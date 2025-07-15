@@ -1,0 +1,19 @@
+# Node.js
+node_modules/
+dist/
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+env/
+.venv/
+
+# IDEs
+.vscode/
+.idea/
+
+# Logs e sistemas operacionais
+*.log
+.DS_Store
+Thumbs.db
