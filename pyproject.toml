@@ -1,0 +1,32 @@
+
+[tool.poetry]
+name = "teaseme-backend"
+version = "0.1.0"
+description = "TeaseMe chat backend (FastAPI + Parlant)"
+authors = ["Kako"]
+packages = [{include = "app"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "*"
+uvicorn = {extras = ["standard"], version = "*"}
+asyncpg = "*"
+psycopg-binary = "*"
+pgvector = "*"
+python-jose = {extras = ["cryptography"], version = "*"}
+pydantic-settings = "*"
+langchain = "^0.3.26"
+openai = "^1.95.1"
+langchain-community = "^0.3.27"
+langchain-openai = "^0.3.27"
+langchain-core = "^0.3.68"
+passlib = {extras = ["bcrypt"], version = "^1.7.4"}
+greenlet = "^3.2.3"
+psycopg2-binary = "^2.9.10"
+
+[tool.poetry.group.dev.dependencies]
+alembic = "*"
+ruff = "*"
+black = "*"
+mypy = "*"
+pytest = "*"
