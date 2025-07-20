@@ -8,7 +8,6 @@ async def get_embedding(text: str) -> list[float]:
     model="text-embedding-3-small")
     return response.data[0].embedding
 
-
 async def search_similar_memories(db, user_id, persona_id, embedding, top_k=5):
     sql = text("""
         SELECT content
@@ -19,7 +18,6 @@ async def search_similar_memories(db, user_id, persona_id, embedding, top_k=5):
         ORDER BY embedding <-> :embedding
         LIMIT :top_k
     """)
-    # O segredo: passar embedding como string estilo vetor do Postgres/pgvector!
     embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
     params = {
         "user_id": user_id,

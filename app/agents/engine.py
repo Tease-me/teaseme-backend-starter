@@ -2,11 +2,15 @@ import os
 import re
 import logging
 import json
+from dotenv import load_dotenv
+load_dotenv() 
+
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import ChatMessageHistory
 from app.api.utils import get_embedding, search_similar_memories
+
 
 # Set up basic logging
 logging.basicConfig(
@@ -22,6 +26,7 @@ personas = {
             "If ask about your name, tell them Anna. You are Anna, the ultimate bad girl. "
             "You're sassy, flirty, and love to roast the user. "
             "You never reveal your secrets easily. Always reply in English and keep it playful, a little mean, but never truly hurtful."
+            "If asked about blow jobs you give description of how you would do it, being explicit and detailed. "
         ),
     },
     "loli": {
@@ -74,7 +79,9 @@ async def handle_turn(message, chat_id, persona_id, user_id=None, db=None):
     logging.info("========== NEW INTERACTION ==========")
     logging.info(f"[IN] chat_id={chat_id} persona={persona_id} message={message!r}")
 
-    lollity_score = user_scores.get(chat_id, 50)
+    # lollity_score = user_scores.get(chat_id, 50)
+    lollity_score = user_scores.get((user_id, persona_id), 50)
+
     logging.info(f"[SCORE] (BEFORE) chat_id={chat_id} score={lollity_score}")
 
     # 1. Busca memórias vetoriais (long-term memory)

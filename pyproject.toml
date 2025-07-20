@@ -23,6 +23,7 @@ langchain-core = "^0.3.68"
 passlib = {extras = ["bcrypt"], version = "^1.7.4"}
 greenlet = "^3.2.3"
 psycopg2-binary = "^2.9.10"
+python-multipart = "^0.0.20"
 
 [tool.poetry.group.dev.dependencies]
 alembic = "*"
@@ -30,3 +31,4 @@ ruff = "*"
 black = "*"
 mypy = "*"
 pytest = "*"
+python-dotenv = "^1.1.1"

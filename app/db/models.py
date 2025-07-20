@@ -28,6 +28,6 @@ class UserScore(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     persona_id: Mapped[str] = mapped_column(String)
-    score_type: Mapped[str] = mapped_column(String) # ex: 'lollity'
+    score_type: Mapped[str] = mapped_column(String)
     value: Mapped[int] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
