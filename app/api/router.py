@@ -10,12 +10,15 @@ from jose import jwt
 from app.api.utils import get_embedding
 from starlette.websockets import WebSocketDisconnect
 from fastapi.responses import StreamingResponse
+from dotenv import load_dotenv
 
 import openai
 import tempfile
 
 #TODO: Bad code
 import httpx
+load_dotenv()
+
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM")
