@@ -17,8 +17,12 @@ import tempfile
 #TODO: Bad code
 import httpx
 
-
-
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = os.getenv("ALGORITHM")
+BLAND_API_KEY =os.getenv("BLAND_API_KEY")
+BLAND_VOICE_ID = os.getenv("BLAND_VOICE_ID")
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID")
 
 
 router = APIRouter()
