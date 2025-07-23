@@ -115,7 +115,7 @@ async def get_ai_reply_via_websocket(message: str, persona_id: str, token: str, 
     # Use websockets.client to connect to your /ws/chat/{persona_id} endpoint
     # Or, refactor your logic to call the same handle_turn() function directly!
     # For demo, let's assume you can just call handle_turn():
-    reply = await handle_turn(message, chat_id="audio-chat", persona_id=persona_id, user_id=1, db=db)  # mock user/db
+    reply = await handle_turn(message, chat_id="audio-chat", persona_id=persona_id, user_id=1, db=db,is_audio=True)  # mock user/db
     return reply
 
 async def synthesize_audio_with_elevenlabs(text: str):
