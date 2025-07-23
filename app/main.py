@@ -5,8 +5,10 @@ from app.api.router import router
 from app.api.auth import router as auth_router
 
 origins = [
-    "https://localhost:3000",  # frontend dev
-    "https://192.168.68.72:3000",  # frontend dev
+   # "https://localhost:8000",  # frontend dev
+   # "https://192.168.68.72:3000",  # frontend dev
+    "http://localhost:3000",
+    "http://192.168.0.120:3000",
 ]
 
 app = FastAPI()

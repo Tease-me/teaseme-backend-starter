@@ -16,7 +16,6 @@ from langchain_community.chat_message_histories import RedisChatMessageHistory
 from app.api.utils import get_embedding, search_similar_memories, upsert_memory
 
 
-
 # ──────────────────────────── 0. Setup ────────────────────────────────
 load_dotenv()
 
@@ -44,7 +43,7 @@ from app.agents.prompt_utils import (
 # ──────────────────────────── 2. Helpers ──────────────────────────────
 MODEL = ChatOpenAI(
     api_key=OPENAI_API_KEY,
-    model_name="gpt-3.5-turbo",
+    model_name="gpt-4-turbo",
     temperature=0.8,
     max_tokens=512,
 )
@@ -90,7 +89,7 @@ async def handle_turn(
     memories = []
     if db and user_id:
         emb = await get_embedding(message)
-        memories = await search_similar_memories(db, user_id, persona_id, emb, top_k=7)
+        memories = await search_similar_memories(db, chat_id, emb, top_k=7)
         memories = list(dict.fromkeys([m for m in memories if m]))
     log.info("[%s] Found memories: %s", cid, memories)
     mem_block = "\n".join(f"- {m}" for m in memories) or "None"
@@ -155,8 +154,7 @@ async def handle_turn(
                     emb = await get_embedding(fact)
                     await upsert_memory(
                         db=db,
-                        user_id=user_id,
-                        persona_id=persona_id,
+                        chat_id=chat_id,
                         content=fact,
                         embedding=emb,
                         sender="user",
