@@ -1,6 +1,7 @@
 from openai import OpenAI
 from sqlalchemy import text
-
+from dotenv import load_dotenv
+load_dotenv()
 client = OpenAI()
 
 async def get_embedding(text: str) -> list[float]:
