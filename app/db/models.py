@@ -9,6 +9,9 @@ class User(Base):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     username: Mapped[str] = mapped_column(String, unique=True)
+    full_name: Mapped[str] = mapped_column(String, nullable=True)  # Optional full name
+    date_of_birth: Mapped[datetime] = mapped_column(DateTime, nullable=True)  # Optional date of birth
+    gender: Mapped[str] = mapped_column(String, nullable=True)
     email: Mapped[str] = mapped_column(String, unique=True)
     password_hash: Mapped[str] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

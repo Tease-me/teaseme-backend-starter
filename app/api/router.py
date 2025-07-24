@@ -40,24 +40,30 @@ ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID")
 
 router = APIRouter()
 
+class ChatCreateRequest(BaseModel):
+    user_id: int
+    persona_id: str
+    
 async def create_chat(db, user_id, persona_id, chat_id=None):
     if not chat_id:
-        # Use UUID para chats múltiplos, ou f"{user_id}_{persona_id}" se só 1 por persona
         import uuid
         chat_id = str(uuid.uuid4())
-    new_chat = Chat(
-        id=chat_id,
-        user_id=user_id,
-        persona_id=persona_id,
-        started_at=datetime.utcnow(),
-    )
+        new_chat = Chat(
+            id=chat_id,
+            user_id=user_id,
+            persona_id=persona_id,
+            started_at=datetime.utcnow(),
+        )
     db.add(new_chat)
     await db.commit()
     return chat_id
 
 @router.post("/chat/")
-async def start_chat(user_id: int, persona_id: str, db: AsyncSession = Depends(get_db)):
-    chat_id = await create_chat(db, user_id, persona_id)
+async def start_chat(
+    data: ChatCreateRequest, 
+    db: AsyncSession = Depends(get_db)
+):
+    chat_id = await create_chat(db, data.user_id, data.persona_id)
     return {"chat_id": chat_id}
 
 @router.websocket("/ws/chat/{persona_id}")
