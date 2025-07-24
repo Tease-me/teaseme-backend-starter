@@ -6,13 +6,14 @@ from app.db.session import get_db
 from app.db.models import User
 from passlib.context import CryptContext
 from jose import jwt
-from pydantic import BaseModel
 from app.schemas.auth import LoginRequest, RegisterRequest
+from dotenv import load_dotenv
+load_dotenv()
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-SECRET_KEY = os.getenv("SECRET_KEY", "CHANGE_THIS_SECRET")
-ALGORITHM = os.getenv("ALGORITHM", "HS256")
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = os.getenv("ALGORITHM")
 
 @router.post("/register")
 async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):

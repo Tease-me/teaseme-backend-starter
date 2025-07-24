@@ -4,10 +4,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.db.session import get_db
 from app.db.models import User, Subscription
-from passlib.context import CryptContext
-from jose import jwt
-from pydantic import BaseModel
-from app.schemas.auth import LoginRequest, RegisterRequest
 
 router = APIRouter()
 
