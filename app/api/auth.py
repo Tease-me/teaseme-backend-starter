@@ -35,4 +35,4 @@ async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
     if not user or not pwd_context.verify(password, user.password_hash):
         raise HTTPException(status_code=400, detail="Invalid credentials")
     token = jwt.encode({"sub": str(user.id)}, SECRET_KEY, algorithm=ALGORITHM)
-    return {"access_token": token}
+    return {"access_token": token,username: user.username, "user_id": str(user.id)}

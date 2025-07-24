@@ -1,5 +1,5 @@
 from sqlalchemy.orm import DeclarativeBase, mapped_column, Mapped, relationship
-from sqlalchemy import Integer, String, Text, ForeignKey, DateTime
+from sqlalchemy import Integer, String, Text, ForeignKey, DateTime, JSON
 from datetime import datetime
 from pgvector.sqlalchemy import Vector
 
@@ -39,3 +39,10 @@ class UserScore(Base):
     score_type: Mapped[str] = mapped_column(String)
     value: Mapped[int] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+    id = mapped_column(Integer, primary_key=True)
+    user_id = mapped_column(Integer, ForeignKey("users.id"))
+    subscription_json = mapped_column(JSON)
+    created_at = mapped_column(DateTime, default=datetime.utcnow)

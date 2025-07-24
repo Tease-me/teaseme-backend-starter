@@ -930,6 +930,20 @@ files = [
 ]
 
 [[package]]
+name = "http-ece"
+version = "1.2.1"
+description = "Encrypted Content Encoding for HTTP"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "http_ece-1.2.1.tar.gz", hash = "sha256:8c6ab23116bbf6affda894acfd5f2ca0fb8facbcbb72121c11c75c33e7ce8cff"},
+]
+
+[package.dependencies]
+cryptography = ">=2.5"
+
+[[package]]
 name = "httpcore"
 version = "1.0.9"
 description = "A minimal low-level HTTP client."
@@ -2158,6 +2172,21 @@ files = [
 ]
 
 [[package]]
+name = "py-vapid"
+version = "1.9.2"
+description = "Simple VAPID header generation library"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "py_vapid-1.9.2-py3-none-any.whl", hash = "sha256:4ccf8a00fc54f1f99f66fb543c96f2c82622508ad814b6e9225f2c26948934d7"},
+    {file = "py_vapid-1.9.2.tar.gz", hash = "sha256:3c8973b6cf8384ad0c9ae64d6270ccc480e0b92c702d8f5ea2cc03e6b51247f9"},
+]
+
+[package.dependencies]
+cryptography = ">=2.5"
+
+[[package]]
 name = "pyasn1"
 version = "0.6.1"
 description = "Pure-Python implementation of ASN.1 types and DER/BER/CER codecs (X.208)"
@@ -2426,6 +2455,29 @@ files = [
     {file = "python_multipart-0.0.20-py3-none-any.whl", hash = "sha256:8a62d3a8335e06589fe01f2a3e178cdcc632f3fbe0d492ad9ee0ec35aab1f104"},
     {file = "python_multipart-0.0.20.tar.gz", hash = "sha256:8dd0cab45b8e23064ae09147625994d090fa46f5b0d1e13af944c331a7fa9d13"},
 ]
+
+[[package]]
+name = "pywebpush"
+version = "2.0.3"
+description = "WebPush publication library"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "pywebpush-2.0.3-py3-none-any.whl", hash = "sha256:04666441715bc547918d7668b2ac7ad5c4b5de7d0a6cf528daf61e0c4bc5431c"},
+    {file = "pywebpush-2.0.3.tar.gz", hash = "sha256:584878e3c243e873a22db8895505d95715bc796ef74cc1b8fe99f596174161e3"},
+]
+
+[package.dependencies]
+aiohttp = "*"
+cryptography = ">=2.6.1"
+http-ece = ">=1.1.0"
+py-vapid = ">=1.7.0"
+requests = ">=2.21.0"
+six = ">=1.15.0"
+
+[package.extras]
+dev = ["black", "mock", "pytest"]
 
 [[package]]
 name = "pyyaml"
@@ -3472,4 +3524,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "7c137d13ec6bed351c989f332b4ff9e0980d07685059cfe845440dfa8b5c1c6c"
+content-hash = "ee925c43748036a123cdc34494dc311f56c7348b61200ec246d6cbc33a6725ec"

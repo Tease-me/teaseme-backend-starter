@@ -24,6 +24,8 @@ passlib = {extras = ["bcrypt"], version = "^1.7.4"}
 greenlet = "^3.2.3"
 psycopg2-binary = "^2.9.10"
 python-multipart = "^0.0.20"
+pywebpush = "^2.0.3"
+cryptography = "^45.0.5"
 
 [tool.poetry.group.dev.dependencies]
 alembic = "*"
