@@ -1,0 +1,31 @@
+import uuid
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, and_
+from app.db.models import Chat
+from datetime import datetime
+
+async def check_chat(db: AsyncSession, user_id: int, persona_id: str):
+    result = await db.execute(
+        select(Chat).where(and_(Chat.user_id == user_id, Chat.persona_id == persona_id))
+    )
+    return result.scalars().first()
+
+async def create_chat(db: AsyncSession, user_id: int, persona_id: str, chat_id=None):
+    if not chat_id:
+        chat_id = str(uuid.uuid4())
+    
+    new_chat = Chat(
+        id=chat_id,
+        user_id=user_id,
+        persona_id=persona_id,
+        started_at=datetime.utcnow(),
+    )
+    db.add(new_chat)
+    await db.commit()
+    return chat_id
+
+async def get_or_create_chat(db: AsyncSession, user_id: int, persona_id: str):
+    existing_chat = await check_chat(db, user_id, persona_id)
+    if existing_chat:
+        return existing_chat.id
+    return await create_chat(db, user_id, persona_id)

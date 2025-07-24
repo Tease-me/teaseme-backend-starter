@@ -11,6 +11,8 @@ from app.api.utils import get_embedding
 from starlette.websockets import WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
+
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
@@ -23,6 +25,8 @@ from datetime import datetime
 import openai
 import tempfile
 
+from app.services.chat_service import get_or_create_chat
+from app.schemas.chat import ChatCreateRequest
 
 
 #TODO: Bad code
@@ -40,30 +44,12 @@ ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID")
 
 router = APIRouter()
 
-class ChatCreateRequest(BaseModel):
-    user_id: int
-    persona_id: str
-    
-async def create_chat(db, user_id, persona_id, chat_id=None):
-    if not chat_id:
-        import uuid
-        chat_id = str(uuid.uuid4())
-        new_chat = Chat(
-            id=chat_id,
-            user_id=user_id,
-            persona_id=persona_id,
-            started_at=datetime.utcnow(),
-        )
-    db.add(new_chat)
-    await db.commit()
-    return chat_id
-
 @router.post("/chat/")
 async def start_chat(
     data: ChatCreateRequest, 
     db: AsyncSession = Depends(get_db)
 ):
-    chat_id = await create_chat(db, data.user_id, data.persona_id)
+    chat_id = await get_or_create_chat(db, data.user_id, data.persona_id)
     return {"chat_id": chat_id}
 
 @router.websocket("/ws/chat/{persona_id}")
