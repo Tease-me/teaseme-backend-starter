@@ -2,7 +2,7 @@ import os
 import io
 import wave
 
-from fastapi import APIRouter, WebSocket, Depends, File, UploadFile, HTTPException, Form
+from fastapi import APIRouter, WebSocket, Depends, File, UploadFile, HTTPException, Form, Query
 from app.agents.turn_handler import handle_turn
 from app.db.session import get_db
 from app.db.models import Message, User
@@ -12,7 +12,8 @@ from starlette.websockets import WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 
-from sqlalchemy import select, and_
+from sqlalchemy import select, func
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
@@ -26,10 +27,11 @@ import openai
 import tempfile
 
 from app.services.chat_service import get_or_create_chat
-from app.schemas.chat import ChatCreateRequest
+from app.schemas.chat import ChatCreateRequest,PaginatedMessages
+from app.api.deps import get_current_user
 
 
-#TODO: Bad code
+#TODO: Bad code - REFACTORE EVERYTHING
 import httpx
 load_dotenv()
 
@@ -105,6 +107,44 @@ async def websocket_chat(ws: WebSocket, persona_id: str, db=Depends(get_db)):
             print(f"[WS] Unexpected error: {e}")
             await ws.close(code=4003)
             break
+
+@router.get("/history/{chat_id}", response_model=PaginatedMessages)
+async def get_chat_history(
+    chat_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    total_result = await db.execute(
+        select(func.count()).where(Message.chat_id == chat_id)
+    )
+    total = total_result.scalar()
+
+    messages_result = await db.execute(
+        select(Message)
+        .where(Message.chat_id == chat_id)
+        .order_by(Message.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    messages = messages_result.scalars().all()
+
+    return PaginatedMessages(
+        total=total,
+        page=page,
+        page_size=page_size,
+        messages=messages
+    )
+
+
+
+
+
+
+
+
+
+
 
 async def transcribe_audio(file: UploadFile = File(...)):
     suffix = os.path.splitext(file.filename)[1].lower()
@@ -183,8 +223,7 @@ async def synthesize_audio_with_bland_ai(text: str):
         if "application/json" in content_type:
             result = resp.json()
             print("Bland AI JSON response:", result)
-            return None, None  # You can adjust this for your needs
-        # If not JSON, it's audio
+            return None, None 
         return resp.content, content_type
 
 def pcm_bytes_to_wav_bytes(pcm_bytes, sample_rate=44100):
