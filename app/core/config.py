@@ -18,8 +18,9 @@ class Settings(BaseSettings):
     bland_voice_id: str
     elevenlabs_api_key: str
     elevenlabs_voice_id: str
-    vapid_public_key: str
-    vapid_private_key: str
+    VAPID_PUBLIC_KEY: str
+    VAPID_PRIVATE_KEY: str
+    VAPID_EMAIL: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8",extra='ignore' )
 
