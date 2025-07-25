@@ -9,6 +9,7 @@ from app.db.session import get_db
 from app.db.models import User
 from app.schemas.auth import RegisterRequest, LoginRequest, Token
 from app.core.config import settings
+from app.api.deps import get_current_user
 
 router = APIRouter()
 
@@ -79,3 +80,11 @@ async def refresh_token(refresh_token: str, db: AsyncSession = Depends(get_db)):
         access_token=new_access_token,
         refresh_token=new_refresh_token
     )
+
+@router.get("/me")
+async def get_me(user: User = Depends(get_current_user)):
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+    }
