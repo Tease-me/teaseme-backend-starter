@@ -1,7 +1,10 @@
+from langchain_core.prompts import ChatPromptTemplate
+
 from langchain_core.prompts import (
     ChatPromptTemplate,
     MessagesPlaceholder,
 )
+
 
 BASE_SYSTEM = """
 You are the user’s playful, attentive girlfriend, keeping conversations short, sweet, and natural.

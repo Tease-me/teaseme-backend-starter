@@ -1,4 +1,3 @@
-
 # TeaseMe Backend (FastAPI + Parlant)
 
 ## Quickstart
@@ -21,7 +20,6 @@
 
 ## Project structure
 
-- app/main.py         # FastAPI entrypoint
-- app/api/router.py   # WebSocket chat endpoint
-- app/db/models.py    # SQLAlchemy+pgvector models
-- app/agents/engine.py # Parlant agent
+- app/main.py # FastAPI entrypoint
+- app/api/router.py # WebSocket chat endpoint
+- app/db/models.py # SQLAlchemy+pgvector models

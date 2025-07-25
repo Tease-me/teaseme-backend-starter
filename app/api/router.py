@@ -3,7 +3,7 @@ import io
 import wave
 
 from fastapi import APIRouter, WebSocket, Depends, File, UploadFile, HTTPException, Form
-from app.agents.engine import handle_turn
+from app.agents.turn_handler import handle_turn
 from app.db.session import get_db
 from app.db.models import Message, User
 from jose import jwt
