@@ -8,8 +8,12 @@ class Settings(BaseSettings):
     SCORE_TTL: int
     HISTORY_TTL: int
 
-    secret_key: str
-    algorithm: str = "HS256"
+    SECRET_KEY: str
+    REFRESH_SECRET_KEY: str
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
     bland_api_key: str
     bland_voice_id: str
     elevenlabs_api_key: str
