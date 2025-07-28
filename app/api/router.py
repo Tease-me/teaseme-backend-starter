@@ -13,7 +13,6 @@ from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 
 from sqlalchemy import select, func
-
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
@@ -28,7 +27,6 @@ import tempfile
 
 from app.services.chat_service import get_or_create_chat
 from app.schemas.chat import ChatCreateRequest,PaginatedMessages
-from app.api.deps import get_current_user
 
 
 #TODO: Bad code - REFACTORE EVERYTHING
@@ -260,82 +258,3 @@ async def chat_audio(
             raise HTTPException(status_code=500, detail="No audio returned from any TTS provider.")
 
     return StreamingResponse(io.BytesIO(audio_bytes), media_type=audio_mime)
-
-
-
-@router.post("/nudge")
-async def send_nudge(
-    user_id: int = Form(...),
-    persona_id: str = Form("loli"),
-    message: str = Form("Hey sumido! Senti sua falta... 😘"),
-    db: AsyncSession = Depends(get_db),
-):
-    chat_id = f"nudge_{user_id}_{persona_id}"
-
-    # 1. Garante que o chat existe
-    chat = await db.get(Chat, chat_id)
-    if not chat:
-        db.add(Chat(id=chat_id, user_id=user_id, persona_id=persona_id, started_at=datetime.utcnow()))
-        try:
-            await db.commit()
-        except IntegrityError:
-            await db.rollback()
-
-    # 2. Gera a resposta da AI
-    ai_reply = await handle_turn(
-        message,
-        chat_id=chat_id,
-        persona_id=persona_id,
-        user_id=user_id,
-        db=db,
-    )
-    # 3. Salva a mensagem na tabela messages (agora só com chat_id)
-    db.add(Message(
-        chat_id=chat_id,
-        sender="ai",
-        content=ai_reply,
-        created_at=datetime.utcnow()
-    ))
-    await db.commit()
-    return {"user_id": user_id, "persona_id": persona_id, "reply": ai_reply}
-
-
-class BroadcastRequest(BaseModel):
-    user_ids: List[int]
-    persona_id: str = "anna"
-    message: str = "Olá, novidade da sua namorada virtual 💖"
-
-@router.post("/nudge/broadcast")
-async def broadcast_nudge(
-    req: BroadcastRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    results = []
-    for user_id in req.user_ids:
-        chat_id = f"broadcast_{user_id}_{req.persona_id}"
-
-        # Garante que o chat existe
-        chat = await db.get(Chat, chat_id)
-        if not chat:
-            db.add(Chat(id=chat_id, user_id=user_id, persona_id=req.persona_id, started_at=datetime.utcnow()))
-            try:
-                await db.commit()
-            except IntegrityError:
-                await db.rollback()
-
-        ai_reply = await handle_turn(
-            req.message,
-            chat_id=chat_id,
-            persona_id=req.persona_id,
-            user_id=user_id,
-            db=db,
-        )
-        db.add(Message(
-            chat_id=chat_id,
-            sender="ai",
-            content=ai_reply,
-            created_at=datetime.utcnow()
-        ))
-        results.append({"user_id": user_id, "reply": ai_reply})
-    await db.commit()
-    return results

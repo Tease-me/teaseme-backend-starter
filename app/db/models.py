@@ -43,6 +43,15 @@ class UserScore(Base):
     value: Mapped[int] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+class Memory(Base):
+    __tablename__ = "memories"
+    id = mapped_column(Integer, primary_key=True)
+    chat_id = mapped_column(String, ForeignKey("chats.id"), index=True)
+    content = mapped_column(Text)
+    embedding = mapped_column(Vector(1536))
+    sender = mapped_column(String)  # 'user', 'ai', 'fact', etc
+    created_at = mapped_column(DateTime, default=datetime.utcnow)
+
 class Subscription(Base):
     __tablename__ = "subscriptions"
     id = mapped_column(Integer, primary_key=True)
