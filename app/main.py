@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import router
 from app.api.auth import router as auth_router
 from app.api.push import router as push_router 
+from fastapi.staticfiles import StaticFiles
 
 origins = [
     "https://localhost:3000",  # frontend dev
@@ -22,7 +23,8 @@ app.add_middleware(
 )
 app.include_router(auth_router, prefix="/auth")
 app.include_router(router)
-app.include_router(push_router)  
+app.include_router(push_router)
+
 
 @app.get("/health")
 def health():

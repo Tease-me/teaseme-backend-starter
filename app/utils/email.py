@@ -1,7 +1,7 @@
 import boto3
 from botocore.exceptions import ClientError
 from app.core.config import settings
-
+from datetime import datetime
 AWS_REGION = settings.AWS_REGION
 SES_SENDER = settings.SES_SENDER
 CONFIRM_BASE_URL = settings.SES_SERVER
@@ -13,13 +13,45 @@ ses_client = boto3.client("ses", region_name=AWS_REGION)
 def send_verification_email(to_email: str, token: str):
     subject = "Confirm your email on TeaseMe!"
     confirm_url = f"{CONFIRM_BASE_URL}/verify-email?token={token}"
-    
+    logo_url = f"https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/3D-LogoTeaseMe-Light+1.png"
+
     body_html = f"""
-    <h2>Welcome to TeaseMe!</h2>
-    <p>Click the link below to confirm your email address:</p>
-    <a href="{confirm_url}">Confirm Email</a>
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>Confirm your email</title>
+    </head>
+    <body style="background-color:#f7f8fc;font-family:Arial,sans-serif;margin:0;padding:20px;">
+        <div style="max-width:600px;margin:auto;background:#ffffff;border-radius:8px;box-shadow:0 2px 5px rgba(0,0,0,0.15);overflow:hidden;">
+            
+            <!-- Logo -->
+            <div style="padding:20px;text-align:center;background-color:#FDB4C2;">
+                <img src="{logo_url}" alt="TeaseMe" width="120" style="display:block;margin:auto;">
+            </div>
+            
+            <!-- Body -->
+            <div style="padding:30px;text-align:center;">
+                <h2 style="color:#333;">Welcome to TeaseMe!</h2>
+                <p style="color:#555;">Click the button below to confirm your email address.</p>
+                <a href="{confirm_url}" style="display:inline-block;margin-top:20px;padding:12px 24px;background-color:#FF5C74;color:#ffffff;text-decoration:none;border-radius:4px;font-weight:bold;">
+                    Confirm Email
+                </a>
+                <p style="margin-top:30px;font-size:12px;color:#999;">
+                    If you didn't sign up, you can safely ignore this email.
+                </p>
+            </div>
+
+            <!-- Footer -->
+            <div style="background-color:#f1f1f1;padding:15px;text-align:center;font-size:12px;color:#aaa;">
+                © {datetime.now().year} TeaseMe. All rights reserved.
+            </div>
+
+        </div>
+    </body>
+    </html>
     """
-    
+
     body_text = f"Welcome to TeaseMe!\nPlease confirm your email by clicking this link: {confirm_url}"
 
     return send_email_via_ses(to_email, subject, body_html, body_text)
