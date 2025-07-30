@@ -12,7 +12,7 @@ ses_client = boto3.client("ses", region_name=AWS_REGION)
 
 def send_verification_email(to_email: str, token: str):
     subject = "Confirm your email on TeaseMe!"
-    confirm_url = f"{CONFIRM_BASE_URL}/auth/verify-email?token={token}"
+    confirm_url = f"{CONFIRM_BASE_URL}/verify-email?token={token}"
     
     body_html = f"""
     <h2>Welcome to TeaseMe!</h2>
