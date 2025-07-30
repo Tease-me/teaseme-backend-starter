@@ -21,7 +21,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 @router.post("/register")
 async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
     existing_user = await db.execute(
-        select(User).where((User.email == data.email) | (User.username == data.username))
+        select(User).where((User.email == data.email))
     )
     if existing_user.scalar():
         raise HTTPException(status_code=200, detail="Username or email already registered")
@@ -29,7 +29,6 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
     verify_token = secrets.token_urlsafe(32)
 
     user = User(
-        username=data.username,
         password_hash=pwd_context.hash(data.password),
         email=data.email,
         is_verified=False,
