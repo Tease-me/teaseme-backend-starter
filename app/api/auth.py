@@ -51,6 +51,7 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
 async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == data.email))
     user = result.scalar()
+
     if not user or not pwd_context.verify(data.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     
@@ -98,6 +99,7 @@ async def get_me(user: User = Depends(get_current_user)):
         "id": user.id,
         "username": user.username,
         "email": user.email,
+        "is_verified": user.is_verified,
     }
     
 @router.get("/verify-email")
