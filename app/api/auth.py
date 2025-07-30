@@ -24,7 +24,7 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
         select(User).where((User.email == data.email) | (User.username == data.username))
     )
     if existing_user.scalar():
-        raise HTTPException(status_code=400, detail="Username or email already registered")
+        raise HTTPException(status_code=200, detail="Username or email already registered")
 
     verify_token = secrets.token_urlsafe(32)
 
