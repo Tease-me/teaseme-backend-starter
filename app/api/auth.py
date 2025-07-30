@@ -10,31 +10,43 @@ from app.db.models import User
 from app.schemas.auth import RegisterRequest, LoginRequest, Token
 from app.core.config import settings
 from app.api.deps import get_current_user
+from app.utils.email import send_verification_email
+from app.utils.auth import create_token
+import secrets
 
 router = APIRouter()
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-def create_token(data: dict, secret: str, expires_delta: timedelta):
-    to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + expires_delta
-    to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, secret, algorithm=settings.ALGORITHM)
-
 @router.post("/register")
 async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    existing_user = await db.execute(select(User).where(User.email == data.email))
+    existing_user = await db.execute(
+        select(User).where((User.email == data.email) | (User.username == data.username))
+    )
     if existing_user.scalar():
-        raise HTTPException(status_code=400, detail="Email already registered")
+        raise HTTPException(status_code=400, detail="Username or email already registered")
+
+    verify_token = secrets.token_urlsafe(32)
+
     user = User(
         username=data.username,
         password_hash=pwd_context.hash(data.password),
-        email=data.email
+        email=data.email,
+        is_verified=False,
+        email_token=verify_token,
     )
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    return {"ok": True, "user_id": user.id, "email": user.email}
+
+    send_verification_email(user.email, verify_token)
+
+    return {
+        "ok": True,
+        "user_id": user.id,
+        "email": user.email,
+        "message": "Check your email to verify your account before logging in."
+    }
 
 @router.post("/login", response_model=Token)
 async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
@@ -88,3 +100,14 @@ async def get_me(user: User = Depends(get_current_user)):
         "username": user.username,
         "email": user.email,
     }
+    
+@router.get("/verify-email")
+async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.email_token == token))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid or expired token")
+    user.is_verified = True
+    user.email_token = None
+    await db.commit()
+    return {"ok": True, "message": "Email verified! You can now login."}

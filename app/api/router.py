@@ -10,37 +10,28 @@ from jose import jwt
 from app.api.utils import get_embedding
 from starlette.websockets import WebSocketDisconnect
 from fastapi.responses import StreamingResponse
-from dotenv import load_dotenv
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
-
-from pydantic import BaseModel
-from typing import List
-
-from app.db.models import Chat
-from datetime import datetime
 
 import openai
 import tempfile
 
 from app.services.chat_service import get_or_create_chat
 from app.schemas.chat import ChatCreateRequest,PaginatedMessages
+from app.core.config import settings
 
 
 #TODO: Bad code - REFACTORE EVERYTHING
 import httpx
-load_dotenv()
 
 
-SECRET_KEY = os.getenv("SECRET_KEY")
-ALGORITHM = os.getenv("ALGORITHM")
-BLAND_API_KEY =os.getenv("BLAND_API_KEY")
-BLAND_VOICE_ID = os.getenv("BLAND_VOICE_ID")
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
-ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID")
-
+SECRET_KEY = settings.SECRET_KEY
+ALGORITHM = settings.ALGORITHM
+BLAND_API_KEY =settings.BLAND_API_KEY
+BLAND_VOICE_ID = settings.BLAND_VOICE_ID
+ELEVENLABS_API_KEY = settings.ELEVENLABS_API_KEY
+ELEVENLABS_VOICE_ID = settings.ELEVENLABS_VOICE_ID
 
 router = APIRouter()
 

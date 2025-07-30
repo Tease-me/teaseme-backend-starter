@@ -20,13 +20,15 @@ openai = "^1.95.1"
 langchain-community = "^0.3.27"
 langchain-openai = "^0.3.27"
 langchain-core = "^0.3.68"
-passlib = {extras = ["bcrypt"], version = "^1.7.4"}
 greenlet = "^3.2.3"
 psycopg2-binary = "^2.9.10"
 python-multipart = "^0.0.20"
 pywebpush = "^2.0.3"
 cryptography = "^45.0.5"
-bcrypt = "^4.3.0"
+boto3 = "^1.39.15"
+bcrypt = "<4.1.0"
+passlib = "<1.8.0"
+aiosmtplib = "^4.0.1"
 
 [tool.poetry.group.dev.dependencies]
 alembic = "*"
