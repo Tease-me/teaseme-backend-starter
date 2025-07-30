@@ -112,3 +112,25 @@ async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
     user.email_token = None
     await db.commit()
     return {"ok": True, "message": "Email verified! You can now login."}
+
+@router.post("/resend-verification-email")
+async def resend_verification_email(email: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.email == email))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.is_verified:
+        raise HTTPException(status_code=400, detail="Email is already verified")
+
+    verify_token = secrets.token_urlsafe(32)
+    user.email_token = verify_token
+    await db.commit()
+
+    send_verification_email(user.email, verify_token)
+
+    return {
+        "ok": True,
+        "message": "A new verification email has been sent."
+    }
