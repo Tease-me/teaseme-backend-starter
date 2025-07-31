@@ -1,17 +1,21 @@
-import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import HTMLResponse
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 from app.db.session import get_db
 from app.db.models import User
-from app.schemas.auth import RegisterRequest, LoginRequest, Token
+from app.schemas.auth import RegisterRequest, LoginRequest, Token, PasswordResetRequest
 from app.core.config import settings
 from app.api.deps import get_current_user
-from app.utils.email import send_verification_email
+from app.utils.email import send_verification_email, send_password_reset_email
 from app.utils.auth import create_token
+from app.api.notify_ws import notify_email_verified
+
 import secrets
 
 router = APIRouter()
@@ -46,6 +50,31 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
         "email": user.email,
         "message": "Check your email to verify your account before logging in."
     }
+
+@router.get("/confirm-email")
+async def confirm_email(token: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.email_token == token))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Invalid or expired token")
+    user.is_verified = True
+    user.email_token = None
+    await db.commit()
+   
+    await notify_email_verified(user.email)
+
+    return HTMLResponse("""
+      <html>
+        <head>
+          <title>Email Verified!</title>
+        </head>
+        <body style="font-family: sans-serif; text-align: center; margin-top: 100px;">
+          <h2>✅ Email verified!</h2>
+          <p>Close this Pagex.</p>
+        </body>
+      </html>
+    """)
+
 
 @router.post("/login", response_model=Token)
 async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
@@ -134,3 +163,33 @@ async def resend_verification_email(email: str, db: AsyncSession = Depends(get_d
         "ok": True,
         "message": "A new verification email has been sent."
     }
+
+@router.post("/forgot-password")
+async def forgot_password(email: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.email == email))
+    user = result.scalar_one_or_none()
+
+    if user:
+        reset_token = secrets.token_urlsafe(32)
+        user.password_reset_token = reset_token
+        user.password_reset_token_expires_at = datetime.utcnow() + timedelta(hours=1)
+        await db.commit()
+
+        send_password_reset_email(user.email, reset_token)
+
+    return {"ok": True, "message": "If an account exists, we've sent a reset link."}
+
+@router.post("/reset-password")
+async def reset_password(data: PasswordResetRequest, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.password_reset_token == data.token))
+    user = result.scalar_one_or_none()
+
+    if not user or user.password_reset_token_expires_at < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Token inválido ou expirado.")
+
+    user.password_hash = pwd_context.hash(data.new_password)
+    user.password_reset_token = None
+    user.password_reset_token_expires_at = None
+    await db.commit()
+
+    return {"ok": True, "message": "Password updated successfully!"}

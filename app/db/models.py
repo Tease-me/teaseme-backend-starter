@@ -1,5 +1,6 @@
 from sqlalchemy.orm import DeclarativeBase, mapped_column, Mapped, relationship
 from sqlalchemy import Integer, String, Boolean, Text, ForeignKey, DateTime, JSON
+from typing import Optional
 from datetime import datetime
 from pgvector.sqlalchemy import Vector
 
@@ -16,6 +17,8 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     email_token: Mapped[str] = mapped_column(String, nullable=True)
+    password_reset_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    password_reset_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     chats = relationship("Chat", backref="user")
 
