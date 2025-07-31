@@ -9,7 +9,7 @@ from app.api.notify_ws import router as notify_ws_router
 origins = [
     "https://localhost:3000",  # frontend dev
     "http://localhost:3000",  # frontend dev
-    "https://192.168.68.72:3000",  # frontend dev
+    "https://192.168.68.72:4174",  # frontend dev
     "https://192.168.68.61:3000",  # frontend dev
 ]
 

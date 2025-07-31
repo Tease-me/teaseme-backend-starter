@@ -63,17 +63,7 @@ async def confirm_email(token: str, db: AsyncSession = Depends(get_db)):
    
     await notify_email_verified(user.email)
 
-    return HTMLResponse("""
-      <html>
-        <head>
-          <title>Email Verified!</title>
-        </head>
-        <body style="font-family: sans-serif; text-align: center; margin-top: 100px;">
-          <h2>✅ Email verified!</h2>
-          <p>Close this Pagex.</p>
-        </body>
-      </html>
-    """)
+    return 
 
 
 @router.post("/login", response_model=Token)
