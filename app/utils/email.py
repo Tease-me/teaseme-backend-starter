@@ -16,41 +16,61 @@ def send_verification_email(to_email: str, token: str):
     logo_url = f"https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/email_verify_header.png"
 
     body_html = f"""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <title>Confirm your email</title>
-    </head>
-    <body style="background-color:#f7f8fc;font-family:Arial,sans-serif;margin:0;padding:20px;">
-        <div style="max-width:600px;margin:auto;background:#ffffff;border-radius:8px;box-shadow:0 2px 5px rgba(0,0,0,0.15);overflow:hidden;">
-            
-            <!-- Logo -->
-            <div style="padding:20px;text-align:center;background-color:#FDB4C2;">
-                <img src="{logo_url}" alt="TeaseMe" width="120" style="display:block;margin:auto;">
-            </div>
-            
-            <!-- Body -->
-            <div style="padding:30px;text-align:center;">
-                <h2 style="color:#333;">Welcome to TeaseMe!</h2>
-                <p style="color:#555;">Click the button below to confirm your email address.</p>
-                <a href="{confirm_url}" style="display:inline-block;margin-top:20px;padding:12px 24px;background-color:#FF5C74;color:#ffffff;text-decoration:none;border-radius:4px;font-weight:bold;">
-                    Confirm Email
-                </a>
-                <p style="margin-top:30px;font-size:12px;color:#999;">
-                    If you didn't sign up, you can safely ignore this email.
-                </p>
-            </div>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Confirm your email</title>
+</head>
+<body style="background:#f7f8fc;padding:0;margin:0;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f7f8fc;padding:40px 0;">
+    <tr>
+      <td align="center">
 
-            <!-- Footer -->
-            <div style="background-color:#f1f1f1;padding:15px;text-align:center;font-size:12px;color:#aaa;">
-                © {datetime.now().year} TeaseMe. All rights reserved.
-            </div>
+        <!-- Card -->
+        <table width="480" cellpadding="0" cellspacing="0" border="0" style="background:#fff;border-radius:24px;box-shadow:0 10px 32px 0 rgba(50,50,93,0.10),0 2px 4px 0 rgba(0,0,0,0.07);overflow:hidden;">
+          <!-- Banner/Hero Image -->
+          <tr>
+            <td align="center" style="background:#23293b;padding:0;">
+              <img 
+                src="{logo_url}" 
+                alt="TeaseMe" 
+                style="width:100%;max-width:480px;display:block;border-top-left-radius:24px;border-top-right-radius:24px;"
+              />
+            </td>
+          </tr>
+          <!-- Main Content -->
+          <tr>
+            <td align="center" style="padding:32px 30px 8px 30px;">
+              <h2 style="font-family: 'Arial Rounded MT Bold', Arial, sans-serif; font-size:32px; font-weight:bold; margin:0 0 12px 0; color:#444;">Hi! Welcome to TeaseMe</h2>
+              <p style="font-size:16px;color:#666;margin:0 0 32px 0;">
+                You are almost done! Before we get started, please verify your email address to activate your account. It's quick and helps us keep your account safe.
+              </p>
+              <a href="{confirm_url}"
+                style="background:#FF5C74;border-radius:8px;color:#fff;text-decoration:none;display:inline-block;padding:18px 50px;font-size:22px;font-weight:bold;box-shadow:0 6px 24px #ffb5c7;margin-bottom:20px;">
+                Confirm Email
+              </a>
+              <p style="margin:24px 0 0 0; font-size:14px; color:#bbb;">
+                If you didn't sign up for TeaseMe, please ignore this message.<br/>
+                Can't wait to talk to you!
+              </p>
+            </td>
+          </tr>
+          <!-- Footer -->
+          <tr>
+            <td align="center" style="padding:20px 0 12px 0;background:#f6f6f6;color:#bbb;font-size:14px;border-bottom-left-radius:24px;border-bottom-right-radius:24px;">
+              © {datetime.now().year} TeaseMe. All rights reserved.
+            </td>
+          </tr>
+        </table>
+        <!-- /Card -->
 
-        </div>
-    </body>
-    </html>
-    """
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+"""
 
     body_text = f"Welcome to TeaseMe!\nPlease confirm your email by clicking this link: {confirm_url}"
     return send_email_via_ses(to_email, subject, body_html, body_text)
@@ -81,34 +101,62 @@ def send_password_reset_email(to_email: str, token: str):
     logo_url = f"https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/reset_password_header.png"
 
     body_html = f"""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <title>Reset your password</title>
-    </head>
-    <body style="background-color:#f7f8fc;font-family:Arial,sans-serif;margin:0;padding:20px;">
-        <div style="max-width:600px;margin:auto;background:#ffffff;border-radius:8px;box-shadow:0 2px 5px rgba(0,0,0,0.15);overflow:hidden;">
-            <div style="padding:20px;text-align:center;background-color:#FDB4C2;">
-                <img src="{logo_url}" alt="TeaseMe" width="120" style="display:block;margin:auto;">
-            </div>
-            <div style="padding:30px;text-align:center;">
-                <h2 style="color:#333;">Forgot your password?</h2>
-                <p style="color:#555;">Click below to reset your password.</p>
-                <a href="{reset_url}" style="display:inline-block;margin-top:20px;padding:12px 24px;background-color:#FF5C74;color:#ffffff;text-decoration:none;border-radius:4px;font-weight:bold;">
-                    Reset Password
-                </a>
-                <p style="margin-top:30px;font-size:12px;color:#999;">
-                    If you didn't request this, please ignore this email.
-                </p>
-            </div>
-            <div style="background-color:#f1f1f1;padding:15px;text-align:center;font-size:12px;color:#aaa;">
-                © {datetime.now().year} TeaseMe. All rights reserved.
-            </div>
-        </div>
-    </body>
-    </html>
-    """
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <title>Reset your password</title>
+        </head>
+        <body style="background:#f7f8fc;padding:0;margin:0;font-family:Arial,sans-serif;">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f7f8fc;padding:40px 0;">
+            <tr>
+            <td align="center">
+
+                <!-- Card -->
+                <table width="480" cellpadding="0" cellspacing="0" border="0" style="background:#fff;border-radius:24px;box-shadow:0 10px 32px 0 rgba(50,50,93,0.10),0 2px 4px 0 rgba(0,0,0,0.07);overflow:hidden;">
+                <!-- Banner/Hero Image -->
+                <tr>
+                    <td align="center" style="padding:0;">
+                    <img 
+                        src="{logo_url}" 
+                        alt="TeaseMe" 
+                        style="width:100%;max-width:480px;display:block;border-top-left-radius:24px;border-top-right-radius:24px;"
+                    />
+                    </td>
+                </tr>
+                <!-- Main Content -->
+                <tr>
+                    <td align="center" style="padding:32px 30px 8px 30px;">
+                    <h2 style="font-family: 'Arial Rounded MT Bold', Arial, sans-serif; font-size:28px; font-weight:bold; margin:0 0 12px 0; color:#444;">Forgot Your Password?</h2>
+                    <p style="font-size:16px;color:#666;margin:0 0 32px 0;">
+                        We received a request to reset the password for your TeaseMe account.<br/>
+                        To create a new password, just click the button below:
+                    </p>
+                    <a href="{reset_url}"
+                        style="background:#FF5C74;border-radius:8px;color:#fff;text-decoration:none;display:inline-block;padding:18px 50px;font-size:22px;font-weight:bold;box-shadow:0 6px 24px #ffb5c7;margin-bottom:20px;">
+                        Reset My Password
+                    </a>
+                    <p style="margin:24px 0 0 0; font-size:14px; color:#bbb;">
+                        This link will expire in 30 minutes to keep your account safe.<br/>
+                        If you didn't request a password reset, you can safely ignore this email.
+                    </p>
+                    </td>
+                </tr>
+                <!-- Footer -->
+                <tr>
+                    <td align="center" style="padding:20px 0 12px 0;background:#f6f6f6;color:#bbb;font-size:14px;border-bottom-left-radius:24px;border-bottom-right-radius:24px;">
+                    © {datetime.now().year} TeaseMe. All rights reserved.
+                    </td>
+                </tr>
+                </table>
+                <!-- /Card -->
+
+            </td>
+            </tr>
+        </table>
+        </body>
+        </html>
+        """
 
     body_text = f"Reset your TeaseMe password by clicking this link: {reset_url}"
 
