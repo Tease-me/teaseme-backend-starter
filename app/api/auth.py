@@ -63,7 +63,10 @@ async def confirm_email(token: str, db: AsyncSession = Depends(get_db)):
    
     await notify_email_verified(user.email)
 
-    return 
+    return {
+        "ok": True,
+        "message": "Email verified successfully! You can now log in.",
+    }
 
 
 @router.post("/login", response_model=Token)
