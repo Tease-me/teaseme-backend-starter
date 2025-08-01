@@ -25,7 +25,12 @@ async def handle_turn(message: str, chat_id: str, persona_id: str, user_id: str 
 
     persona_rules = PERSONAS.get(persona_id, PERSONAS["anna"]).format(lollity_score=score)
     prompt_template = GLOBAL_AUDIO_PROMPT if is_audio else GLOBAL_PROMPT
-    prompt = prompt_template.partial(persona_rules=persona_rules, memories="\n".join(memories), daily_context=get_today_script())
+    prompt = prompt_template.partial(
+        persona_rules=persona_rules, 
+        memories="\n".join(memories), 
+        daily_context=get_today_script(),
+        last_user_message=message
+    )
     
     chain = prompt | MODEL
     history = redis_history(chat_id)

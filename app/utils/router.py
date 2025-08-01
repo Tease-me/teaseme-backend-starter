@@ -2,7 +2,7 @@ import os
 import io
 import wave
 
-from fastapi import  Depends, File, UploadFile, HTTPException
+from fastapi import  Depends, HTTPException
 
 from app.agents.turn_handler import handle_turn
 from app.db.session import get_db
