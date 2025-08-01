@@ -36,6 +36,7 @@ class Message(Base):
     chat_id: Mapped[str] = mapped_column(ForeignKey("chats.id"), index=True)
     sender: Mapped[str] = mapped_column(String)  # 'user' ou 'ai'
     content: Mapped[str] = mapped_column(Text)
+    audio_url: Mapped[str] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     embedding: Mapped[list[float]] = mapped_column(Vector(1536), nullable=True)
 

@@ -1,37 +1,25 @@
-import os
+
 import io
-import wave
 
 from fastapi import APIRouter, WebSocket, Depends, File, UploadFile, HTTPException, Form, Query
 from app.agents.turn_handler import handle_turn
 from app.db.session import get_db
-from app.db.models import Message, User
+from app.db.models import Message
 from jose import jwt
 from app.api.utils import get_embedding
 from starlette.websockets import WebSocketDisconnect
-from fastapi.responses import StreamingResponse
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import openai
-import tempfile
-
 from app.services.chat_service import get_or_create_chat
 from app.schemas.chat import ChatCreateRequest,PaginatedMessages
 from app.core.config import settings
-
-
-#TODO: Bad code - REFACTORE EVERYTHING
-import httpx
-
+from app.utils.router import transcribe_audio, synthesize_audio_with_elevenlabs, synthesize_audio_with_bland_ai, get_ai_reply_via_websocket
+from app.utils.s3 import save_audio_to_s3, save_ia_audio_to_s3, generate_presigned_url
 
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = settings.ALGORITHM
-BLAND_API_KEY =settings.BLAND_API_KEY
-BLAND_VOICE_ID = settings.BLAND_VOICE_ID
-ELEVENLABS_API_KEY = settings.ELEVENLABS_API_KEY
-ELEVENLABS_VOICE_ID = settings.ELEVENLABS_VOICE_ID
 
 router = APIRouter()
 
@@ -125,106 +113,6 @@ async def get_chat_history(
         messages=messages
     )
 
-
-
-
-
-
-
-
-
-
-
-async def transcribe_audio(file: UploadFile = File(...)):
-    suffix = os.path.splitext(file.filename)[1].lower()
-    # Fallback: try to infer from content_type if missing
-    if not suffix and file.content_type in ("audio/webm", "audio/wav", "audio/mp3"):
-        suffix = {
-            "audio/webm": ".webm",
-            "audio/wav": ".wav",
-            "audio/mp3": ".mp3"
-        }[file.content_type]
-    if suffix not in [".webm", ".wav", ".mp3"]:  # Add more as needed
-        raise HTTPException(status_code=415, detail="Formato não suportado.")
-    content = await file.read()
-    if len(content) < 512:  # Change threshold as needed
-        raise HTTPException(status_code=422, detail="Arquivo de áudio vazio ou muito pequeno.")
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(content)
-        tmp_path = tmp.name
-    with open(tmp_path, "rb") as f:
-        transcript = openai.audio.transcriptions.create(
-            file=f,
-            model="whisper-1"
-        )
-    os.remove(tmp_path)
-    print("Transcription:", transcript.text)
-    return {"text": transcript.text}
-
-async def get_ai_reply_via_websocket(chat_id: str,message: str, persona_id: str, token: str, db: Depends(get_db) ): # type: ignore
-    # Use websockets.client to connect to your /ws/chat/{persona_id} endpoint
-    # Or, refactor your logic to call the same handle_turn() function directly!
-    # For demo, let's assume you can just call handle_turn():
-    reply = await handle_turn(message, chat_id=chat_id, persona_id=persona_id, user_id=1, db=db,is_audio=True)  # mock user/db
-    return reply
-
-async def synthesize_audio_with_elevenlabs(text: str):
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
-    headers = {
-        "xi-api-key": ELEVENLABS_API_KEY,
-        "Accept": "audio/mpeg",  # For MP3 output
-        "Content-Type": "application/json",
-    }
-    data = {
-        "text": text,
-        "model_id": "eleven_monolingual_v1",  # or another model if you want
-        "voice_settings": {
-            "stability": 0.5,
-            "similarity_boost": 0.75
-        }
-    }
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(url, headers=headers, json=data)
-        if resp.status_code != 200:
-            print("ElevenLabs error:", resp.text)
-            return None, None
-        return resp.content, "audio/mpeg"
-    
-async def synthesize_audio_with_bland_ai(text: str):
-    url = "https://api.bland.ai/v1/speak"
-    headers = {
-        "Authorization": BLAND_API_KEY,
-        "Content-Type": "application/json",
-    }
-    data = {
-        "voice": BLAND_VOICE_ID,
-        "text": text,
-    }
-    timeout = httpx.Timeout(60.0, connect=10.0)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(url, headers=headers, json=data)
-        content_type = resp.headers.get("content-type", "")
-        print("Bland AI status:", resp.status_code)
-        print("Content-Type:", content_type)
-        if resp.status_code != 200:
-            print("Bland AI error:", resp.text)
-            return None, None
-        if "application/json" in content_type:
-            result = resp.json()
-            print("Bland AI JSON response:", result)
-            return None, None 
-        return resp.content, content_type
-
-def pcm_bytes_to_wav_bytes(pcm_bytes, sample_rate=44100):
-    wav_io = io.BytesIO()
-    with wave.open(wav_io, 'wb') as wav_file:
-        wav_file.setnchannels(1)
-        wav_file.setsampwidth(2)
-        wav_file.setframerate(sample_rate)
-        wav_file.writeframes(pcm_bytes)
-    wav_io.seek(0)
-    return wav_io.read()
-
 @router.post("/chat_audio/")
 async def chat_audio(
     file: UploadFile = File(...),
@@ -233,19 +121,63 @@ async def chat_audio(
     token: str = Form(""),    
     db=Depends(get_db)
 ):
-    # 1. Transcribe audio
-    transcript = await transcribe_audio(file)
+    if not token:
+        raise HTTPException(status_code=400, detail="Token missing")
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = int(payload.get("sub"))
+    except Exception as e:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Audio File empty.")
+
+    user_audio_url = await save_audio_to_s3(io.BytesIO(file_bytes), file.filename, file.content_type, user_id)
+
+    transcript = await transcribe_audio(io.BytesIO(file_bytes), file.filename, file.content_type)
     if not transcript or "error" in transcript:
         raise HTTPException(status_code=422, detail=transcript.get("error", "Transcription error"))
 
-    # 2. Get AI reply (via websocket or direct)
+    transcript_text = transcript["text"]
+
+    # 3. Save user message with embedding
+    embedding = await get_embedding(transcript_text)
+    msg_user = Message(
+        chat_id=chat_id,
+            sender="user",
+            content=transcript_text,
+            audio_url=user_audio_url,
+            embedding=embedding
+        )
+    db.add(msg_user)
+    await db.commit()
+
+    # 4. Get AI reply (via websocket or direct)
     ai_reply = await get_ai_reply_via_websocket(chat_id,transcript["text"], persona_id, token, db)
 
-    # 3. Synthesize reply as audio (try ElevenLabs first, then Bland as fallback)
+    # 5. Synthesize reply as audio (try ElevenLabs first, then Bland as fallback)
     audio_bytes, audio_mime = await synthesize_audio_with_elevenlabs(ai_reply)
     if not audio_bytes:
         audio_bytes, audio_mime = await synthesize_audio_with_bland_ai(ai_reply)
         if not audio_bytes:
             raise HTTPException(status_code=500, detail="No audio returned from any TTS provider.")
+        
+    # 6. Salve o áudio da IA
+    ai_audio_url = await save_ia_audio_to_s3(audio_bytes, user_id)
 
-    return StreamingResponse(io.BytesIO(audio_bytes), media_type=audio_mime)
+    # 7. Salve a mensagem da IA no banco
+    msg_ai = Message(
+        chat_id=chat_id,
+        sender="ai",
+        content=ai_reply,
+        audio_url=ai_audio_url
+    )
+    db.add(msg_ai)
+    await db.commit()
+    return {
+        "ai_text": ai_reply,
+        "ai_audio_url": generate_presigned_url(ai_audio_url),
+        "user_audio_url": generate_presigned_url(user_audio_url),
+        "transcript": transcript_text
+    }

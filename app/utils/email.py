@@ -28,14 +28,14 @@ def send_verification_email(to_email: str, token: str):
       <td align="center">
 
         <!-- Card -->
-        <table width="480" cellpadding="0" cellspacing="0" border="0" style="background:#fff;border-radius:24px;box-shadow:0 10px 32px 0 rgba(50,50,93,0.10),0 2px 4px 0 rgba(0,0,0,0.07);overflow:hidden;">
+        <table width="520" cellpadding="0" cellspacing="0" border="0" style="background:#fff;border-radius:24px;box-shadow:0 10px 32px 0 rgba(50,50,93,0.10),0 2px 4px 0 rgba(0,0,0,0.07);overflow:hidden;">
           <!-- Banner/Hero Image -->
           <tr>
             <td align="center" style="background:#23293b;padding:0;">
               <img 
                 src="{logo_url}" 
                 alt="TeaseMe" 
-                style="width:100%;max-width:480px;display:block;border-top-left-radius:24px;border-top-right-radius:24px;"
+                style="width:100%;max-width:520px;display:block;border-top-left-radius:24px;border-top-right-radius:24px;"
               />
             </td>
           </tr>
@@ -58,7 +58,7 @@ def send_verification_email(to_email: str, token: str):
           </tr>
           <!-- Footer -->
           <tr>
-            <td align="center" style="padding:20px 0 12px 0;background:#f6f6f6;color:#bbb;font-size:14px;border-bottom-left-radius:24px;border-bottom-right-radius:24px;">
+            <td align="center" style="padding:20px 0 12px 0;background:#e5e5e5;color:#bbb;font-size:14px;border-bottom-left-radius:24px;border-bottom-right-radius:24px;">
               © {datetime.now().year} TeaseMe. All rights reserved.
             </td>
           </tr>
@@ -113,14 +113,14 @@ def send_password_reset_email(to_email: str, token: str):
             <td align="center">
 
                 <!-- Card -->
-                <table width="480" cellpadding="0" cellspacing="0" border="0" style="background:#fff;border-radius:24px;box-shadow:0 10px 32px 0 rgba(50,50,93,0.10),0 2px 4px 0 rgba(0,0,0,0.07);overflow:hidden;">
+                <table width="520" cellpadding="0" cellspacing="0" border="0" style="background:#fff;border-radius:24px;box-shadow:0 10px 32px 0 rgba(50,50,93,0.10),0 2px 4px 0 rgba(0,0,0,0.07);overflow:hidden;">
                 <!-- Banner/Hero Image -->
                 <tr>
                     <td align="center" style="padding:0;">
                     <img 
                         src="{logo_url}" 
                         alt="TeaseMe" 
-                        style="width:100%;max-width:480px;display:block;border-top-left-radius:24px;border-top-right-radius:24px;"
+                        style="width:100%;max-width:520px;display:block;border-top-left-radius:24px;border-top-right-radius:24px;"
                     />
                     </td>
                 </tr>
@@ -144,7 +144,7 @@ def send_password_reset_email(to_email: str, token: str):
                 </tr>
                 <!-- Footer -->
                 <tr>
-                    <td align="center" style="padding:20px 0 12px 0;background:#f6f6f6;color:#bbb;font-size:14px;border-bottom-left-radius:24px;border-bottom-right-radius:24px;">
+                    <td align="center" style="padding:20px 0 12px 0;background:#e5e5e5;color:#bbb;font-size:14px;border-bottom-left-radius:24px;border-bottom-right-radius:24px;">
                     © {datetime.now().year} TeaseMe. All rights reserved.
                     </td>
                 </tr>
@@ -157,6 +157,7 @@ def send_password_reset_email(to_email: str, token: str):
         </body>
         </html>
         """
+
 
     body_text = f"Reset your TeaseMe password by clicking this link: {reset_url}"
 

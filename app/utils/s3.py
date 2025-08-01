@@ -1,0 +1,30 @@
+import boto3
+import uuid
+import io
+from fastapi import UploadFile
+from app.core.config import settings
+
+s3 = boto3.client("s3")
+BUCKET_NAME = "bucket-audio-message-tease-me"
+
+# Save audio file to S3 and return the S3 key
+async def save_audio_to_s3(file_obj, filename, content_type, user_id):
+    ext = filename.split('.')[-1] if '.' in filename else 'webm'
+    key = f"useraudio/{user_id}/{uuid.uuid4()}.{ext}"
+    file_obj.seek(0)
+    s3.upload_fileobj(file_obj, BUCKET_NAME, key, ExtraArgs={"ContentType": content_type})
+    return key
+
+# Save IA-generated audio to S3 and return the S3 key
+async def save_ia_audio_to_s3(audio_bytes: bytes, user_id: str) -> str:
+    filename = f"iaudio/{user_id}/{uuid.uuid4()}.mp3"
+    s3.upload_fileobj(io.BytesIO(audio_bytes), BUCKET_NAME, filename, ExtraArgs={"ContentType": "audio/mpeg"})
+    return filename  # Return the S3 key, not URL
+
+# Generate a presigned URL for accessing an S3 object
+def generate_presigned_url(key: str, expires: int = 3600) -> str:
+    return s3.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": BUCKET_NAME, "Key": key},
+        ExpiresIn=expires
+    )
