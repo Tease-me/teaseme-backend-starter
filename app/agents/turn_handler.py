@@ -28,7 +28,7 @@ async def handle_turn(message: str, chat_id: str, persona_id: str, user_id: str 
     prompt = prompt_template.partial(
         persona_rules=persona_rules, 
         memories="\n".join(memories), 
-        daily_context=get_today_script(),
+        daily_context=get_today_script(persona_id),
         last_user_message=message
     )
     
