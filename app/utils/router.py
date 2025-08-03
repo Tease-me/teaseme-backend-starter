@@ -59,8 +59,16 @@ async def get_ai_reply_via_websocket(chat_id: str,message: str, persona_id: str,
     reply = await handle_turn(message, chat_id=chat_id, persona_id=persona_id, user_id=1, db=db,is_audio=True)  # mock user/db
     return reply
 
-async def synthesize_audio_with_elevenlabs(text: str):
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
+async def synthesize_audio_with_elevenlabs(text: str, persona_id: str = ELEVENLABS_VOICE_ID):
+
+    ELEVENLABS_VOICE_IDS = {
+        "loli": "5oPVgvHJQCyGSeUSCyM5",
+        "anna": "ZG3wFGD5BySqL24InyYB",
+        "bella": "mbLGDd6ntDPbOiaIPgZ7"
+    }
+    voice_id = ELEVENLABS_VOICE_IDS.get(persona_id, ELEVENLABS_VOICE_IDS["loli"])
+
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
     headers = {
         "xi-api-key": ELEVENLABS_API_KEY,
         "Accept": "audio/mpeg",

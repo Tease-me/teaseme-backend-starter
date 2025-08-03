@@ -157,7 +157,7 @@ async def chat_audio(
     ai_reply = await get_ai_reply_via_websocket(chat_id,transcript["text"], persona_id, token, db)
 
     # 5. Synthesize reply as audio (try ElevenLabs first, then Bland as fallback)
-    audio_bytes, audio_mime = await synthesize_audio_with_elevenlabs(ai_reply)
+    audio_bytes, audio_mime = await synthesize_audio_with_elevenlabs(ai_reply,persona_id)
     if not audio_bytes:
         audio_bytes, audio_mime = await synthesize_audio_with_bland_ai(ai_reply)
         if not audio_bytes:
