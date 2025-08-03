@@ -210,7 +210,8 @@ def get_today_script(persona_id: str):
     idx = date.today().timetuple().tm_yday % len(persona_scripts)
     return persona_scripts[idx]
 
-#def get_today_script(persona_id: str) -> str:
+#from random
+# def get_today_script(persona_id: str) -> str:
  #   scripts = DAILY_SCRIPTS.get(persona_id)
   #  if not scripts:
    #     # fallback: soma todas as listas e escolhe aleatório
