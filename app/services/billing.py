@@ -57,7 +57,6 @@ async def charge_feature(db, *, user_id: int, feature: str, units: int, meta: di
     await db.commit()
     return cost
 
-
 async def topup_wallet(db, user_id: int, cents: int, source: str):
     """Add credits to user's wallet and log the transaction."""
     wallet = await db.get(CreditWallet, user_id) or CreditWallet(user_id=user_id)
@@ -96,3 +95,60 @@ def get_audio_duration_ffmpeg(file_bytes: bytes) -> float:
     except Exception as e:
         print(f"ffmpeg duration error: {e}")
         return 10.0  # fallback
+    
+
+import subprocess, tempfile, math
+
+MIME_TO_SUFFIX = {
+    "audio/webm": ".webm",
+    "audio/wav":  ".wav",
+    "audio/x-wav": ".wav",
+    "audio/mp3":  ".mp3",
+    "audio/mpeg": ".mp3",
+    "audio/ogg":  ".ogg",
+    "audio/x-m4a": ".m4a",
+}
+
+def _duration_via_ffprobe(data: bytes, suffix: str) -> float:
+    """
+    Internal helper – writes bytes to tmp file and uses ffprobe to read duration.
+    Returns float seconds (can be fractional).
+    """
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(data)
+        tmp_path = tmp.name
+
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                tmp_path,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        return float(result.stdout.decode().strip())
+    except Exception as e:
+        print(f"[WARN] ffprobe failed: {e}")
+        return 0.0
+    finally:
+        try:
+            import os; os.unlink(tmp_path)
+        except Exception:
+            pass
+
+
+def get_duration_seconds(file_bytes: bytes, mime: str | None = None) -> int:
+    """
+    Public helper – returns *ceiled* duration (int seconds ≥ 1).
+
+    If MIME type is missing or unknown, tries .wav as generic fallback.
+    Falls back to 10 s if duration cannot be detected.
+    """
+    suffix = MIME_TO_SUFFIX.get(mime or "", ".wav")
+    duration = _duration_via_ffprobe(file_bytes, suffix)
+    if duration <= 0:
+        duration = 10.0  # conservative fallback
+    return max(1, math.ceil(duration))

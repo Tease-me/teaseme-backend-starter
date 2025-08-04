@@ -17,7 +17,7 @@ from app.schemas.chat import ChatCreateRequest,PaginatedMessages
 from app.core.config import settings
 from app.utils.router import transcribe_audio, synthesize_audio_with_elevenlabs, synthesize_audio_with_bland_ai, get_ai_reply_via_websocket
 from app.utils.s3 import save_audio_to_s3, save_ia_audio_to_s3, generate_presigned_url
-from app.services.billing import charge_feature
+from app.services.billing import charge_feature, get_duration_seconds
 
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = settings.ALGORITHM

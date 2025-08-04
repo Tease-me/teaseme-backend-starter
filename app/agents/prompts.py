@@ -15,12 +15,17 @@ MODEL = ChatOpenAI(
 
 FACT_EXTRACTOR = ChatOpenAI(
     openai_api_key=settings.OPENAI_API_KEY,
-    model="gpt-3.5-turbo"
+    model="gpt-3.5-turbo",
+    temperature=0.2,
+    max_tokens=512,
 )
 
 FACT_PROMPT = ChatPromptTemplate.from_template("""
-From this conversation, extract any *facts* or *personal info* the AI should remember 
-(name, favorites, relationships, secrets…). If nothing new, output 'No new memories.'
+From the user's message and context, extract only new and explicit facts or personal info the AI should remember.
+For each, use one of these categories: preferência, relacionamento, pedido, fato, nota_contextual.
+If nothing new, output 'No new memories.'
+
+Format: [categoria] texto
 
 User message: {msg}
 Context: {ctx}
