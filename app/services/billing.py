@@ -61,6 +61,8 @@ async def charge_feature(db, *, user_id: int, feature: str, units: int, meta: di
 async def topup_wallet(db, user_id: int, cents: int, source: str):
     """Add credits to user's wallet and log the transaction."""
     wallet = await db.get(CreditWallet, user_id) or CreditWallet(user_id=user_id)
+    if wallet.balance_cents is None:
+        wallet.balance_cents = 0
     wallet.balance_cents += cents
     db.add_all([
         wallet,
