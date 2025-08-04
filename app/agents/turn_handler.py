@@ -15,20 +15,20 @@ def redis_history(chat_id: str):
     return RedisChatMessageHistory(
         session_id=chat_id, url=settings.REDIS_URL, ttl=settings.HISTORY_TTL)
 
-async def handle_turn(message: str, chat_id: str, persona_id: str, user_id: str | None = None, db=None, is_audio: bool = False) -> str:
+async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: str | None = None, db=None, is_audio: bool = False) -> str:
     cid = uuid4().hex[:8]
     start = time.perf_counter()
-    log.info("[%s] START persona=%s chat=%s user=%s", cid, persona_id, chat_id, user_id)
+    log.info("[%s] START persona=%s chat=%s user=%s", cid, influencer_id, chat_id, user_id)
 
-    score = get_score(user_id or chat_id, persona_id)
+    score = get_score(user_id or chat_id, influencer_id)
     memories = await find_similar_memories(db, chat_id, message) if db and user_id else []
 
-    persona_rules = PERSONAS.get(persona_id, PERSONAS["anna"]).format(lollity_score=score)
+    persona_rules = PERSONAS.get(influencer_id, PERSONAS["anna"]).format(lollity_score=score)
     prompt_template = GLOBAL_AUDIO_PROMPT if is_audio else GLOBAL_PROMPT
     prompt = prompt_template.partial(
         persona_rules=persona_rules, 
         memories="\n".join(memories), 
-        daily_context=get_today_script(persona_id),
+        daily_context=get_today_script(influencer_id),
         last_user_message=message
     )
     
@@ -50,7 +50,7 @@ async def handle_turn(message: str, chat_id: str, persona_id: str, user_id: str 
         log.error("[%s] LLM error: %s", cid, e, exc_info=True)
         return "Sorry, something went wrong. 😔"
 
-    update_score(user_id or chat_id, persona_id, extract_score(reply, score))
+    update_score(user_id or chat_id, influencer_id, extract_score(reply, score))
 
     recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
     try:

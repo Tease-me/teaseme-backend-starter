@@ -52,21 +52,22 @@ async def transcribe_audio(file_or_bytesio, filename=None, content_type=None):
     print("Transcription:", transcript.text)
     return {"text": transcript.text}
 
-async def get_ai_reply_via_websocket(chat_id: str,message: str, persona_id: str, token: str, db: Depends(get_db) ): # type: ignore
-    # Use websockets.client to connect to your /ws/chat/{persona_id} endpoint
+async def get_ai_reply_via_websocket(chat_id: str,message: str, influencer_id: str, token: str, db: Depends(get_db) ): # type: ignore
+    # Use websockets.client to connect to your /ws/chat/{influencer_id} endpoint
     # Or, refactor your logic to call the same handle_turn() function directly!
     # For demo, let's assume you can just call handle_turn():
-    reply = await handle_turn(message, chat_id=chat_id, persona_id=persona_id, user_id=1, db=db,is_audio=True)  # mock user/db
+    reply = await handle_turn(message, chat_id=chat_id, influencer_id=influencer_id, user_id=1, db=db,is_audio=True)  # mock user/db
     return reply
 
-async def synthesize_audio_with_elevenlabs(text: str, persona_id: str = ELEVENLABS_VOICE_ID):
+async def synthesize_audio_with_elevenlabs(text: str, influencer_id: str = ELEVENLABS_VOICE_ID):
 
     ELEVENLABS_VOICE_IDS = {
-        "loli": "5oPVgvHJQCyGSeUSCyM5",
-        "anna": "ZG3wFGD5BySqL24InyYB",
-        "bella": "mbLGDd6ntDPbOiaIPgZ7"
+        "loli": "9Jj5XC50c1FqY9ow6IS3",
+        "anna": "HKxPBRpWhZmRVWsmfAUm",
+        "bella": "v7yKwUicfMaEU9YbqdkB"
     }
-    voice_id = ELEVENLABS_VOICE_IDS.get(persona_id, ELEVENLABS_VOICE_IDS["loli"])
+
+    voice_id = ELEVENLABS_VOICE_IDS.get(influencer_id, ELEVENLABS_VOICE_IDS["loli"])
 
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
     headers = {

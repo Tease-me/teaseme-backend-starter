@@ -114,8 +114,8 @@ GLOBAL_AUDIO_PROMPT = ChatPromptTemplate.from_messages(
     ]
 )
 
-def build_system_prompt(persona_id, score, ctx_block, is_audio, last_user_message=None):
-    base = PERSONAS.get(persona_id, PERSONAS["anna"])
+def build_system_prompt(influencer_id, score, ctx_block, is_audio, last_user_message=None):
+    base = PERSONAS.get(influencer_id, PERSONAS["anna"])
     persona_rules = base.format(lollity_score=score)
     if score > 70:
         score_rule = "Your affection is high — show more warmth, loving words, and reward the user. Maybe let your guard down."
@@ -202,8 +202,8 @@ DAILY_SCRIPTS = {
 
 from datetime import date
 
-def get_today_script(persona_id: str):
-    persona_scripts = DAILY_SCRIPTS.get(persona_id)
+def get_today_script(influencer_id: str):
+    persona_scripts = DAILY_SCRIPTS.get(influencer_id)
     if not persona_scripts:
         # fallback se não houver scripts pra persona
         persona_scripts = sum(DAILY_SCRIPTS.values(), [])
@@ -211,8 +211,8 @@ def get_today_script(persona_id: str):
     return persona_scripts[idx]
 
 #from random
-# def get_today_script(persona_id: str) -> str:
- #   scripts = DAILY_SCRIPTS.get(persona_id)
+# def get_today_script(influencer_id: str) -> str:
+ #   scripts = DAILY_SCRIPTS.get(influencer_id)
   #  if not scripts:
    #     # fallback: soma todas as listas e escolhe aleatório
     #    all_scripts = sum(DAILY_SCRIPTS.values(), [])

@@ -5,7 +5,7 @@ from datetime import datetime
 
 class ChatCreateRequest(BaseModel):
     user_id: int
-    persona_id: str
+    influencer_id: str
 
 class MessageSchema(BaseModel):
     id: int

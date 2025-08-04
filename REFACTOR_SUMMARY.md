@@ -49,12 +49,12 @@
 ```python
 class NudgeRequest(BaseModel):
     user_id: int = Field(..., gt=0)
-    persona_id: str = Field(default="loli", min_length=1)
+    influencer_id: str = Field(default="loli", min_length=1)
     message: str = Field(default="Hey sumido! Senti sua falta... 😘", min_length=1)
 
 class BroadcastRequest(BaseModel):
     user_ids: List[int] = Field(..., min_items=1)
-    persona_id: str = Field(default="anna", min_length=1)
+    influencer_id: str = Field(default="anna", min_length=1)
     message: str = Field(default="Olá, novidade da sua namorada virtual 💖", min_length=1)
 
 class AudioResponse(BaseModel):
@@ -75,7 +75,7 @@ class AudioResponse(BaseModel):
 ### **Endpoint Improvements**
 
 - **`/chat/`**: Added proper error handling and status codes
-- **`/ws/chat/{persona_id}`**: Improved WebSocket error handling and validation
+- **`/ws/chat/{influencer_id}`**: Improved WebSocket error handling and validation
 - **`/history/{chat_id}`**: Better error handling and documentation
 - **`/chat_audio/`**: Comprehensive error handling and validation
 - **`/nudge`**: Input validation and proper error responses

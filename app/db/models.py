@@ -1,10 +1,33 @@
 from sqlalchemy.orm import DeclarativeBase, mapped_column, Mapped, relationship
 from sqlalchemy import Integer, String, Boolean, Text, ForeignKey, DateTime, JSON
-from typing import Optional
+from typing import Optional, List, Dict
+
 from datetime import datetime
 from pgvector.sqlalchemy import Vector
 
-class Base(DeclarativeBase): pass
+class Base(DeclarativeBase):
+    """Common base class – can host __repr__ or metadata config later."""
+    pass
+
+# ───────────────────────────────────────────────────────────────────────────────
+#  Master persona table  (replaces hard‑coded dict)
+# ───────────────────────────────────────────────────────────────────────────────
+class Influencer(Base):
+    """
+    One row per persona/influencer.  The `id` column will be the new
+    `influencer_id` referenced from Chat.
+    """
+    __tablename__ = "influencers"
+
+    id:             Mapped[str]          = mapped_column(String, primary_key=True)
+    display_name:   Mapped[str]          = mapped_column(String, nullable=False)
+    owner_id:       Mapped[int | None]   = mapped_column(ForeignKey("users.id"), nullable=True)
+    voice_id:       Mapped[str | None]   = mapped_column(String, nullable=True)        # ElevenLabs, etc.
+    prompt_template:Mapped[str]          = mapped_column(Text, nullable=False)
+    daily_scripts:  Mapped[List[str] | None] = mapped_column(JSON, nullable=True)
+    created_at:     Mapped[datetime]     = mapped_column(DateTime, default=datetime.utcnow)
+
+    chats:          Mapped[List["Chat"]] = relationship(back_populates="influencer")
 
 class User(Base):
     __tablename__ = "users"
@@ -20,15 +43,22 @@ class User(Base):
     password_reset_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     password_reset_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    chats = relationship("Chat", backref="user")
+
+    chats = relationship("Chat", back_populates="user")
 
 class Chat(Base):
     __tablename__ = "chats"
-    id: Mapped[str] = mapped_column(String, primary_key=True)  # UUID string
+
+    id:           Mapped[str]  = mapped_column(String, primary_key=True)  # UUID
+    user_id:      Mapped[int]  = mapped_column(ForeignKey("users.id"))
+    influencer_id:Mapped[str]  = mapped_column(ForeignKey("influencers.id"))
+    started_at:   Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # relationships
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    persona_id: Mapped[str] = mapped_column(String)  # Qual persona/mulher neste chat
-    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    messages = relationship("Message", backref="chat", cascade="all, delete-orphan")
+    user = relationship("User", back_populates="chats")
+    influencer:  Mapped["Influencer"] = relationship(back_populates="chats")
+    messages = relationship("Message", back_populates="chat", cascade="all, delete-orphan")
 
 class Message(Base):
     __tablename__ = "messages"
@@ -39,6 +69,7 @@ class Message(Base):
     audio_url: Mapped[str] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     embedding: Mapped[list[float]] = mapped_column(Vector(1536), nullable=True)
+    chat = relationship("Chat", back_populates="messages")
 
 class Memory(Base):
     __tablename__ = "memories"

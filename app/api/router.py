@@ -29,11 +29,11 @@ async def start_chat(
     data: ChatCreateRequest, 
     db: AsyncSession = Depends(get_db)
 ):
-    chat_id = await get_or_create_chat(db, data.user_id, data.persona_id)
+    chat_id = await get_or_create_chat(db, data.user_id, data.influencer_id)
     return {"chat_id": chat_id}
 
-@router.websocket("/ws/chat/{persona_id}")
-async def websocket_chat(ws: WebSocket, persona_id: str, db=Depends(get_db)):
+@router.websocket("/ws/chat/{influencer_id}")
+async def websocket_chat(ws: WebSocket, influencer_id: str, db=Depends(get_db)):
     await ws.accept()
     token = ws.query_params.get("token")
     if not token:
@@ -43,7 +43,7 @@ async def websocket_chat(ws: WebSocket, persona_id: str, db=Depends(get_db)):
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id = int(payload.get("sub"))
     except WebSocketDisconnect:
-        print(f"[WS] Client disconnected from chat/persona={persona_id}")
+        print(f"[WS] Client disconnected from chat/persona={influencer_id}")
     except Exception as e:
         await ws.close(code=4002)
         print("JWT decode error:", e)
@@ -54,7 +54,7 @@ async def websocket_chat(ws: WebSocket, persona_id: str, db=Depends(get_db)):
             raw = await ws.receive_json()
             chat_id = raw.get("chat_id")
             if not chat_id:
-                chat_id = f"{user_id}_{persona_id}"
+                chat_id = f"{user_id}_{influencer_id}"
 
             await charge_feature(
                 db, user_id=user_id, feature="text", units=1,
@@ -72,7 +72,7 @@ async def websocket_chat(ws: WebSocket, persona_id: str, db=Depends(get_db)):
             reply = await handle_turn(
                 raw["message"],
                 chat_id=chat_id,
-                persona_id=persona_id,
+                influencer_id=influencer_id,
                 user_id=user_id,
                 db=db
             )
@@ -85,7 +85,7 @@ async def websocket_chat(ws: WebSocket, persona_id: str, db=Depends(get_db)):
             await ws.send_json({"reply": reply})
         
         except WebSocketDisconnect:
-            print(f"[WS] Client {user_id} disconnected from {persona_id}")
+            print(f"[WS] Client {user_id} disconnected from {influencer_id}")
             break
         except Exception as e:
             print(f"[WS] Unexpected error: {e}")
@@ -124,7 +124,7 @@ async def get_chat_history(
 async def chat_audio(
     file: UploadFile = File(...),
     chat_id: str = Form(...),
-    persona_id: str = Form("default"),
+    influencer_id: str = Form("default"),
     token: str = Form(""),    
     db=Depends(get_db)
 ):
@@ -169,10 +169,10 @@ async def chat_audio(
     await db.commit()
 
     # 4. Get AI reply (via websocket or direct)
-    ai_reply = await get_ai_reply_via_websocket(chat_id,transcript["text"], persona_id, token, db)
+    ai_reply = await get_ai_reply_via_websocket(chat_id,transcript["text"], influencer_id, token, db)
 
     # 5. Synthesize reply as audio (try ElevenLabs first, then Bland as fallback)
-    audio_bytes, audio_mime = await synthesize_audio_with_elevenlabs(ai_reply,persona_id)
+    audio_bytes, audio_mime = await synthesize_audio_with_elevenlabs(ai_reply,influencer_id)
     if not audio_bytes:
         audio_bytes, audio_mime = await synthesize_audio_with_bland_ai(ai_reply)
         if not audio_bytes:

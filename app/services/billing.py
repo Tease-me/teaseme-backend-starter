@@ -42,9 +42,9 @@ async def charge_feature(db, *, user_id: int, feature: str, units: int, meta: di
     # Debit wallet
     if cost:
         wallet = await db.get(CreditWallet, user_id) or CreditWallet(user_id=user_id)
-        if wallet.balance_cents < cost:
+        if (wallet.balance_cents or 0) < cost:
             raise HTTPException(402, "Insufficient credits")
-        wallet.balance_cents -= cost
+        wallet.balance_cents = (wallet.balance_cents or 0) - cost
         db.add(wallet)
 
     db.add(CreditTransaction(
@@ -110,10 +110,6 @@ MIME_TO_SUFFIX = {
 }
 
 def _duration_via_ffprobe(data: bytes, suffix: str) -> float:
-    """
-    Internal helper – writes bytes to tmp file and uses ffprobe to read duration.
-    Returns float seconds (can be fractional).
-    """
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(data)
         tmp_path = tmp.name
@@ -129,26 +125,25 @@ def _duration_via_ffprobe(data: bytes, suffix: str) -> float:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
-        return float(result.stdout.decode().strip())
-    except Exception as e:
-        print(f"[WARN] ffprobe failed: {e}")
-        return 0.0
+        output = result.stdout.decode().strip()
+        try:
+            duration = float(output)
+        except Exception:
+            print(f"[WARN] ffprobe failed: {output!r}")
+            duration = 0.0
+        return duration
     finally:
         try:
-            import os; os.unlink(tmp_path)
+            os.unlink(tmp_path)
         except Exception:
             pass
 
-
 def get_duration_seconds(file_bytes: bytes, mime: str | None = None) -> int:
     """
-    Public helper – returns *ceiled* duration (int seconds ≥ 1).
-
-    If MIME type is missing or unknown, tries .wav as generic fallback.
-    Falls back to 10 s if duration cannot be detected.
+    Returns duration in whole seconds (>=1), fallback 10s if ffprobe fails.
     """
     suffix = MIME_TO_SUFFIX.get(mime or "", ".wav")
     duration = _duration_via_ffprobe(file_bytes, suffix)
     if duration <= 0:
-        duration = 10.0  # conservative fallback
+        duration = 10.0
     return max(1, math.ceil(duration))
