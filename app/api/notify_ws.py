@@ -1,5 +1,5 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
-from jose import jwt, JWTError
+from jose import JWTError
 from app.core.config import settings
 
 SECRET_KEY = settings.SECRET_KEY

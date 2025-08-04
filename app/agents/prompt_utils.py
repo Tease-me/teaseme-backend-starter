@@ -218,3 +218,10 @@ def get_today_script(persona_id: str):
     #    all_scripts = sum(DAILY_SCRIPTS.values(), [])
      #   return random.choice(all_scripts)
     #return random.choice(scripts)
+
+# Payment methods
+# Charge user
+# Call user by name or nickname
+# each persona has a brain
+# WELCOME Conversation
+# await charge_feature(db, user_id, "live_chat", total_seconds, meta={"session_id": sid})

@@ -17,6 +17,7 @@ from app.schemas.chat import ChatCreateRequest,PaginatedMessages
 from app.core.config import settings
 from app.utils.router import transcribe_audio, synthesize_audio_with_elevenlabs, synthesize_audio_with_bland_ai, get_ai_reply_via_websocket
 from app.utils.s3 import save_audio_to_s3, save_ia_audio_to_s3, generate_presigned_url
+from app.services.billing import charge_feature
 
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = settings.ALGORITHM
@@ -54,6 +55,12 @@ async def websocket_chat(ws: WebSocket, persona_id: str, db=Depends(get_db)):
             chat_id = raw.get("chat_id")
             if not chat_id:
                 chat_id = f"{user_id}_{persona_id}"
+
+            await charge_feature(
+                db, user_id=user_id, feature="text", units=1,
+                meta={"chat_id": chat_id}
+            )
+
             embedding = await get_embedding(raw["message"])
             db.add(Message(
                 chat_id=chat_id,
@@ -132,6 +139,14 @@ async def chat_audio(
     file_bytes = await file.read()
     if not file_bytes:
         raise HTTPException(status_code=400, detail="Audio File empty.")
+    
+    seconds = get_duration_seconds(file_bytes, file.content_type)
+
+    # ◆ charge before heavy calls
+    await charge_feature(
+        db, user_id=user_id, feature="voice",
+        units=int(seconds), meta={"chat_id": chat_id}
+    )
 
     user_audio_url = await save_audio_to_s3(io.BytesIO(file_bytes), file.filename, file.content_type, user_id)
 
@@ -175,6 +190,7 @@ async def chat_audio(
     )
     db.add(msg_ai)
     await db.commit()
+    
     return {
         "ai_text": ai_reply,
         "ai_audio_url": generate_presigned_url(ai_audio_url),

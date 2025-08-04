@@ -55,3 +55,43 @@ class Subscription(Base):
     user_id = mapped_column(Integer, ForeignKey("users.id"))
     subscription_json = mapped_column(JSON)
     created_at = mapped_column(DateTime, default=datetime.utcnow)
+
+class Pricing(Base):
+    """
+    Current pricing table.
+    Example: feature='text', unit='message', price_cents=5, free_allowance=100
+    """
+    __tablename__ = "pricing"
+    id: Mapped[int]          = mapped_column(Integer, primary_key=True)
+    feature: Mapped[str]     = mapped_column(String)     # text / voice / live_chat
+    unit: Mapped[str]        = mapped_column(String)     # message / second
+    price_cents: Mapped[int] = mapped_column(Integer)    # 5  ⇒  $0.05
+    free_allowance: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool]  = mapped_column(Boolean, default=True)
+
+class CreditWallet(Base):
+    """User's prepaid balance (>= 0)."""
+    __tablename__ = "credit_wallets"
+    user_id: Mapped[int]     = mapped_column(ForeignKey("users.id"), primary_key=True)
+    balance_cents: Mapped[int] = mapped_column(Integer, default=0)
+
+class CreditTransaction(Base):
+    """Immutable ledger of debits and credits."""
+    __tablename__ = "credit_transactions"
+    id: Mapped[int]          = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int]     = mapped_column(ForeignKey("users.id"))
+    feature: Mapped[str]     = mapped_column(String)      # text / voice / live_chat / topup / refund
+    units: Mapped[int]       = mapped_column(Integer)     # -1 msg, -30 secs, +10000 topup
+    amount_cents: Mapped[int] = mapped_column(Integer)    # -5, -60, +1000 …
+    meta: Mapped[dict]       = mapped_column(JSON, nullable=True)
+    ts: Mapped[datetime]     = mapped_column(DateTime, default=datetime.utcnow)
+
+class DailyUsage(Base):
+    """Daily counter that resets at midnight UTC (for free tier usage)."""
+    __tablename__ = "daily_usage"
+    user_id: Mapped[int]     = mapped_column(ForeignKey("users.id"), primary_key=True)
+    date:    Mapped[datetime]= mapped_column(DateTime, primary_key=True)  # YYYY-MM-DD 00:00 UTC
+    free_allowance: Mapped[int] = mapped_column(Integer, default=0)
+    text_count: Mapped[int]  = mapped_column(Integer, default=0)
+    voice_secs: Mapped[int]  = mapped_column(Integer, default=0)
+    live_secs:  Mapped[int]  = mapped_column(Integer, default=0)
