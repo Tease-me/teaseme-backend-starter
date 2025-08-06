@@ -2,12 +2,13 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.router import router
+from app.api.chat import router
 from app.api.auth import router as auth_router
 from app.api.push import router as push_router 
 from app.api import billing
 from app.api.notify_ws import router as notify_ws_router
 from app.api.influencer import router as influencer_router
+from app.api.elevenlabs import router as elevenlabs_router
 
 log = logging.getLogger("teaseme")
 logging.basicConfig(
@@ -37,6 +38,7 @@ app.include_router(push_router)
 app.include_router(notify_ws_router)
 app.include_router(billing.router)
 app.include_router(influencer_router)
+app.include_router(elevenlabs_router)
 
 @app.get("/health")
 def health():

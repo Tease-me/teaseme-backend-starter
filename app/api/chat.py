@@ -15,16 +15,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.chat_service import get_or_create_chat
 from app.schemas.chat import ChatCreateRequest,PaginatedMessages
 from app.core.config import settings
-from app.utils.router import transcribe_audio, synthesize_audio_with_elevenlabs, synthesize_audio_with_bland_ai, get_ai_reply_via_websocket
+from app.utils.chat import transcribe_audio, synthesize_audio_with_elevenlabs, synthesize_audio_with_bland_ai, get_ai_reply_via_websocket
 from app.utils.s3 import save_audio_to_s3, save_ia_audio_to_s3, generate_presigned_url, message_to_schema_with_presigned
 from app.services.billing import charge_feature, get_duration_seconds
 
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = settings.ALGORITHM
 
-router = APIRouter()
+router = APIRouter(prefix="/chat", tags=["chat"])
 
-@router.post("/chat/")
+@router.post("/")
 async def start_chat(
     data: ChatCreateRequest, 
     db: AsyncSession = Depends(get_db)
@@ -32,7 +32,7 @@ async def start_chat(
     chat_id = await get_or_create_chat(db, data.user_id, data.influencer_id)
     return {"chat_id": chat_id}
 
-@router.websocket("/ws/chat/{influencer_id}")
+@router.websocket("/ws/{influencer_id}")
 async def websocket_chat(ws: WebSocket, influencer_id: str, db=Depends(get_db)):
     await ws.accept()
     token = ws.query_params.get("token")

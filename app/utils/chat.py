@@ -61,7 +61,6 @@ async def get_ai_reply_via_websocket(chat_id: str,message: str, influencer_id: s
     return reply
 
 async def synthesize_audio_with_elevenlabs(text: str, db, influencer_id: str = None):
-
     influencer = await db.get(Influencer, influencer_id)
     if not influencer:
         raise HTTPException(404, "Influencer not found")
