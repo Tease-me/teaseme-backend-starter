@@ -1,3 +1,4 @@
+#TODO: add file into UTILS folder
 from openai import OpenAI
 from sqlalchemy import text
 from dotenv import load_dotenv
