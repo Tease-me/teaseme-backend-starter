@@ -5,9 +5,11 @@ from app.core.config import settings
 from app.agents.scoring import get_score, update_score, extract_score
 from app.agents.memory import find_similar_memories, store_fact
 from app.agents.prompts import MODEL, FACT_EXTRACTOR, FACT_PROMPT
-from app.agents.prompt_utils import PERSONAS, GLOBAL_PROMPT, GLOBAL_AUDIO_PROMPT, get_today_script
+from app.agents.prompt_utils import GLOBAL_PROMPT, GLOBAL_AUDIO_PROMPT, get_today_script
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import RedisChatMessageHistory
+from app.db.models import Influencer
+from fastapi import HTTPException
 
 log = logging.getLogger("teaseme-turn")
 
@@ -23,7 +25,18 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     score = get_score(user_id or chat_id, influencer_id)
     memories = await find_similar_memories(db, chat_id, message) if db and user_id else []
 
-    persona_rules = PERSONAS.get(influencer_id, PERSONAS["anna"]).format(lollity_score=score)
+    influencer = await db.get(Influencer, influencer_id)
+    if not influencer:
+        raise HTTPException(404, "Influencer not found")
+    persona_rules = influencer.prompt_template.format(lollity_score=score)
+
+    if score > 70:
+        persona_rules += "\nYour affection is high — show more warmth, loving words, and reward the user. Maybe let your guard down."
+    elif score > 40:
+        persona_rules += "\nYou’re feeling playful. Mix gentle teasing with affection. Make the user work a bit for your praise."
+    else:
+        persona_rules += "\nYou’re in full teasing mode! Challenge the user, play hard to get, and use the name TeaseMe as a game."
+
     prompt_template = GLOBAL_AUDIO_PROMPT if is_audio else GLOBAL_PROMPT
     prompt = prompt_template.partial(
         persona_rules=persona_rules, 

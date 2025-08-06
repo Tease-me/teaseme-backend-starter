@@ -7,6 +7,7 @@ from fastapi import  Depends, HTTPException
 from app.agents.turn_handler import handle_turn
 from app.db.session import get_db
 from app.core.config import settings
+from app.db.models import Influencer
 
 import openai
 import tempfile
@@ -59,15 +60,15 @@ async def get_ai_reply_via_websocket(chat_id: str,message: str, influencer_id: s
     reply = await handle_turn(message, chat_id=chat_id, influencer_id=influencer_id, user_id=1, db=db,is_audio=True)  # mock user/db
     return reply
 
-async def synthesize_audio_with_elevenlabs(text: str, influencer_id: str = ELEVENLABS_VOICE_ID):
+async def synthesize_audio_with_elevenlabs(text: str, db, influencer_id: str = None):
 
-    ELEVENLABS_VOICE_IDS = {
-        "loli": "9Jj5XC50c1FqY9ow6IS3",
-        "anna": "HKxPBRpWhZmRVWsmfAUm",
-        "bella": "v7yKwUicfMaEU9YbqdkB"
-    }
+    influencer = await db.get(Influencer, influencer_id)
+    if not influencer:
+        raise HTTPException(404, "Influencer not found")
+    if not influencer.voice_id:
+        raise HTTPException(500, f"Voice ID not set for influencer '{influencer_id}'")
 
-    voice_id = ELEVENLABS_VOICE_IDS.get(influencer_id, ELEVENLABS_VOICE_IDS["loli"])
+    voice_id = influencer.voice_id
 
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
     headers = {
