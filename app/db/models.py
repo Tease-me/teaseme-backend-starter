@@ -1,6 +1,6 @@
 from sqlalchemy.orm import DeclarativeBase, mapped_column, Mapped, relationship
 from sqlalchemy import Integer, String, Boolean, Text, ForeignKey, DateTime, JSON
-from typing import Optional, List, Dict
+from typing import Optional, List
 
 from datetime import datetime
 from pgvector.sqlalchemy import Vector
@@ -9,9 +9,6 @@ class Base(DeclarativeBase):
     """Common base class – can host __repr__ or metadata config later."""
     pass
 
-# ───────────────────────────────────────────────────────────────────────────────
-#  Master persona table  (replaces hard‑coded dict)
-# ───────────────────────────────────────────────────────────────────────────────
 class Influencer(Base):
     """
     One row per persona/influencer.  The `id` column will be the new
@@ -25,6 +22,7 @@ class Influencer(Base):
     voice_id:       Mapped[str | None]   = mapped_column(String, nullable=True)        # ElevenLabs, etc.
     prompt_template:Mapped[str]          = mapped_column(Text, nullable=False)
     daily_scripts:  Mapped[List[str] | None] = mapped_column(JSON, nullable=True)
+    influencer_agent_id_third_part: Mapped[str | None] = mapped_column(String, nullable=True)  
     created_at:     Mapped[datetime]     = mapped_column(DateTime, default=datetime.utcnow)
 
     chats:          Mapped[List["Chat"]] = relationship(back_populates="influencer")
