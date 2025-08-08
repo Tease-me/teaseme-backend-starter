@@ -65,10 +65,18 @@ async def get_signed_url(
     greeting = first_message or _pick_greeting(influencer_id, greeting_mode)
 
     async with httpx.AsyncClient() as client:
+        payload = {
+            "agent_id": agent_id,
+            "conversation_config": {
+                "agent": {
+                    "first_message": greeting
+                }
+            }
+        }
         patch = await client.patch(
             f"https://api.elevenlabs.io/v1/convai/agents/{agent_id}",
             headers=headers,
-            json={"first_message": greeting},
+            json=payload,
         )
         if patch.status_code >= 400:
             raise HTTPException(status_code=424, detail=f"Failed to update first message: {patch.text}")
