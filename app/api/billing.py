@@ -5,7 +5,7 @@ from app.services.billing import topup_wallet
 from app.db.models import CreditWallet
 from app.schemas.billing import TopUpRequest
 from app.db.session import get_db
-from app.api.deps import get_current_user
+from app.utils.deps import get_current_user
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 

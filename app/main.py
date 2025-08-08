@@ -9,6 +9,7 @@ from app.api import billing
 from app.api.notify_ws import router as notify_ws_router
 from app.api.influencer import router as influencer_router
 from app.api.elevenlabs import router as elevenlabs_router
+from .api import health_router
 
 log = logging.getLogger("teaseme")
 logging.basicConfig(
@@ -32,14 +33,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth_router, prefix="/auth")
+app.include_router(auth_router)
 app.include_router(router)
 app.include_router(push_router)
 app.include_router(notify_ws_router)
 app.include_router(billing.router)
 app.include_router(influencer_router)
 app.include_router(elevenlabs_router)
+app.include_router(health_router.router)
 
-@app.get("/health")
-def health():
-    return {"ok": True}
