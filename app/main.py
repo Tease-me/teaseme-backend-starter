@@ -9,6 +9,8 @@ from app.api import billing
 from app.api.notify_ws import router as notify_ws_router
 from app.api.influencer import router as influencer_router
 from app.api.elevenlabs import router as elevenlabs_router
+from app.api.persona_import import router as persona_import_router
+
 from .api import health_router
 
 log = logging.getLogger("teaseme")
@@ -41,4 +43,4 @@ app.include_router(billing.router)
 app.include_router(influencer_router)
 app.include_router(elevenlabs_router)
 app.include_router(health_router.router)
-
+app.include_router(persona_import_router)
