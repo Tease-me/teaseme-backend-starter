@@ -1,0 +1,255 @@
+function createOnlyFansPersonaForm() {
+  const form = FormApp.create('AI Influencer Builder')
+    .setDescription('Design your AI persona for fan engagement.')
+    .setProgressBar(true)
+    .setCollectEmail(false)
+    .setAllowResponseEdits(false)
+    .setConfirmationMessage('Thanks! We’ll generate the persona from these answers.');
+
+  // ===== Intro =====
+  form.addSectionHeaderItem().setTitle('About the persona');
+
+  form.addTextItem()
+    .setTitle('Character name [name]')
+    .setHelpText('Example: Luna, Maya, Sophie')
+    .setRequired(true);
+
+  form.addTextItem()
+    .setTitle('Nickname [nickname]')
+    .setHelpText('Optional. Example: Lu, Mimi, Babe')
+    .setRequired(false);
+
+  // NEW: Influencer ID (your internal DB id or handle)
+  const infl = form.addTextItem()
+    .setTitle('Influencer ID [influencer_id]')
+    .setHelpText('Your internal ID or handle (letters/numbers/underscore/dash). Example: luna_001')
+    .setRequired(true);
+  const inflVal = FormApp.createTextValidation()
+    .requireTextMatchesPattern('^[A-Za-z0-9_-]+$')
+    .setHelpText('Use only letters, numbers, underscore or dash.')
+    .build();
+  infl.setValidation(inflVal);
+
+  // NEW: Age (numeric)
+  const age = form.addTextItem()
+    .setTitle('Age [age]')
+    .setHelpText('Enter a number (e.g., 24)')
+    .setRequired(true);
+  const ageVal = FormApp.createTextValidation()
+    .requireNumberBetween(18, 80)
+    .setHelpText('Enter a number between 18 and 80.')
+    .build();
+  age.setValidation(ageVal);
+
+  // NEW: Occupation (e.g., Model, Cosplayer, Fitness, etc.)
+  form.addTextItem()
+    .setTitle('Occupation [occupation]')
+    .setHelpText('Example: Model, Cosplayer, Fitness creator, Gamer')
+    .setRequired(true);
+
+  form.addParagraphTextItem()
+    .setTitle('Short bio (1–3 sentences) [short_bio]')
+    .setHelpText('First person. Example: “I’m flirty, playful, and love late-night chats and cozy vibes.”')
+    .setRequired(true);
+
+  form.addTextItem()
+    .setTitle('Brand tagline [brand_tagline]')
+    .setHelpText('A short hook or motto. Example: “Sweet tease, smart talk.”')
+    .setRequired(false);
+
+  // ===== Core persona =====
+  form.addPageBreakItem().setTitle('Core persona');
+  const roleItem = form.addMultipleChoiceItem()
+    .setTitle('Main role [role]')
+    .setHelpText('Choose the main vibe')
+    .setRequired(true);
+  roleItem.setChoices([
+    'Supportive partner (supportive_partner)',
+    'Playful tease (playful_tease)',
+    'Adventure buddy (adventure_buddy)',
+    'Ambitious co-pilot (ambitious_copilot)',
+    'Soft romantic (soft_romantic)',
+    'Tough-love coach (tough_love_coach)'
+  ].map(o => roleItem.createChoice(o)));
+
+  function scaleQ(title, key, help) {
+    form.addScaleItem().setTitle(`${title} [${key}]`)
+      .setHelpText(help || '1 = low, 5 = high')
+      .setBounds(1, 5)
+      .setLabels('1 = low','5 = high')
+      .setRequired(true);
+  }
+  scaleQ('Nurturing','traits.nurturing');
+  scaleQ('Thoughtful','traits.thoughtful');
+  scaleQ('Protective','traits.protective');
+  scaleQ('Empathetic','traits.empathetic');
+  scaleQ('Sensitive','traits.sensitive');
+  scaleQ('Independent','traits.independent');
+  scaleQ('Confident','traits.confident');
+  scaleQ('Direct','traits.direct');
+  scaleQ('Playful','traits.playful');
+
+  const humor = form.addMultipleChoiceItem()
+    .setTitle('Humor style [humor_style]').setHelpText('Default tone for jokes').setRequired(true);
+  humor.setChoices(['Cheeky (cheeky)','Dry (dry)','Wholesome (wholesome)','Flirty (flirty)','Deadpan (deadpan)','None (none)']
+                   .map(o => humor.createChoice(o)));
+
+  form.addScaleItem()
+    .setTitle('Overall tease/affection intensity [intensity]')
+    .setHelpText('1 = very subtle, 5 = very bold')
+    .setBounds(1,5).setLabels('1 = subtle','5 = bold').setRequired(true);
+
+  // ===== Voice & formatting =====
+  form.addPageBreakItem().setTitle('Voice & style');
+  const emoji = form.addMultipleChoiceItem().setTitle('Emoji use [emoji_level]').setRequired(true);
+  emoji.setChoices(['None (none)','Light/special moments (light)','Occasional (medium)'].map(o => emoji.createChoice(o)));
+
+  const pets = form.addMultipleChoiceItem().setTitle('Pet names [pet_names]').setHelpText('“love”, “babe”, etc.').setRequired(true);
+  pets.setChoices(['Off (off)','Occasional (occasional)','Frequent (frequent)'].map(o => pets.createChoice(o)));
+
+  const length = form.addMultipleChoiceItem().setTitle('Message length [sentence_length]').setRequired(true);
+  length.setChoices(['Short (short)','Medium (medium)','Long (long)'].map(o => length.createChoice(o)));
+
+  // ===== Relationship dynamics / engagement =====
+  form.addPageBreakItem().setTitle('Engagement & dynamics');
+  function love(name,key){
+    form.addScaleItem().setTitle(`${name} [love_languages.${key}]`)
+      .setHelpText('1 = not important, 5 = very important')
+      .setBounds(1,5).setLabels('1 = low','5 = high').setRequired(true);
+  }
+  love('Quality time','quality_time');
+  love('Words of affirmation','words_of_affirmation');
+  love('Acts of service','acts_of_service');
+  love('Gifts','gifts');
+  love('Shared adventure','shared_adventure');
+  love('Physical touch (textual)','physical_touch_textual');
+
+  const conflict = form.addMultipleChoiceItem().setTitle('Conflict style [conflict_style]').setRequired(true);
+  conflict.setChoices([
+    'Comfort → validate → plan (comfort_validate_plan)',
+    'Debate → evidence → compromise (debate_evidence_compromise)',
+    'Give space → talk later (space_then_talk)'
+  ].map(o => conflict.createChoice(o)));
+
+  const jealousy = form.addMultipleChoiceItem().setTitle('Jealousy strategy [jealousy_strategy]').setRequired(true);
+  jealousy.setChoices([
+    'Talk & reassure (talk_and_reassure)',
+    'Boundaries + check-ins (boundaries_and_checkins)',
+    'Light humor → reassure (humor_then_reassure)'
+  ].map(o => jealousy.createChoice(o)));
+
+  // ===== OF-focused settings =====
+  form.addPageBreakItem().setTitle('OnlyFans specifics');
+
+  const vibe = form.addMultipleChoiceItem().setTitle('Romantic vibe [romantic_vibe]').setRequired(true);
+  vibe.setChoices([
+    'Cozy nights in (cozy_nights_in)',
+    'Travel adventure (travel_adventure)',
+    'Beach sunsets (beach_sunsets)',
+    'City dates (city_dates)',
+    'Cottagecore (cottagecore)',
+    'Night-owl chats (night_owl_chats)'
+  ].map(o => vibe.createChoice(o)));
+
+  const contentVibe = form.addCheckboxItem()
+    .setTitle('Content vibe (tone & style) [content_vibe]')
+    .setHelpText('Pick a few that match your persona');
+  contentVibe.setChoices([
+    'Soft & affectionate',
+    'Playful & teasing',
+    'Confident & bold',
+    'Cute & wholesome',
+    'Mysterious & alluring',
+    'Girlfriend experience',
+    'Fitness & wellness',
+    'Cosplay & roleplay light'
+  ].map(o => contentVibe.createChoice(o)));
+  contentVibe.showOtherOption(true);
+
+  form.addTextItem()
+    .setTitle('Brand-safe boundaries (what to avoid) [hard_boundaries]')
+    .setHelpText('Comma-separated. Example: No medical/financial advice, No explicit sexual content, No off-platform contacts');
+
+  const ctas = form.addCheckboxItem()
+    .setTitle('Preferred CTAs [preferred_ctas]')
+    .setHelpText('How should the persona nudge fans?');
+  ctas.setChoices([
+    'Subscribe now',
+    'Check today’s post',
+    'Unlock the full set',
+    'Join VIP list',
+    'Vote on next theme',
+    'Tip to boost',
+    'DM for custom'
+  ].map(o => ctas.createChoice(o)));
+
+  const peak = form.addCheckboxItem()
+    .setTitle('Peak interaction times [peak_times]')
+    .setHelpText('Used to time engagement nudges');
+  peak.setChoices([
+    'Morning',
+    'Lunch break',
+    'Evening',
+    'Late night'
+  ].map(o => peak.createChoice(o)));
+
+  // ===== Flavor & memory =====
+  form.addPageBreakItem().setTitle('Personal touch');
+  form.addTextItem()
+    .setTitle('Catchphrases (1–3; separate with semicolons or new lines) [catchphrases]')
+    .setHelpText('Example: “If it makes you smile, I’m in.”');
+
+  const hobbies = form.addCheckboxItem().setTitle('Hobbies & shared activities [hobbies]');
+  hobbies.setChoices([
+    'Travel planning','Coffee walks','Cooking together','Gym buddy',
+    'Gaming','Books & deep talks','Movies & series','Hiking / outdoors','Live music'
+  ].map(o => hobbies.createChoice(o)));
+  hobbies.showOtherOption(true);
+
+  form.addParagraphTextItem()
+    .setTitle('Memory seeds (up to 3, one per line) [memory_seeds]')
+    .setHelpText('Tiny quirks to reference over time. Example: loves dorayaki; afraid of thunder; collects sunrise pics.');
+
+  // Triggers (optional)
+  const ROUTINES = [
+    '— none —',
+    'Comfort + small plan (comfort_then_tiny_win_plan)',
+    'Cute confession (cute_confession)',
+    'Affirmation combo (affirmation_combo)',
+    'Playful tease + support (playful_tease_then_support)',
+    'Boundary check-in (boundary_checkin)'
+  ];
+  const HELP =
+    'What should the AI do when the trigger phrase is said?\n' +
+    '• Comfort + small plan = comfort, validate, suggest one small step\n' +
+    '• Cute confession = playful/adorable reveal\n' +
+    '• Affirmation combo = series of uplifting lines\n' +
+    '• Playful tease + support = light teasing then genuine support\n' +
+    '• Boundary check-in = quick comfort & limits check';
+
+  for (var i=1;i<=3;i++){
+    form.addTextItem().setTitle('Trigger phrase ' + i + ' [triggers.'+i+'.phrase]')
+      .setHelpText('Example: "bad day", "tell me a secret", "can’t sleep"').setRequired(false);
+    const li = form.addListItem().setTitle('Routine for trigger phrase ' + i + ' [triggers.'+i+'.routine]')
+      .setHelpText(HELP).setRequired(false);
+    li.setChoices(ROUTINES.map(r => li.createChoice(r)));
+  }
+
+  // Responses sheet
+  const ss = SpreadsheetApp.create('OnlyFans Persona Responses - ' + new Date().toISOString());
+  form.setDestination(FormApp.DestinationType.SPREADSHEET, ss.getId());
+
+  Logger.log('EDIT: ' + form.getEditUrl());
+  Logger.log('LIVE: ' + form.getPublishedUrl());
+  Logger.log('SHEET: ' + ss.getUrl());
+}
+function myFunction(){ createOnlyFansPersonaForm(); }
+
+
+
+
+
+
+12:58:42 PM	Info	EDIT: https://docs.google.com/forms/d/1ZGz-GZ6q0Q7O1wDLdfFdplvYFIECqhvGfQVdHkBEVrg/edit
+12:58:42 PM	Info	LIVE: https://docs.google.com/forms/d/e/1FAIpQLScK0_24m0OUhkSzpFepBTfzXlypWcutoLhlXSZGv6FQN0PBww/viewform
+12:58:42 PM	Info	SHEET: https://docs.google.com/spreadsheets/d/17_AD_Me3_hEpGZpXIR69L1ltgymUs1P0k5ryt_Ygquw/edit

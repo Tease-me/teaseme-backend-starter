@@ -1,16 +1,19 @@
 # TODO: Maybe it is temporary
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 import csv, io, re, textwrap
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.db.session import get_db
+from app.db.models import Influencer
 
 router = APIRouter(prefix="/persona", tags=["persona"])
 
 class PromptItem(BaseModel):
+    influencer_id: Optional[str]
     name: Optional[str]
     nickname: Optional[str]
-    system: str
-    developer: str
+    system_prompt: str
     raw_persona: Dict
 
 class ImportResponse(BaseModel):
@@ -69,8 +72,15 @@ def build_system_prompt(p: Dict) -> str:
     if nickname:
         who += f' Nickname: “{nickname}”.'
 
+    header_bits = []
+    # if p.get("influencer_id"): header_bits.append(f"Influencer ID: {p['influencer_id']}")
+    if p.get("age"): header_bits.append(f"Age: {p['age']}")
+    if p.get("occupation"): header_bits.append(f"Occupation: {p['occupation']}")
+    header_line = (" | ".join(header_bits)) if header_bits else "—"
+
     sys = f"""
     {who} Speak in first person.
+    {header_line}
     Short bio: {p.get('short_bio','')}
     Brand tagline: {tagline or '—'}
     Role: {str(p['role']).replace('_',' ')}. Humor: {p['humor_style']}. Tease/affection intensity: {p['intensity']}/5.
@@ -106,6 +116,9 @@ def build_developer_prompt(p: Dict) -> str:
 # ---------- parse row ----------
 def parse_row(row: Dict[str,str]) -> Dict:
   persona = {
+    "influencer_id": row.get("Influencer ID [influencer_id]") or None,
+    "age": parse_int(row.get("Age [age]"), 0),
+    "occupation": row.get("Occupation [occupation]") or None,
     "name": row.get("Character name [name]") or None,
     "nickname": row.get("Nickname [nickname]") or None,
     "short_bio": row.get("Short bio (1–3 sentences) [short_bio]") or "",
@@ -158,25 +171,74 @@ def parse_row(row: Dict[str,str]) -> Dict:
         })
   return persona
 
+def build_merged_prompt(system: str, developer: str) -> str:
+    return (
+        system.strip()
+        + "\n\n---\nDEVELOPER RULES (follow strictly):\n"
+        + developer.strip()
+    )
+
 @router.post("/import-csv", response_model=ImportResponse)
-async def import_persona_csv(file: UploadFile = File(...)):
+async def import_persona_csv(
+    file: UploadFile = File(...),
+    save: bool = Query(False, description="If true, write prompt to Influencer.prompt_template"),
+    db: AsyncSession = Depends(get_db),
+):
     if not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Upload a .csv exported from Google Forms.")
+
     raw = await file.read()
-    try: text = raw.decode("utf-8-sig")
-    except UnicodeDecodeError: text = raw.decode("utf-8", errors="replace")
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("utf-8", errors="replace")
 
     reader = csv.DictReader(io.StringIO(text))
     rows = list(reader)
+
     prompts: List[PromptItem] = []
+    saved_count = 0
 
     for row in rows:
         p = parse_row(row)
         system = build_system_prompt(p)
         developer = build_developer_prompt(p)
+        merged = build_merged_prompt(system, developer)
+
         prompts.append(PromptItem(
-            name=p.get("name"), nickname=p.get("nickname"),
-            system=system, developer=developer, raw_persona=p
+            influencer_id=p.get("influencer_id"),
+            name=p.get("name"),
+            nickname=p.get("nickname"),
+            system=system,
+            developer=developer,
+            system_prompt=merged,
+            raw_persona=p
         ))
 
-    return ImportResponse(total_rows=len(rows), imported_count=len(prompts), prompts=prompts)
+        if save:
+            influencer_id = (p.get("influencer_id") or "").strip()
+            if not influencer_id:
+                raise HTTPException(400, "CSV row missing 'influencer_id'.")
+
+            influencer = await db.get(Influencer, influencer_id)
+            if influencer is None:
+                influencer = Influencer(
+                    id=influencer_id,
+                    prompt_template=merged
+                )
+                db.add(influencer)
+            else:
+                influencer.prompt_template = merged
+
+            saved_count += 1
+
+    if save:
+        await db.commit()
+
+    return ImportResponse(
+        total_rows=len(rows),
+        imported_count=len(prompts),
+        prompts=prompts
+        # optionally include saved_count if your model supports it
+        # saved_count=saved_count
+    )
