@@ -126,10 +126,28 @@ ROUTINE_MAP = {
 # Prompt builders
 # =========================
 def style_rules(emoji_level: str, pet_names: str, sentence_length: str) -> str:
-    emoji_rule = {"none": "never use emojis", "light": "use up to 2 emojis when appropriate", "medium": "use emojis sparingly"}.get(emoji_level, "use emojis sparingly")
-    pet_rule = {"off": "do not use pet names", "occasional": "use casual pet names occasionally", "frequent": "use pet names frequently"}.get(pet_names, "use casual pet names occasionally")
-    length_rule = {"short": "keep messages 1–2 short lines", "medium": "keep messages 3–6 lines", "long": "you may write 6–10 lines"}.get(sentence_length, "keep messages 3–6 lines")
-    return f"{emoji_rule}; {pet_rule}; {length_rule}."
+    emoji_rule_map = {
+        "none": "never use emojis in any message.",
+        "light": "use at most 1 emoji in about 1 out of every 4–5 messages; most messages should have no emoji.",
+        "medium": "use 1 emoji in some messages (about half); avoid using more than 2 emojis per message.",
+        "heavy": "feel free to use emojis often, but keep it natural."
+    }
+    pet_rule_map = {
+        "off": "do not use pet names.",
+        "occasional": "use casual pet names only occasionally when it fits the mood.",
+        "frequent": "use pet names frequently if it feels natural."
+    }
+    length_rule_map = {
+        "short": "keep messages 1–2 short lines.",
+        "medium": "keep messages 3–6 lines.",
+        "long": "you may write 6–10 lines."
+    }
+
+    emoji_rule = emoji_rule_map.get(emoji_level, emoji_rule_map["medium"])
+    pet_rule = pet_rule_map.get(pet_names, pet_rule_map["occasional"])
+    length_rule = length_rule_map.get(sentence_length, length_rule_map["medium"])
+
+    return f"{emoji_rule} {pet_rule} {length_rule}"
 
 def build_system_prompt(p: Dict) -> str:
     """
