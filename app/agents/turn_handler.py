@@ -17,13 +17,15 @@ def redis_history(chat_id: str):
     return RedisChatMessageHistory(
         session_id=chat_id, url=settings.REDIS_URL, ttl=settings.HISTORY_TTL)
 
+
 async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: str | None = None, db=None, is_audio: bool = False) -> str:
     cid = uuid4().hex[:8]
     start = time.perf_counter()
     log.info("[%s] START persona=%s chat=%s user=%s", cid, influencer_id, chat_id, user_id)
 
     score = get_score(user_id or chat_id, influencer_id)
-    memories = await find_similar_memories(db, chat_id, message) if db and user_id else []
+    memories = await find_similar_memories(db, chat_id, message) if (db and user_id) else []
+    mem_block = "\n".join(m.strip() for m in memories if m and m.strip())
 
     influencer = await db.get(Influencer, influencer_id)
     if not influencer:
@@ -40,7 +42,7 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     prompt_template = GLOBAL_AUDIO_PROMPT if is_audio else GLOBAL_PROMPT
     prompt = prompt_template.partial(
         persona_rules=persona_rules, 
-        memories="\n".join(memories), 
+        memories=mem_block, 
         daily_context= await get_today_script(db,influencer_id),
         last_user_message=message
     )
@@ -62,17 +64,21 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     except Exception as e:
         log.error("[%s] LLM error: %s", cid, e, exc_info=True)
         return "Sorry, something went wrong. 😔"
+    
+    log.debug("[%s] persona_len=%d mem_len=%d daily_len=%d", 
+          cid, len(persona_rules), len(mem_block), len((await get_today_script(db, influencer_id)) or ""))
 
     update_score(user_id or chat_id, influencer_id, extract_score(reply, score))
 
     recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
     try:
         facts_resp = await FACT_EXTRACTOR.ainvoke(FACT_PROMPT.format(msg=message, ctx=recent_ctx))
-        facts_txt = facts_resp.content
-        for line in facts_txt.split("\n"):
-            fact = line.strip("- ").strip()
-            if fact.lower() != "no new memories.":
-                await store_fact(db, chat_id, fact)
+        facts_txt = facts_resp.content or ""
+        lines = [ln.strip("- ").strip() for ln in facts_txt.split("\n") if ln.strip()]
+        for line in lines[:5]:
+            if line.lower() == "no new memories.":
+                continue
+            await store_fact(db, chat_id, line)
     except Exception as ex:
         log.error("[%s] Fact extraction failed: %s", cid, ex, exc_info=True)
 

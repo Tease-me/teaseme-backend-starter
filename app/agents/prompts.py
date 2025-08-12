@@ -15,19 +15,30 @@ MODEL = ChatOpenAI(
 
 FACT_EXTRACTOR = ChatOpenAI(
     openai_api_key=settings.OPENAI_API_KEY,
-    model="gpt-3.5-turbo",
-    temperature=0.2,
+    model="gpt-4o-mini",
+    temperature=0.5,
     max_tokens=512,
 )
 
 FACT_PROMPT = ChatPromptTemplate.from_template("""
-From the user's message and context, extract only new and explicit facts or personal info the AI should remember.
-For each, use one of these categories: preferência, relacionamento, pedido, fato, nota_contextual.
-If nothing new, output 'No new memories.'
+You extract user memories. Output only if NEW and EXPLICIT in the user’s message (not inferred).
+Allowed categories (English, lowercase): preference, relationship, request, fact, contextual_note.
+- “preference”: stable likes/dislikes & style (“prefers playful teasing”)
+- “relationship”: how user relates to AI (“calls you girlfriend”, “misses you”)
+- “request”: asks for future action (“remind me…”, “introduce me to…”)
+- “fact”: stable personal info (name, city, time zone)
+- “contextual_note”: short-lived state or mood (“tired”, “busy”, “traveling”)
 
-Format: [categoria] texto
+Rules:
+- Max 5 bullets.
+- No duplicates of memories you already have in Context.
+- Be literal; no guessing or reading between the lines.
+- If nothing new: exactly `No new memories.`
+
+Format EXACTLY:
+[categoria] short sentence
 
 User message: {msg}
-Context: {ctx}
+Context (past memories): {ctx}
 Bullet points:
 """)
