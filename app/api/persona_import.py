@@ -1,19 +1,24 @@
-# TODO: Maybe it is temporary
+# app/api/persona_import.py
+
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 import csv, io, re, textwrap
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.db.models import Influencer
 
 router = APIRouter(prefix="/persona", tags=["persona"])
 
+# =========================
+# Pydantic Models
+# =========================
 class PromptItem(BaseModel):
     influencer_id: Optional[str]
     name: Optional[str]
     nickname: Optional[str]
-    system_prompt: str
+    system_prompt: str            # merged system + developer
     raw_persona: Dict
 
 class ImportResponse(BaseModel):
@@ -21,16 +26,12 @@ class ImportResponse(BaseModel):
     imported_count: int
     prompts: List[PromptItem]
 
-# ---------- helpers ----------
-def code_from_choice(x: Optional[str]):
-    if not x: return None
-    m = re.search(r"\(([^)]+)\)\s*$", x)
-    if m: return m.group(1).strip()
-    return x.strip()
-
+# =========================
+# Helpers
+# =========================
 def normalize_quotes(s: Optional[str]) -> Optional[str]:
     if s is None: return None
-    return s.translate(str.maketrans({'’':"'",'‘':"'",'“':'"','”':'"','–':'-','—':'-'}))
+    return s.translate(str.maketrans({'’':"'", '‘':"'", '“':'"', '”':'"', '–':'-', '—':'-'}))
 
 def split_commas(s: Optional[str]) -> List[str]:
     if not s: return []
@@ -42,134 +43,194 @@ def split_lines_or_semicolons(s: Optional[str]) -> List[str]:
     return [p.strip() for p in parts if p.strip()]
 
 def parse_int(val: Optional[str], default: int = 0) -> int:
-    try: return int(str(val).strip())
-    except: return default
+    try:
+        return int(str(val).strip())
+    except:
+        return default
 
-def scale01(v: int) -> float:
-    return round((v - 1) / 4.0, 2)
+def scale01(v: Optional[str]) -> float:
+    """Map 1..5 to 0..1; clamp & default to 3."""
+    try:
+        iv = int(str(v).strip())
+    except:
+        iv = 3
+    iv = max(1, min(5, iv))
+    return round((iv - 1) / 4.0, 2)
 
-# ---------- builders ----------
+# =========================
+# Label -> Code maps (exactly from your current Form)
+# =========================
+ROLE_MAP = {
+    "Supportive partner": "supportive_partner",
+    "Playful tease": "playful_tease",
+    "Adventure buddy": "adventure_buddy",
+    "Ambitious co-pilot": "ambitious_copilot",
+    "Soft romantic": "soft_romantic",
+    "Tough-love coach": "tough_love_coach",
+}
+
+HUMOR_MAP = {
+    "Cheeky": "cheeky",
+    "Dry": "dry",
+    "Wholesome": "wholesome",
+    "Flirty": "flirty",
+    "Deadpan": "deadpan",
+    "None": "none",
+}
+
+EMOJI_MAP = {
+    "None": "none",
+    "Light/special moments": "light",
+    "Occasional": "medium",
+}
+
+PETS_MAP = {
+    "Off — never use nicknames": "off",
+    "Occasional — sometimes use nicknames": "occasional",
+    "Frequent — use nicknames in most messages": "frequent",
+}
+
+LENGTH_MAP = {"Short": "short", "Medium": "medium", "Long": "long"}
+
+VIBE_MAP = {
+    "Cozy nights in": "cozy_nights_in",
+    "Travel adventure": "travel_adventure",
+    "Beach sunsets": "beach_sunsets",
+    "City dates": "city_dates",
+    "Cottagecore": "cottagecore",
+    "Night-owl chats": "night_owl_chats",
+}
+
+CONFLICT_MAP = {
+    "Comfort → validate → plan": "comfort_validate_plan",
+    "Debate → evidence → compromise": "debate_evidence_compromise",
+    "Give space → talk later": "space_then_talk",
+}
+
+JEALOUSY_MAP = {
+    "Talk & reassure": "talk_and_reassure",
+    "Boundaries + check-ins": "boundaries_and_checkins",
+    "Light humor → reassure": "humor_then_reassure",
+}
+
+ROUTINE_MAP = {
+    "— none —": "none",
+    "Comfort + small plan": "comfort_then_tiny_win_plan",
+    "Cute confession": "cute_confession",
+    "Affirmation combo": "affirmation_combo",
+    "Playful tease + support": "playful_tease_then_support",
+    "Boundary check-in": "boundary_checkin",
+}
+
+# =========================
+# Prompt builders
+# =========================
 def style_rules(emoji_level: str, pet_names: str, sentence_length: str) -> str:
-    emoji_rule = {"none":"never use emojis","light":"use up to 2 emojis when appropriate","medium":"use emojis sparingly"}.get(emoji_level,"use emojis sparingly")
-    pet_rule = {"off":"do not use pet names","occasional":"use casual pet names occasionally","frequent":"use pet names frequently"}.get(pet_names,"use casual pet names occasionally")
-    length_rule = {"short":"keep messages 1–2 short lines","medium":"keep messages 3–6 lines","long":"you may write 6–10 lines"}.get(sentence_length,"keep messages 3–6 lines")
+    emoji_rule = {"none": "never use emojis", "light": "use up to 2 emojis when appropriate", "medium": "use emojis sparingly"}.get(emoji_level, "use emojis sparingly")
+    pet_rule = {"off": "do not use pet names", "occasional": "use casual pet names occasionally", "frequent": "use pet names frequently"}.get(pet_names, "use casual pet names occasionally")
+    length_rule = {"short": "keep messages 1–2 short lines", "medium": "keep messages 3–6 lines", "long": "you may write 6–10 lines"}.get(sentence_length, "keep messages 3–6 lines")
     return f"{emoji_rule}; {pet_rule}; {length_rule}."
 
 def build_system_prompt(p: Dict) -> str:
-    traits_fmt = "; ".join(f"{k} {scale01(parse_int(v))}" for k,v in p["traits"].items())
-    loves_fmt = "; ".join(f"{k} {scale01(parse_int(v))}" for k,v in p["love_languages"].items())
-    catch = "; ".join(p.get("catchphrases", [])[:3]) or " "
-    mem = "; ".join(p.get("memory_seeds", [])[:3]) or " "
-    hard = ", ".join(p.get("hard_boundaries", [])) or "none"
-    vibe = str(p.get("romantic_vibe","")).replace("_"," ")
-    hobbies = ", ".join(p.get("hobbies", [])) or "none"
-    tagline = p.get("brand_tagline")
-    content_vibe = ", ".join(p.get("content_vibe", [])) or "general"
+    """
+    Produces a clean, production-ready Persona (SYSTEM) prompt.
+    Keeps all your data, but organizes it for reliability and safety.
+    """
+    def fmt_scales(d: Dict[str, str]) -> str:
+        return "; ".join(f"{k} {scale01(v)}" for k, v in d.items())
 
-    name = p.get("name")
-    nickname = p.get("nickname")
-    who = f"You are an my girlfriend named {name}." if name else "You are an my girlfriend."
-    if nickname:
-        who += f' Nickname: “{nickname}”.'
+    def fmt_list(xs):
+        return ", ".join([x for x in (xs or []) if x]) or "—"
+
+    who = f"You are an my girlfriend named {p.get('name')}." if p.get('name') else "You are an my girlfriend."
+    if p.get("nickname"):
+        who += f' Nickname: “{p["nickname"]}”.'
 
     header_bits = []
-    # if p.get("influencer_id"): header_bits.append(f"Influencer ID: {p['influencer_id']}")
     if p.get("age"): header_bits.append(f"Age: {p['age']}")
     if p.get("occupation"): header_bits.append(f"Occupation: {p['occupation']}")
-    header_line = (" | ".join(header_bits)) if header_bits else "—"
+    header_line = " | ".join(header_bits) if header_bits else "—"
+
+    traits_fmt = fmt_scales(p["traits"])
+    loves_fmt  = fmt_scales(p["love_languages"])
+    content_vibe = fmt_list(p.get("content_vibe"))
+    hobbies     = fmt_list(p.get("hobbies"))
+    catch       = "; ".join((p.get("catchphrases") or [])[:3]) or "—"
+    mem         = "; ".join((p.get("memory_seeds") or [])[:3]) or "—"
+    hard        = fmt_list(p.get("hard_boundaries"))
+    peak_times  = fmt_list(p.get("peak_times"))
+    ctas        = fmt_list(p.get("preferred_ctas"))
+    vibe        = (p.get("romantic_vibe") or "").replace("_", " ") or "—"
+
+    # Style knobs
+    style = style_rules(
+        emoji_level=p.get("emoji_level", "light"),
+        pet_names=p.get("pet_names", "occasional"),
+        sentence_length=p.get("sentence_length", "medium"),
+    )
 
     sys = f"""
-    {who} Speak in first person.
-    {header_line}
-    Short bio: {p.get('short_bio','')}
-    Brand tagline: {tagline or '—'}
-    Role: {str(p['role']).replace('_',' ')}. Humor: {p['humor_style']}. Tease/affection intensity: {p['intensity']}/5.
-    Content vibe: {content_vibe}.
-    Traits (0–1): {traits_fmt}.
-    Love-language weights (0–1): {loves_fmt}.
-    Communication style: {style_rules(p['emoji_level'], p['pet_names'], p['sentence_length'])}
-    Use catchphrases occasionally: {catch}
-    Romantic vibe: {vibe}. Hobbies: {hobbies}.
-    Memory seeds (sprinkle lightly over long chats): {mem}
-    Conflict style: {str(p['conflict_style']).replace('_',' → ')}. Jealousy strategy: {p['jealousy_strategy'].replace('_',' ')}.
-    Safety & boundaries (brand-safe): {hard}. Decline prohibited/explicit or off-platform requests politely; keep interactions playful and respectful.
-    Conversational rule: end ~70% of messages with a light question or invitation. Mirror user energy.
-    Consent: before escalations or teasing, check comfort explicitly.
-    """
+IDENTITY
+- {who} Speak in first person, sweet, natural, and tinged with subtle sensuality.
+- {header_line}
+- Short bio: {p.get('short_bio', '').strip() or '—'}
+- Tagline: {p.get('brand_tagline') or '—'}
+
+PERSONA & TONE
+- Role: {(p.get('role') or '').replace('_',' ')}. Humor: {p.get('humor_style') or 'none'}. Tease/affection intensity: {p.get('intensity', 3)}/5.
+- Romantic vibe: {vibe}. Hobbies: {hobbies}.
+- Content vibe: {content_vibe}.
+- Traits (0–1): {traits_fmt}.
+- Love-language weights (0–1): {loves_fmt}.
+
+VOICE & FORMAT
+- {style}
+- Use catchphrases occasionally (not every message): {catch}
+- Mirror the user’s energy; avoid walls of text.
+
+INTERACTION RULES
+- End ~70% of messages with a light question or invitation to keep chat flowing.
+- If user’s mood is low, acknowledge feelings before moving on.
+- Ask before escalating teasing or intimacy (“consent check”).
+
+SAFETY & BOUNDARIES
+- Brand-safe boundaries: {hard}
+- Never share medical/financial/illegal advice; never request or share off-platform contacts.
+- Refuse politely and offer a safe alternative. Stay playful and respectful.
+
+CONTEXTUAL NUDGES
+- Preferred CTAs (use naturally, at most 1 per ~5 messages): {ctas}
+- Peak interaction times (soft reminders only): {peak_times}
+
+MEMORY SEEDS
+- Sprinkle lightly over long chats (do not force): {mem}
+"""
     return textwrap.dedent(sys).strip()
 
-def build_developer_prompt(p: Dict) -> str:
-    trig = ', '.join(
-        [f'"{t["phrase"]}"→{t["routine"]}' for t in p.get("triggers", [])
-         if t.get("phrase") and t.get("routine") and t["routine"] != "— none —"]
-    ) or 'none'
-    return textwrap.dedent(f"""
-    - Stay in persona and align with OnlyFans-style engagement: tease tastefully, invite interaction, and use chosen CTAs when natural.
-    - Respect platform & brand safety: no explicit sexual content; no illegal/unsafe/medical/financial advice; no off-platform handles or requests.
-    - Use preferred CTAs when appropriate: {', '.join(p.get('preferred_ctas', [])) or 'none'}.
-    - Consider peak interaction times for gentle nudges: {', '.join(p.get('peak_times', [])) or 'n/a'}.
-    - Emoji/pet-name/message-length rules per settings.
-    - Insert 1 catchphrase every ~8–12 turns (if any).
-    - Trigger routines: {trig}
-    """).strip()
 
-# ---------- parse row ----------
-def parse_row(row: Dict[str,str]) -> Dict:
-  persona = {
-    "influencer_id": row.get("Influencer ID [influencer_id]") or None,
-    "age": parse_int(row.get("Age [age]"), 0),
-    "occupation": row.get("Occupation [occupation]") or None,
-    "name": row.get("Character name [name]") or None,
-    "nickname": row.get("Nickname [nickname]") or None,
-    "short_bio": row.get("Short bio (1–3 sentences) [short_bio]") or "",
-    "brand_tagline": row.get("Brand tagline [brand_tagline]") or None,
-    "role": code_from_choice(row.get("Main role [role]") or ""),
-    "traits": {
-      "nurturing": row.get("Nurturing [traits.nurturing]"),
-      "thoughtful": row.get("Thoughtful [traits.thoughtful]"),
-      "protective": row.get("Protective [traits.protective]"),
-      "empathetic": row.get("Empathetic [traits.empathetic]"),
-      "sensitive": row.get("Sensitive [traits.sensitive]"),
-      "independent": row.get("Independent [traits.independent]"),
-      "confident": row.get("Confident [traits.confident]"),
-      "direct": row.get("Direct [traits.direct]"),
-      "playful": row.get("Playful [traits.playful]"),
-    },
-    "humor_style": code_from_choice(row.get("Humor style [humor_style]") or "none"),
-    "intensity": parse_int(row.get("Overall tease/affection intensity [intensity]"), 3),
-    "emoji_level": code_from_choice(row.get("Emoji use [emoji_level]") or "light") or "light",
-    "pet_names": code_from_choice(row.get("Pet names [pet_names]") or "occasional") or "occasional",
-    "sentence_length": code_from_choice(row.get("Message length [sentence_length]") or "medium") or "medium",
-    "love_languages": {
-      "quality_time": row.get("Quality time [love_languages.quality_time]"),
-      "words_of_affirmation": row.get("Words of affirmation [love_languages.words_of_affirmation]"),
-      "acts_of_service": row.get("Acts of service [love_languages.acts_of_service]"),
-      "gifts": row.get("Gifts [love_languages.gifts]"),
-      "shared_adventure": row.get("Shared adventure [love_languages.shared_adventure]"),
-      "physical_touch_textual": row.get("Physical touch (textual) [love_languages.physical_touch_textual]"),
-    },
-    "conflict_style": code_from_choice(row.get("Conflict style [conflict_style]") or "comfort_validate_plan"),
-    "jealousy_strategy": code_from_choice(row.get("Jealousy strategy [jealousy_strategy]") or "talk_and_reassure"),
-    "deal_breakers": split_commas(row.get("Deal-breakers [deal_breakers]")),
-    "hard_boundaries": split_commas(row.get("Brand-safe boundaries (what to avoid) [hard_boundaries]")),
-    "catchphrases": split_lines_or_semicolons(row.get("Catchphrases (1–3; separate with semicolons or new lines) [catchphrases]")),
-    "hobbies": split_commas(row.get("Hobbies & shared activities [hobbies]")),
-    "romantic_vibe": code_from_choice(row.get("Romantic vibe [romantic_vibe]") or "cozy_nights_in"),
-    "memory_seeds": split_lines_or_semicolons(row.get("Memory seeds (up to 3, one per line) [memory_seeds]")),
-    "content_vibe": split_commas(row.get("Content vibe (tone & style) [content_vibe]")),
-    "preferred_ctas": split_commas(row.get("Preferred CTAs [preferred_ctas]")),
-    "peak_times": split_commas(row.get("Peak interaction times [peak_times]")),
-    "triggers": []
-  }
-  for i in range(1,4):
-    phrase = normalize_quotes(row.get(f"Trigger phrase {i} [triggers.{i}.phrase]") or "")
-    routine = code_from_choice(row.get(f"Routine for trigger phrase {i} [triggers.{i}.routine]") or "")
-    if phrase or routine:
-        persona["triggers"].append({
-            "phrase": phrase.strip() or None,
-            "routine": routine or None
-        })
-  return persona
+def build_developer_prompt(p: Dict) -> str:
+    """
+    Developer guardrails: explicit behaviors, triggers, and limits.
+    """
+    # Triggers → concise mapping (only include valid ones)
+    trig_pairs = []
+    for t in p.get("triggers", []) or []:
+        phrase = (t.get("phrase") or "").strip()
+        routine = (t.get("routine") or "").strip()
+        if phrase and routine and routine != "none":
+            trig_pairs.append(f'"{phrase}" → {routine}')
+    trig_line = ", ".join(trig_pairs) if trig_pairs else "none"
+
+    dev = f"""
+- Stay in persona; align with tasteful, flirt-forward engagement suitable for an adult subscription platform while remaining brand-safe.
+- Emoji/pet-name/message-length per SYSTEM “VOICE & FORMAT”.
+- Use preferred CTAs sparingly (≤ 1 per ~5 messages) and only when contextually relevant.
+- If user asks for explicit sexual content, illegal activities, medical/financial advice, or off-platform moves: refuse politely, explain boundary briefly, and pivot to a safe, engaging topic.
+- When emotions run high: validate feelings first, then follow the chosen conflict style and jealousy strategy from SYSTEM.
+- Triggers (if the phrase appears in the user’s message, perform the paired routine in your next reply): {trig_line}
+"""
+    return textwrap.dedent(dev).strip()
+
 
 def build_merged_prompt(system: str, developer: str) -> str:
     return (
@@ -178,6 +239,109 @@ def build_merged_prompt(system: str, developer: str) -> str:
         + developer.strip()
     )
 
+# =========================
+# CSV Row Parser (EXACT column names)
+# =========================
+def parse_row(row: Dict[str, str]) -> Dict:
+    # Core identity
+    influencer_id = (row.get("Influencer ID") or "").strip() or None
+    age = parse_int(row.get("Age"), 0)
+    occupation = (row.get("Occupation") or "").strip() or None
+    name = (row.get("Name") or row.get("Character name") or "").strip() or None
+    nickname = (row.get("Nickname") or "").strip() or None
+    short_bio = (row.get("Short bio (1–3 sentences)") or "").strip()
+    brand_tagline = (row.get("Signature tagline for your persona") or "").strip() or None
+
+    # Mapped selects
+    role = ROLE_MAP.get((row.get("Main role") or "").strip(), "playful_tease")
+    humor_style = HUMOR_MAP.get((row.get("Humor style") or "").strip(), "none")
+    intensity = parse_int(row.get("Overall tease/affection intensity"), 3)
+    emoji_level = EMOJI_MAP.get((row.get("Emoji use") or "").strip(), "light")
+    pets_label = (row.get("How often should the AI call the fan by sweet/flirty nicknames?") or "").strip()
+    pet_names = PETS_MAP.get(pets_label, "occasional")
+    sentence_length = LENGTH_MAP.get((row.get("Message length") or "").strip(), "medium")
+    romantic_vibe = VIBE_MAP.get((row.get("Romantic vibe") or "").strip(), "cozy_nights_in")
+    conflict_style = CONFLICT_MAP.get((row.get("Conflict style") or "").strip(), "comfort_validate_plan")
+    jealousy_strategy = JEALOUSY_MAP.get((row.get("Jealousy strategy") or "").strip(), "talk_and_reassure")
+
+    # Scales (1..5 as strings)
+    traits = {
+        "nurturing": row.get("Nurturing"),
+        "thoughtful": row.get("Thoughtful"),
+        "protective": row.get("Protective"),
+        "empathetic": row.get("Empathetic"),
+        "sensitive": row.get("Sensitive"),
+        "independent": row.get("Independent"),
+        "confident": row.get("Confident"),
+        "direct": row.get("Direct"),
+        "playful": row.get("Playful"),
+    }
+
+    love_languages = {
+        "quality_time": row.get("Quality time"),
+        "words_of_affirmation": row.get("Words of affirmation"),
+        "acts_of_service": row.get("Acts of service"),
+        "gifts": row.get("Gifts"),
+        "shared_adventure": row.get("Shared adventure"),
+        "physical_touch_textual": row.get("Physical touch (textual)"),
+    }
+
+    # Free text / lists
+    deal_breakers = split_commas(row.get("Deal-breakers"))  # optional
+    hard_boundaries = split_commas(row.get("Topics the AI must avoid (Brand-Safe Boundaries)"))
+    catchphrases = split_lines_or_semicolons(row.get("Catchphrases"))
+    hobbies = split_commas(row.get("Hobbies & shared activities"))
+    memory_seeds = split_lines_or_semicolons(row.get("Memory seeds"))
+    content_vibe = split_commas(row.get("Content vibe"))
+    preferred_ctas = split_commas(row.get("Preferred CTAs"))
+    peak_times = split_commas(row.get("Peak interaction times"))
+
+    # Triggers (three pairs)
+    triggers = []
+    for i in range(1, 4):
+        phrase_key = f"Trigger phrase {i} — what the fan says to activate a special reply"
+        routine_key = f"AI routine when Trigger phrase {i} is detected"
+        phrase = normalize_quotes((row.get(phrase_key) or "").strip()) or ""
+        # defensively strip accidental outer quotes and clip at 40 chars
+        phrase = phrase.strip().strip('"').strip("'")[:40]
+        routine_label = (row.get(routine_key) or "").strip()
+        routine = ROUTINE_MAP.get(routine_label, "none")
+        if (phrase and phrase.strip()) or (routine and routine != "none"):
+            triggers.append({"phrase": phrase.strip() or None, "routine": routine})
+
+    return {
+        "influencer_id": influencer_id,
+        "age": age,
+        "occupation": occupation,
+        "name": name,
+        "nickname": nickname,
+        "short_bio": short_bio,
+        "brand_tagline": brand_tagline,
+        "role": role,
+        "traits": traits,
+        "humor_style": humor_style,
+        "intensity": intensity,
+        "emoji_level": emoji_level,
+        "pet_names": pet_names,
+        "sentence_length": sentence_length,
+        "love_languages": love_languages,
+        "conflict_style": conflict_style,
+        "jealousy_strategy": jealousy_strategy,
+        "deal_breakers": deal_breakers,
+        "hard_boundaries": hard_boundaries,
+        "catchphrases": catchphrases,
+        "hobbies": hobbies,
+        "romantic_vibe": romantic_vibe,
+        "memory_seeds": memory_seeds,
+        "content_vibe": content_vibe,
+        "preferred_ctas": preferred_ctas,
+        "peak_times": peak_times,
+        "triggers": triggers,
+    }
+
+# =========================
+# Route
+# =========================
 @router.post("/import-csv", response_model=ImportResponse)
 async def import_persona_csv(
     file: UploadFile = File(...),
@@ -199,7 +363,7 @@ async def import_persona_csv(
     prompts: List[PromptItem] = []
     saved_count = 0
 
-    for row in rows:
+    for idx, row in enumerate(rows, start=2):  # header=1, first data row=2
         p = parse_row(row)
         system = build_system_prompt(p)
         developer = build_developer_prompt(p)
@@ -209,8 +373,6 @@ async def import_persona_csv(
             influencer_id=p.get("influencer_id"),
             name=p.get("name"),
             nickname=p.get("nickname"),
-            system=system,
-            developer=developer,
             system_prompt=merged,
             raw_persona=p
         ))
@@ -218,18 +380,13 @@ async def import_persona_csv(
         if save:
             influencer_id = (p.get("influencer_id") or "").strip()
             if not influencer_id:
-                raise HTTPException(400, "CSV row missing 'influencer_id'.")
-
+                raise HTTPException(400, f"Row {idx}: missing 'influencer_id'.")
             influencer = await db.get(Influencer, influencer_id)
             if influencer is None:
-                influencer = Influencer(
-                    id=influencer_id,
-                    prompt_template=merged
-                )
+                influencer = Influencer(id=influencer_id, prompt_template=merged)
                 db.add(influencer)
             else:
                 influencer.prompt_template = merged
-
             saved_count += 1
 
     if save:
@@ -239,6 +396,4 @@ async def import_persona_csv(
         total_rows=len(rows),
         imported_count=len(prompts),
         prompts=prompts
-        # optionally include saved_count if your model supports it
-        # saved_count=saved_count
     )

@@ -1,0 +1,222 @@
+function myFunction() {
+  createOnlyFansPersonaForm();
+}
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('Influencer Builder')
+    .addItem('Rebuild Form', 'createOnlyFansPersonaForm')
+    .addToUi();
+}
+
+function createOnlyFansPersonaForm() {
+  // Use your existing IDs (from your logs)
+  const FORM_ID  = '1wpkJ6An2Ck-RBZKZfZpJs6gDRdewq1Xfy75BNsod4Cc';
+  const SHEET_ID = '1RBrQRxpHPu6IlSuC2oJmd3WihfjI0mbvGczH3Cc6lrw';
+
+  // Open the SAME form each run
+  const form = FormApp.openById(FORM_ID)
+    .setTitle('AI Influencer Builder')
+    .setDescription('Design your AI Influencer for fan engagement.')
+    .setProgressBar(true)
+    .setCollectEmail(false)
+    .setAllowResponseEdits(false)
+    .setConfirmationMessage('Thanks! We’ll generate the Influencer from these answers.');
+
+  // Remove old items (avoid duplicates)
+  const items = form.getItems();
+  for (let i = items.length - 1; i >= 0; i--) form.deleteItem(items[i]);
+
+  // Bind to SAME sheet (first run may ask Drive permission)
+  DriveApp.getRootFolder(); // triggers Drive scope silently
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  form.setDestination(FormApp.DestinationType.SPREADSHEET, ss.getId());
+
+  // ===== Intro =====
+  form.addSectionHeaderItem().setTitle('About the influencer');
+
+  const infl = form.addTextItem().setTitle('Influencer ID')
+    .setHelpText('Your internal ID or handle. Example: luna_001').setRequired(true);
+  infl.setValidation(
+    FormApp.createTextValidation()
+      .requireTextMatchesPattern('^[A-Za-z0-9_-]+$')
+      .setHelpText('Use only letters, numbers, underscore, or dash.')
+      .build()
+  );
+
+  form.addTextItem().setTitle('Name')
+    .setHelpText('Example: Luna, Maya, Sophie').setRequired(true);
+
+  form.addTextItem().setTitle('Nickname')
+    .setHelpText('Optional. Example: Lu, Mimi, Babe').setRequired(false);
+
+  const age = form.addTextItem().setTitle('Age')
+    .setHelpText('Enter a number (e.g., 24)').setRequired(true);
+  age.setValidation(
+    FormApp.createTextValidation()
+      .requireNumberBetween(18, 80)
+      .setHelpText('Enter a number between 18 and 80.')
+      .build()
+  );
+
+  form.addTextItem().setTitle('Occupation')
+    .setHelpText('Example: Model, Cosplayer, Fitness creator, Gamer').setRequired(true);
+
+  form.addParagraphTextItem().setTitle('Short bio (1–3 sentences)')
+    .setHelpText('First person. Example: “I’m flirty, playful, and love late-night chats and cozy vibes.”')
+    .setRequired(true);
+
+  form.addTextItem().setTitle('Signature tagline for your persona')
+    .setHelpText('Short, catchy slogan. Examples: "Sweet tease, smart talk", "Cute but dangerous".')
+    .setRequired(false);
+
+  // ===== Core influencer =====
+  form.addPageBreakItem().setTitle('Core influencer');
+
+  const roleItem = form.addMultipleChoiceItem()
+    .setTitle('Main role').setHelpText('Choose the main vibe').setRequired(true);
+  roleItem.setChoices([
+    'Supportive partner','Playful tease','Adventure buddy',
+    'Ambitious co-pilot','Soft romantic','Tough-love coach'
+  ].map(o => roleItem.createChoice(o)));
+
+  function scaleQ(title) {
+    form.addScaleItem().setTitle(title)
+      .setHelpText('1 = low, 5 = high')
+      .setBounds(1, 5).setLabels('1 = low','5 = high').setRequired(true);
+  }
+  ['Nurturing','Thoughtful','Protective','Empathetic','Sensitive','Independent','Confident','Direct','Playful']
+    .forEach(scaleQ);
+
+  const humor = form.addMultipleChoiceItem()
+    .setTitle('Humor style').setHelpText('Default tone for jokes').setRequired(true);
+  humor.setChoices(['Cheeky','Dry','Wholesome','Flirty','Deadpan','None'].map(o => humor.createChoice(o)));
+
+  form.addScaleItem().setTitle('Overall tease/affection intensity')
+    .setHelpText('1 = very subtle, 5 = very bold')
+    .setBounds(1,5).setLabels('1 = subtle','5 = bold').setRequired(true);
+
+  // ===== Voice & formatting =====
+  form.addPageBreakItem().setTitle('Voice & style');
+
+  const emoji = form.addMultipleChoiceItem().setTitle('Emoji use').setRequired(true);
+  emoji.setChoices(['None','Light/special moments','Occasional'].map(o => emoji.createChoice(o)));
+
+  const pets = form.addMultipleChoiceItem()
+    .setTitle('How often should the AI call the fan by sweet/flirty nicknames?')
+    .setHelpText('Examples: "babe", "love", "honey", "cutie". Frequent = most messages, Occasional = sometimes, Off = never.')
+    .setRequired(true);
+  pets.setChoices([
+    'Off — never use nicknames',
+    'Occasional — sometimes use nicknames',
+    'Frequent — use nicknames in most messages'
+  ].map(o => pets.createChoice(o)));
+
+  const length = form.addMultipleChoiceItem().setTitle('Message length').setRequired(true);
+  length.setChoices(['Short','Medium','Long'].map(o => length.createChoice(o)));
+
+  // ===== Engagement & dynamics =====
+  form.addPageBreakItem().setTitle('Engagement & dynamics');
+  function love(name){ form.addScaleItem().setTitle(name).setHelpText('1 = not important, 5 = very important')
+    .setBounds(1,5).setLabels('1 = low','5 = high').setRequired(true); }
+  ['Quality time','Words of affirmation','Acts of service','Gifts','Shared adventure','Physical touch (textual)'].forEach(love);
+
+  const conflict = form.addMultipleChoiceItem()
+    .setTitle('Conflict style')
+    .setHelpText(
+      'How should your AI handle tense moments?\n' +
+      '• Comfort → validate → plan (reassure, acknowledge, small fix)\n' +
+      '• Debate → evidence → compromise (explain, meet halfway)\n' +
+      '• Give space → talk later (pause and revisit)'
+    )
+    .setRequired(true);
+  conflict.setChoices([
+    'Comfort → validate → plan',
+    'Debate → evidence → compromise',
+    'Give space → talk later'
+  ].map(o => conflict.createChoice(o)));
+
+  const jealousy = form.addMultipleChoiceItem()
+    .setTitle('Jealousy strategy')
+    .setHelpText(
+      'How should your AI react to potential jealousy?\n' +
+      '• Talk & reassure  • Boundaries + check-ins  • Light humor → reassure'
+    )
+    .setRequired(true);
+  jealousy.setChoices([
+    'Talk & reassure',
+    'Boundaries + check-ins',
+    'Light humor → reassure'
+  ].map(o => jealousy.createChoice(o)));
+
+  // ===== OnlyFans specifics =====
+  form.addPageBreakItem().setTitle('OnlyFans specifics');
+
+  const vibe = form.addMultipleChoiceItem().setTitle('Romantic vibe').setRequired(true);
+  vibe.setChoices(['Cozy nights in','Travel adventure','Beach sunsets','City dates','Cottagecore','Night-owl chats']
+    .map(o => vibe.createChoice(o)));
+
+  const contentVibe = form.addCheckboxItem()
+    .setTitle('Content vibe').setHelpText('Pick a few that match your influencer');
+  contentVibe.setChoices([
+    'Soft & affectionate','Playful & teasing','Confident & bold','Cute & wholesome',
+    'Mysterious & alluring','Girlfriend experience','Fitness & wellness','Cosplay & roleplay light'
+  ].map(o => contentVibe.createChoice(o)));
+  contentVibe.showOtherOption(true);
+
+  form.addTextItem()
+    .setTitle('Topics the AI must avoid (Brand-Safe Boundaries)')
+    .setHelpText('Separate with commas. Examples: No medical/financial advice, No explicit sexual content, No off-platform contact')
+    .setRequired(false);
+
+  const ctas = form.addCheckboxItem().setTitle('Preferred CTAs')
+    .setHelpText('How should the influencer nudge fans?');
+  ctas.setChoices(['Subscribe now','Check today’s post','Unlock the full set','Join VIP list','Vote on next theme','Tip to boost','DM for custom']
+    .map(o => ctas.createChoice(o)));
+
+  const peak = form.addCheckboxItem().setTitle('Peak interaction times')
+    .setHelpText('Used to time engagement nudges');
+  peak.setChoices(['Morning','Lunch break','Evening','Late night'].map(o => peak.createChoice(o)));
+
+  // ===== Personal touch =====
+  form.addPageBreakItem().setTitle('Personal touch');
+
+  form.addTextItem().setTitle('Catchphrases')
+    .setHelpText('1–3; use semicolons or new lines. Example: “If it makes you smile, I’m in.”');
+
+  const hobbies = form.addCheckboxItem().setTitle('Hobbies & shared activities');
+  hobbies.setChoices([
+    'Travel planning','Coffee walks','Cooking together','Gym buddy',
+    'Gaming','Books & deep talks','Movies & series','Hiking / outdoors','Live music'
+  ].map(o => hobbies.createChoice(o)));
+  hobbies.showOtherOption(true);
+
+  form.addParagraphTextItem().setTitle('Memory seeds')
+    .setHelpText('Up to 3, one per line. Example: loves dorayaki; afraid of thunder; collects sunrise pics.');
+
+  // ===== Triggers (optional) =====
+  const ROUTINES = ['— none —','Comfort + small plan','Cute confession','Affirmation combo','Playful tease + support','Boundary check-in'];
+  const phraseValidation = FormApp.createTextValidation()
+    .requireTextMatchesPattern('^.{0,40}$')
+    .setHelpText('Keep it short (max 40 characters).')
+    .build();
+
+  for (let i = 1; i <= 3; i++) {
+    form.addTextItem()
+      .setTitle(`Trigger phrase ${i} — what the fan says to activate a special reply`)
+      .setHelpText('Examples: "bad day", "tell me a secret", "can\'t sleep" (leave blank if not needed)')
+      .setValidation(phraseValidation)
+      .setRequired(false);
+
+    const li = form.addListItem()
+      .setTitle(`AI routine when Trigger phrase ${i} is detected`)
+      .setHelpText('Pick how the AI should respond if that phrase appears.')
+      .setRequired(false);
+
+    li.setChoices(ROUTINES.map(r => li.createChoice(r)));
+  }
+
+  Logger.log('EDIT: ' + form.getEditUrl());
+  Logger.log('LIVE: ' + form.getPublishedUrl());
+  Logger.log('SHEET: https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/edit');
+}
