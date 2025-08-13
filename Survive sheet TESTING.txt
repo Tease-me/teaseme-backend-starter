@@ -82,10 +82,10 @@ function createOnlyFansPersonaForm() {
 
   function scaleQ(title) {
     form.addScaleItem().setTitle(title)
-      .setHelpText('1 = low, 5 = high')
+      .setHelpText('1 = Not like me at all | 5 = very much like me')
       .setBounds(1, 5).setLabels('1 = low','5 = high').setRequired(true);
   }
-  ['Nurturing','Thoughtful','Protective','Empathetic','Sensitive','Independent','Confident','Direct','Playful']
+  ['Nurturing - you enjoy taking care of others and making them feel supported.','Thoughtful - you think carefully before you act or speak, and consider others\' feelings.','Protective - you like to look out for others and make sure they\'re safe or cared for.','Empathetic - you easily understand and share the feelings of others.','Sensitive - you are deeply affected by emotions, situations, or feedback.','Independent - you prefer doing things your own and making your own decisions.','Confident - you believe in yourself and your abilities, even in challenging situations.','Direct - you say that you mean clearly, without too much sugar-coating.','Playful - you like to have fun, joke around, and keep things lighthearted.']
     .forEach(scaleQ);
 
   const humor = form.addMultipleChoiceItem()
@@ -103,23 +103,23 @@ function createOnlyFansPersonaForm() {
   emoji.setChoices(['None','Light/special moments','Occasional'].map(o => emoji.createChoice(o)));
 
   const pets = form.addMultipleChoiceItem()
-    .setTitle('How often should the AI call the fan by sweet/flirty nicknames?')
+    .setTitle('When your AI character chats with fans, how often should it use sweet or flirty nicknames?')
     .setHelpText('Examples: "babe", "love", "honey", "cutie". Frequent = most messages, Occasional = sometimes, Off = never.')
     .setRequired(true);
   pets.setChoices([
-    'Off — never use nicknames',
-    'Occasional — sometimes use nicknames',
-    'Frequent — use nicknames in most messages'
+    'Never - no nicknames at all. Always address fans more neutrally.',
+    'Occasional - Sprinkle nickname in sometimes, but not in every conversation.',
+    'Frequent - Fans will often be called “babe” or “cutie,” etc.'
   ].map(o => pets.createChoice(o)));
 
-  const length = form.addMultipleChoiceItem().setTitle('Message length').setRequired(true);
+  const length = form.addMultipleChoiceItem().setTitle('Your Message Length – How long your typical messages are when you reply to people.').setRequired(true);
   length.setChoices(['Short','Medium','Long'].map(o => length.createChoice(o)));
 
   // ===== Engagement & dynamics =====
   form.addPageBreakItem().setTitle('Engagement & dynamics');
-  function love(name){ form.addScaleItem().setTitle(name).setHelpText('1 = not important, 5 = very important')
+  function love(name){ form.addScaleItem().setTitle(name).setHelpText('1 = Not important at all | 5 = Extremely important')
     .setBounds(1,5).setLabels('1 = low','5 = high').setRequired(true); }
-  ['Quality time','Words of affirmation','Acts of service','Gifts','Shared adventure','Physical touch (textual)'].forEach(love);
+  ['Quality time – Spending focused time chatting, playing games, or sharing moments together.','Words of affirmation – Giving compliments, encouragement, and expressing appreciation through words.','Acts of service – Doing helpful things for the fan, like remembering details about them or surprising them with special messages.','Gifts – Sending virtual presents, special content, or other “tokens” to show care.','Shared adventure – Experiencing fun or exciting activities together, such as virtual dates, story games, or challenges.','Physical touch (textual) – Using flirty, affectionate, or intimate language that mimics physical closeness in text form.'].forEach(love);
 
   const conflict = form.addMultipleChoiceItem()
     .setTitle('Conflict style')
@@ -181,8 +181,13 @@ function createOnlyFansPersonaForm() {
   // ===== Personal touch =====
   form.addPageBreakItem().setTitle('Personal touch');
 
-  form.addTextItem().setTitle('Catchphrases')
-    .setHelpText('1–3; use semicolons or new lines. Example: “If it makes you smile, I’m in.”');
+  form.addParagraphTextItem()
+  .setTitle('Catchphrases')
+  .setHelpText(
+    '1–3 catchphrases for your persona.\n' +
+    'Separate them with semicolons or put each on a new line.\n' +
+    'Example: “If it makes you smile, I’m in.”'
+  );
 
   const hobbies = form.addCheckboxItem().setTitle('Hobbies & shared activities');
   hobbies.setChoices([
@@ -195,7 +200,7 @@ function createOnlyFansPersonaForm() {
     .setHelpText('Up to 3, one per line. Example: loves dorayaki; afraid of thunder; collects sunrise pics.');
 
   // ===== Triggers (optional) =====
-  const ROUTINES = ['— none —','Comfort + small plan','Cute confession','Affirmation combo','Playful tease + support','Boundary check-in'];
+  const ROUTINES = ['— none —','Comfort + small plan','Cute confession','Affirmation combo','Playful tease + support','Boundary check-in','Quick distraction game','Micro-story / mini-escape','Guided sensory reset','Tiny win challenge','Humor drop','Sing-along / lyric comfort'];
   const phraseValidation = FormApp.createTextValidation()
     .requireTextMatchesPattern('^.{0,40}$')
     .setHelpText('Keep it short (max 40 characters).')

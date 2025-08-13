@@ -8,7 +8,11 @@ import csv, io, re, textwrap
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.db.models import Influencer
+from app.api.elevenlabs import _push_prompt_to_elevenlabs
 
+# =========================
+# Router setup
+# =========================
 router = APIRouter(prefix="/persona", tags=["persona"])
 
 # =========================
@@ -56,6 +60,48 @@ def scale01(v: Optional[str]) -> float:
         iv = 3
     iv = max(1, min(5, iv))
     return round((iv - 1) / 4.0, 2)
+
+def head_before_dash(label: Optional[str]) -> Optional[str]:
+    """Return the part of a label before an em/en/simple dash."""
+    if not label:
+        return label
+    return re.split(r"\s+[—-]\s+", label, maxsplit=1)[0].strip()
+
+def get_by_base(row: Dict[str, str], base_label: str) -> Optional[str]:
+    """
+    Fetch a value by matching either the exact column name or any column whose
+    *prefix before a dash* equals base_label (case-insensitive).
+    """
+    # 1) exact match first
+    if base_label in row and str(row[base_label]).strip() != "":
+        return str(row[base_label]).strip()
+
+    # 2) try 'prefix before dash' match
+    base = base_label.strip().lower()
+    for k, v in row.items():
+        if v is None or str(v).strip() == "":
+            continue
+        k_base = head_before_dash(k or "").strip().lower()
+        if k_base == base:
+            return str(v).strip()
+    return None
+
+def map_pets_choice(label: Optional[str]) -> str:
+    if not label:
+        return "occasional"
+    lbl = label.strip()
+    # exact match first
+    if lbl in PETS_MAP:
+        return PETS_MAP[lbl]
+    # fallback by first word before dash
+    first = head_before_dash(lbl).lower()
+    if first.startswith("never") or first == "off":
+        return "off"
+    if first.startswith("occasional"):
+        return "occasional"
+    if first.startswith("frequent"):
+        return "frequent"
+    return "occasional"
 
 # =========================
 # Label -> Code maps (exactly from your current Form)
@@ -160,7 +206,7 @@ def build_system_prompt(p: Dict) -> str:
     def fmt_list(xs):
         return ", ".join([x for x in (xs or []) if x]) or "—"
 
-    who = f"You are an my girlfriend named {p.get('name')}." if p.get('name') else "You are an my girlfriend."
+    who = f"You are my girlfriend named {p.get('name')}." if p.get('name') else "You are my girlfriend."
     if p.get("nickname"):
         who += f' Nickname: “{p["nickname"]}”.'
 
@@ -241,7 +287,7 @@ def build_developer_prompt(p: Dict) -> str:
 
     dev = f"""
 - Stay in persona; align with tasteful, flirt-forward engagement suitable for an adult subscription platform while remaining brand-safe.
-- Emoji/pet-name/message-length per SYSTEM “VOICE & FORMAT”.
+- Follow SYSTEM “VOICE & FORMAT” for emoji use, nickname frequency, and message length.
 - Use preferred CTAs sparingly (≤ 1 per ~5 messages) and only when contextually relevant.
 - If user asks for explicit sexual content, illegal activities, medical/financial advice, or off-platform moves: refuse politely, explain boundary briefly, and pivot to a safe, engaging topic.
 - When emotions run high: validate feelings first, then follow the chosen conflict style and jealousy strategy from SYSTEM.
@@ -276,32 +322,33 @@ def parse_row(row: Dict[str, str]) -> Dict:
     intensity = parse_int(row.get("Overall tease/affection intensity"), 3)
     emoji_level = EMOJI_MAP.get((row.get("Emoji use") or "").strip(), "light")
     pets_label = (row.get("How often should the AI call the fan by sweet/flirty nicknames?") or "").strip()
-    pet_names = PETS_MAP.get(pets_label, "occasional")
-    sentence_length = LENGTH_MAP.get((row.get("Message length") or "").strip(), "medium")
+    pet_names = map_pets_choice(pets_label)
+    sentence_length_label = get_by_base(row, "Message length") or get_by_base(row, "Your Message Length")
+    sentence_length = LENGTH_MAP.get((sentence_length_label or "").strip(), "medium")
     romantic_vibe = VIBE_MAP.get((row.get("Romantic vibe") or "").strip(), "cozy_nights_in")
     conflict_style = CONFLICT_MAP.get((row.get("Conflict style") or "").strip(), "comfort_validate_plan")
     jealousy_strategy = JEALOUSY_MAP.get((row.get("Jealousy strategy") or "").strip(), "talk_and_reassure")
 
     # Scales (1..5 as strings)
     traits = {
-        "nurturing": row.get("Nurturing"),
-        "thoughtful": row.get("Thoughtful"),
-        "protective": row.get("Protective"),
-        "empathetic": row.get("Empathetic"),
-        "sensitive": row.get("Sensitive"),
-        "independent": row.get("Independent"),
-        "confident": row.get("Confident"),
-        "direct": row.get("Direct"),
-        "playful": row.get("Playful"),
+        "nurturing": get_by_base(row, "Nurturing"),
+        "thoughtful": get_by_base(row, "Thoughtful"),
+        "protective": get_by_base(row, "Protective"),
+        "empathetic": get_by_base(row, "Empathetic"),
+        "sensitive": get_by_base(row, "Sensitive"),
+        "independent": get_by_base(row, "Independent"),
+        "confident": get_by_base(row, "Confident"),
+        "direct": get_by_base(row, "Direct"),
+        "playful": get_by_base(row, "Playful"),
     }
 
     love_languages = {
-        "quality_time": row.get("Quality time"),
-        "words_of_affirmation": row.get("Words of affirmation"),
-        "acts_of_service": row.get("Acts of service"),
-        "gifts": row.get("Gifts"),
-        "shared_adventure": row.get("Shared adventure"),
-        "physical_touch_textual": row.get("Physical touch (textual)"),
+        "quality_time": get_by_base(row, "Quality time"),
+        "words_of_affirmation": get_by_base(row, "Words of affirmation"),
+        "acts_of_service": get_by_base(row, "Acts of service"),
+        "gifts": get_by_base(row, "Gifts"),
+        "shared_adventure": get_by_base(row, "Shared adventure"),
+        "physical_touch_textual": get_by_base(row, "Physical touch (textual)"),
     }
 
     # Free text / lists
@@ -406,6 +453,14 @@ async def import_persona_csv(
             else:
                 influencer.prompt_template = merged
             saved_count += 1
+
+            agent_id = getattr(influencer, "influencer_agent_id_third_part", None)
+            if agent_id:
+                try:
+                    await _push_prompt_to_elevenlabs(agent_id, merged)
+                except HTTPException as e:
+                    # log but don’t fail the whole import
+                    print.error(f"ElevenLabs sync failed for {influencer.id}: {e.detail}")
 
     if save:
         await db.commit()
