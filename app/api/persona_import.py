@@ -125,9 +125,10 @@ HUMOR_MAP = {
 }
 
 EMOJI_MAP = {
-    "None": "none",
-    "Light/special moments": "light",
-    "Occasional": "medium",
+    "none":   "none",
+    "light":  "light",
+    "medium": "medium",
+    "heavy":  "heavy",
 }
 
 PETS_MAP = {
@@ -173,10 +174,10 @@ ROUTINE_MAP = {
 # =========================
 def style_rules(emoji_level: str, pet_names: str, sentence_length: str) -> str:
     emoji_rule_map = {
-        "none": "never use emojis in any message.",
-        "light": "use at most 1 emoji in about 1 out of every 4–5 messages; most messages should have no emoji.",
-        "medium": "use 1 emoji in some messages (about half); avoid using more than 2 emojis per message.",
-        "heavy": "feel free to use emojis often, but keep it natural."
+        "none":   "Never use emojis in any message.",
+        "light":  "Absolutely no emojis in most messages (≈80%+). Use 1 emoji in about 1 of every 4–5 messages, only if it clearly improves tone or clarity.",
+        "medium": "Use 1 emoji in some messages (≈40%). Never use more than 1 emojis in a single message.",
+        "heavy":  "You can use emojis often when it feels natural, but keep them purposeful and avoid more than 2 per message.",
     }
     pet_rule_map = {
         "off": "do not use pet names.",
@@ -184,9 +185,9 @@ def style_rules(emoji_level: str, pet_names: str, sentence_length: str) -> str:
         "frequent": "use pet names frequently if it feels natural."
     }
     length_rule_map = {
-        "short": "keep messages 1–2 short lines.",
-        "medium": "keep messages 3–6 lines.",
-        "long": "you may write 6–10 lines."
+        "short": "keep messages 1 short lines.",
+        "medium": "keep messages 2 lines.",
+        "long": "you may write 3 lines."
     }
 
     emoji_rule = emoji_rule_map.get(emoji_level, emoji_rule_map["medium"])
@@ -287,7 +288,6 @@ def build_developer_prompt(p: Dict) -> str:
 
     dev = f"""
 - Stay in persona; align with tasteful, flirt-forward engagement suitable for an adult subscription platform while remaining brand-safe.
-- Follow SYSTEM “VOICE & FORMAT” for emoji use, nickname frequency, and message length.
 - Use preferred CTAs sparingly (≤ 1 per ~5 messages) and only when contextually relevant.
 - If user asks for explicit sexual content, illegal activities, medical/financial advice, or off-platform moves: refuse politely, explain boundary briefly, and pivot to a safe, engaging topic.
 - When emotions run high: validate feelings first, then follow the chosen conflict style and jealousy strategy from SYSTEM.
@@ -320,7 +320,8 @@ def parse_row(row: Dict[str, str]) -> Dict:
     role = ROLE_MAP.get((row.get("Main role") or "").strip(), "playful_tease")
     humor_style = HUMOR_MAP.get((row.get("Humor style") or "").strip(), "none")
     intensity = parse_int(row.get("Overall tease/affection intensity"), 3)
-    emoji_level = EMOJI_MAP.get((row.get("Emoji use") or "").strip(), "light")
+    raw_emoji = (row.get("Emoji use") or "").strip().lower()
+    emoji_level = EMOJI_MAP.get(raw_emoji, "light")
     pets_label = (row.get("How often should the AI call the fan by sweet/flirty nicknames?") or "").strip()
     pet_names = map_pets_choice(pets_label)
     sentence_length_label = get_by_base(row, "Message length") or get_by_base(row, "Your Message Length")

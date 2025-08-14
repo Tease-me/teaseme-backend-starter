@@ -24,7 +24,6 @@ class Influencer(Base):
     daily_scripts:  Mapped[List[str] | None] = mapped_column(JSON, nullable=True)
     influencer_agent_id_third_part: Mapped[str | None] = mapped_column(String, nullable=True)  
     created_at:     Mapped[datetime]     = mapped_column(DateTime, default=datetime.utcnow)
-
     chats:          Mapped[List["Chat"]] = relationship(back_populates="influencer")
 
 class User(Base):

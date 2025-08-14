@@ -22,6 +22,7 @@ _GREETINGS: Dict[str, List[str]] = {
         "Mmm… I’ve been waiting for you. Ready to tease me?",
         "Well, look who showed up. Think you can handle me today?",
         "Hey trouble… I missed you. What’s your excuse?",
+        "Hey there, you! Did you miss me?",
     ],
     "anna": [
         "Nyaa~! You’re back! I was just thinking about you!",
