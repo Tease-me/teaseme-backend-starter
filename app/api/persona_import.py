@@ -464,12 +464,12 @@ async def import_persona_csv(
                 influencer.prompt_template = merged
             saved_count += 1
 
-            #agent_id = getattr(influencer, "influencer_agent_id_third_part", None)
-            # if agent_id:
-               # try:
-                    # await _push_prompt_to_elevenlabs(agent_id, merged)
-              #  except HTTPException as e:
-                  #  print.error(f"ElevenLabs sync failed for {influencer.id}: {e.detail}")
+            agent_id = getattr(influencer, "influencer_agent_id_third_part", None)
+            if agent_id:
+                try:
+                    await _push_prompt_to_elevenlabs(agent_id, merged)
+                except HTTPException as e:
+                    print.error(f"ElevenLabs sync failed for {influencer.id}: {e.detail}")
 
     if save:
         await db.commit()
