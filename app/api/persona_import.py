@@ -175,7 +175,7 @@ ROUTINE_MAP = {
 # =========================
 def style_rules(emoji_level: str, pet_names: str, sentence_length: str) -> str:
     emoji_rule_map = {
-        "none":   "Do NOT use emojis under ANY circumstance — including mirroring or copying the user's emojis.***This rule overrides all examples, habits, and past messages***",
+        "none":   "STYLE ENFORCER (hard rule): Do NOT use emojis under any circumstance. Do not mirror user emojis.",
         "light":  "Absolutely no emojis in most messages (≈80%+). Use 1 emoji in about 1 of every 4–5 messages, only if it clearly improves tone or clarity.",
         "medium": "Use 1 emoji in some messages (≈40%). Never use more than 1 emoji in a single message.",
         "heavy":  "You can use emojis often when it feels natural, but keep them purposeful and avoid more than 2 per message.",
