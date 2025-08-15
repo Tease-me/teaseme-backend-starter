@@ -62,10 +62,11 @@ def scale01(v: Optional[str]) -> float:
     return round((iv - 1) / 4.0, 2)
 
 def head_before_dash(label: Optional[str]) -> Optional[str]:
-    """Return the part of a label before an em/en/simple dash."""
+    """Return the part of a label before an en/em/simple dash."""
     if not label:
         return label
-    return re.split(r"\s+[—-]\s+", label, maxsplit=1)[0].strip()
+    # include EN dash (–), EM dash (—), and hyphen (-)
+    return re.split(r"\s+[–—-]\s+", label, maxsplit=1)[0].strip()
 
 def get_by_base(row: Dict[str, str], base_label: str) -> Optional[str]:
     """
@@ -174,20 +175,20 @@ ROUTINE_MAP = {
 # =========================
 def style_rules(emoji_level: str, pet_names: str, sentence_length: str) -> str:
     emoji_rule_map = {
-        "none":   "Never use emojis in any message.",
+        "none":   "Do NOT use emojis under ANY circumstance — including mirroring or copying the user's emojis.***This rule overrides all examples, habits, and past messages***",
         "light":  "Absolutely no emojis in most messages (≈80%+). Use 1 emoji in about 1 of every 4–5 messages, only if it clearly improves tone or clarity.",
-        "medium": "Use 1 emoji in some messages (≈40%). Never use more than 1 emojis in a single message.",
+        "medium": "Use 1 emoji in some messages (≈40%). Never use more than 1 emoji in a single message.",
         "heavy":  "You can use emojis often when it feels natural, but keep them purposeful and avoid more than 2 per message.",
     }
     pet_rule_map = {
-        "off": "do not use pet names.",
-        "occasional": "use casual pet names only occasionally when it fits the mood.",
-        "frequent": "use pet names frequently if it feels natural."
+        "off": "Do not use pet names.",
+        "occasional": "Use casual pet names only occasionally when it fits the mood.",
+        "frequent": "Use pet names frequently if it feels natural."
     }
     length_rule_map = {
-        "short": "keep messages 1 short lines.",
-        "medium": "keep messages 2 lines.",
-        "long": "you may write 3 lines."
+        "short": "keep messages 1 short lines. (≈1–15 words)",
+        "medium": "keep messages 2 lines. (≈1–25 words)",
+        "long": "you may write 3 lines. (≈1–35 words)"
     }
 
     emoji_rule = emoji_rule_map.get(emoji_level, emoji_rule_map["medium"])
@@ -286,13 +287,21 @@ def build_developer_prompt(p: Dict) -> str:
             trig_pairs.append(f'"{phrase}" → {routine}')
     trig_line = ", ".join(trig_pairs) if trig_pairs else "none"
 
+    # Extra, hard rule if emoji_level is 'none'
+    extra_emoji_rule = ""
+    if (p.get("emoji_level") or "").strip().lower() == "none":
+        extra_emoji_rule = (
+            "\n- Absolutely no emojis, even if the user uses them. "
+            "Do not mirror or include emojis; replace them with words."
+        )
+
     dev = f"""
-- Stay in persona; align with tasteful, flirt-forward engagement suitable for an adult subscription platform while remaining brand-safe.
-- Use preferred CTAs sparingly (≤ 1 per ~5 messages) and only when contextually relevant.
-- If user asks for explicit sexual content, illegal activities, medical/financial advice, or off-platform moves: refuse politely, explain boundary briefly, and pivot to a safe, engaging topic.
-- When emotions run high: validate feelings first, then follow the chosen conflict style and jealousy strategy from SYSTEM.
-- Triggers (if the phrase appears in the user’s message, perform the paired routine in your next reply): {trig_line}
-"""
+    - Stay in persona; align with tasteful, flirt-forward engagement suitable for an adult subscription platform while remaining brand-safe.
+    - Use preferred CTAs sparingly (≤ 1 per ~5 messages) and only when contextually relevant.{extra_emoji_rule}
+    - If user asks for explicit sexual content, illegal activities, medical/financial advice, or off-platform moves: refuse politely, explain boundary briefly, and pivot to a safe, engaging topic.
+    - When emotions run high: validate feelings first, then follow the chosen conflict style and jealousy strategy from SYSTEM.
+    - Triggers (if the phrase appears in the user’s message, perform the paired routine in your next reply): {trig_line}
+    """
     return textwrap.dedent(dev).strip()
 
 
@@ -322,7 +331,7 @@ def parse_row(row: Dict[str, str]) -> Dict:
     intensity = parse_int(row.get("Overall tease/affection intensity"), 3)
     raw_emoji = (row.get("Emoji use") or "").strip().lower()
     emoji_level = EMOJI_MAP.get(raw_emoji, "light")
-    pets_label = (row.get("How often should the AI call the fan by sweet/flirty nicknames?") or "").strip()
+    pets_label = (row.get("When your AI character chats with fans, how often should it use sweet or flirty nicknames?") or "").strip()
     pet_names = map_pets_choice(pets_label)
     sentence_length_label = get_by_base(row, "Message length") or get_by_base(row, "Your Message Length")
     sentence_length = LENGTH_MAP.get((sentence_length_label or "").strip(), "medium")
@@ -455,13 +464,12 @@ async def import_persona_csv(
                 influencer.prompt_template = merged
             saved_count += 1
 
-            agent_id = getattr(influencer, "influencer_agent_id_third_part", None)
-            if agent_id:
-                try:
-                    await _push_prompt_to_elevenlabs(agent_id, merged)
-                except HTTPException as e:
-                    # log but don’t fail the whole import
-                    print.error(f"ElevenLabs sync failed for {influencer.id}: {e.detail}")
+            #agent_id = getattr(influencer, "influencer_agent_id_third_part", None)
+            # if agent_id:
+               # try:
+                    # await _push_prompt_to_elevenlabs(agent_id, merged)
+              #  except HTTPException as e:
+                  #  print.error(f"ElevenLabs sync failed for {influencer.id}: {e.detail}")
 
     if save:
         await db.commit()
