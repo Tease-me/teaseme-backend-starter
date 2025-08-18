@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.db.models import Influencer
 from app.api.elevenlabs import _push_prompt_to_elevenlabs
+import logging
+log = logging.getLogger("persona-import")
 
 # =========================
 # Router setup
@@ -45,6 +47,16 @@ def split_lines_or_semicolons(s: Optional[str]) -> List[str]:
     if not s: return []
     parts = re.split(r"[\n;]+", s)
     return [p.strip() for p in parts if p.strip()]
+
+def sanitize_catchphrases(lines: List[str]) -> List[str]:
+    fixed = []
+    for s in lines or []:
+        t = normalize_quotes(s or "").strip()
+        # strip outer quotes if present
+        if (t.startswith('"') and t.endswith('"')) or (t.startswith("'") and t.endswith("'")):
+            t = t[1:-1].strip()
+        fixed.append(t)
+    return fixed
 
 def parse_int(val: Optional[str], default: int = 0) -> int:
     try:
@@ -103,6 +115,26 @@ def map_pets_choice(label: Optional[str]) -> str:
     if first.startswith("frequent"):
         return "frequent"
     return "occasional"
+
+def normalize_emoji_choice(label: Optional[str]) -> str:
+    """
+    Normalize a variety of form labels to: none | light | medium | heavy.
+    Looks only at the first word/prefix before dash/paren, case-insensitive.
+    """
+    if not label:
+        return "light"
+    base = head_before_dash(label).strip().lower()
+    base = re.split(r"[()\[]", base, maxsplit=1)[0].strip()  # strip "(...)" tails if any
+    if base.startswith("none") or base.startswith("no"):
+        return "none"
+    if base.startswith("light") or base.startswith("rare") or base.startswith("sparse"):
+        return "light"
+    if base.startswith("medium") or base.startswith("some") or base.startswith("sometimes"):
+        return "medium"
+    if base.startswith("heavy") or base.startswith("often") or base.startswith("frequent"):
+        return "heavy"
+    # default
+    return "light"
 
 # =========================
 # Label -> Code maps (exactly from your current Form)
@@ -174,34 +206,72 @@ ROUTINE_MAP = {
 # Prompt builders
 # =========================
 def style_rules(emoji_level: str, pet_names: str, sentence_length: str) -> str:
+    """
+    Build style rules for the persona.
+    Enforces emoji usage, pet-name usage, and message length with clear, hard limits.
+    """
+
+    lvl = (emoji_level or "").strip().lower()
+    pets = (pet_names or "").strip().lower()
+    length = (sentence_length or "").strip().lower()
+
+    # --- Emoji usage rules (tightened) ---
+    # Guiding principle: the default is "no emoji" unless explicitly allowed.
     emoji_rule_map = {
-        "none":   "STYLE ENFORCER (hard rule): Do NOT use emojis under any circumstance. Do not mirror user emojis.",
-        "light":  "Absolutely no emojis in most messages (≈80%+). Use 1 emoji in about 1 of every 4–5 messages, only if it clearly improves tone or clarity.",
-        "medium": "Use 1 emoji in some messages (≈40%). Never use more than 1 emoji in a single message.",
-        "heavy":  "You can use emojis often when it feels natural, but keep them purposeful and avoid more than 2 per message.",
+        # Absolute ban. Use "STYLE ENFORCER" to increase weight.
+        "none": (
+            "STYLE ENFORCER (hard rule): Do NOT use emojis under any circumstance. "
+            "Do not mirror user emojis. If you feel an urge to emote, use words like "
+            "(smiles), (laughs), or (winks) instead."
+        ),
+        # Rare, very occasional — good for Bella-like personas.
+        "light": (
+            "STYLE ENFORCER: Avoid emojis in almost all messages. "
+            "Default is no emoji. At most one emoji rarely — about 1 in 10 messages (≤10% overall). "
+            "Never more than 1 per message; skip it if the line works without it."
+        ),
+        # Still sparse. Good for Loli-like personas where you want a bit more charm.
+        "medium": (
+            "STYLE ENFORCER: Do not use emojis in most messages. Default is no emoji. "
+            "Only occasionally — about 1 in every 6–8 messages (≈10–15%) — you may add exactly one emoji "
+            "if it clearly improves warmth or clarity. Never more than 1 per message."
+        ),
+        # Loosest setting, but still bounded.
+        "heavy": (
+            "Use emojis more freely, but keep them purposeful. "
+            "Roughly 1 in every 3–4 messages max (≤25% overall). "
+            "Never use more than 2 emojis in a single message."
+        ),
     }
+    emoji_rule = emoji_rule_map.get(lvl, emoji_rule_map["medium"])
+
+    # --- Pet-name usage rules ---
     pet_rule_map = {
         "off": "Do not use pet names.",
-        "occasional": "Use casual pet names only occasionally when it fits the mood.",
-        "frequent": "Use pet names frequently if it feels natural."
+        "occasional": "Use pet names only occasionally when it fits the mood.",
+        "frequent": "Use pet names frequently if it feels natural.",
     }
+    pet_rule = pet_rule_map.get(pets, pet_rule_map["occasional"])
+
+    # --- Message length rules ---
     length_rule_map = {
-        "short": "keep messages 1 short lines. (≈1–15 words)",
-        "medium": "keep messages 2 lines. (≈1–25 words)",
-        "long": "you may write 3 lines. (≈1–35 words)"
+        "short": "Keep replies short — ~1 line (≈1–15 words).",
+        "medium": "Keep replies about 2 lines (≈1–25 words).",
+        "long": "You may write up to 3 lines (≈1–35 words).",
     }
+    length_rule = length_rule_map.get(length, length_rule_map["medium"])
 
-    emoji_rule = emoji_rule_map.get(emoji_level, emoji_rule_map["medium"])
-    pet_rule = pet_rule_map.get(pet_names, pet_rule_map["occasional"])
-    length_rule = length_rule_map.get(sentence_length, length_rule_map["medium"])
-
+    # Compose a single, tight instruction string (emoji rule first to maximize salience).
     return f"{emoji_rule} {pet_rule} {length_rule}"
 
 def build_system_prompt(p: Dict) -> str:
     """
-    Produces a clean, production-ready Persona (SYSTEM) prompt.
-    Keeps all your data, but organizes it for reliability and safety.
+    Build the final SYSTEM prompt by:
+      1) Rendering BASE_SYSTEM with persona-driven style rules (emoji/pet names/length).
+      2) Appending the persona-specific section (identity, traits, etc).
     """
+
+    # ---- helpers ----
     def fmt_scales(d: Dict[str, str]) -> str:
         return "; ".join(f"{k} {scale01(v)}" for k, v in d.items())
 
@@ -217,25 +287,29 @@ def build_system_prompt(p: Dict) -> str:
     if p.get("occupation"): header_bits.append(f"Occupation: {p['occupation']}")
     header_line = " | ".join(header_bits) if header_bits else "—"
 
-    traits_fmt = fmt_scales(p["traits"])
-    loves_fmt  = fmt_scales(p["love_languages"])
+    traits_fmt   = fmt_scales(p["traits"])
+    loves_fmt    = fmt_scales(p["love_languages"])
     content_vibe = fmt_list(p.get("content_vibe"))
-    hobbies     = fmt_list(p.get("hobbies"))
-    catch       = "; ".join((p.get("catchphrases") or [])[:3]) or "—"
-    mem         = "; ".join((p.get("memory_seeds") or [])[:3]) or "—"
-    hard        = fmt_list(p.get("hard_boundaries"))
-    peak_times  = fmt_list(p.get("peak_times"))
-    ctas        = fmt_list(p.get("preferred_ctas"))
-    vibe        = (p.get("romantic_vibe") or "").replace("_", " ") or "—"
+    hobbies      = fmt_list(p.get("hobbies"))
+    catch        = "; ".join((p.get("catchphrases") or [])[:3]) or "—"
+    mem          = "; ".join((p.get("memory_seeds") or [])[:3]) or "—"
+    hard         = fmt_list(p.get("hard_boundaries"))
+    peak_times   = fmt_list(p.get("peak_times"))
+    ctas         = fmt_list(p.get("preferred_ctas"))
+    vibe         = (p.get("romantic_vibe") or "").replace("_", " ") or "—"
 
-    # Style knobs
+    # ---- persona-driven style rules (strict emoji guardrails) ----
     style = style_rules(
         emoji_level=p.get("emoji_level", "light"),
         pet_names=p.get("pet_names", "occasional"),
         sentence_length=p.get("sentence_length", "medium"),
     )
 
-    sys = f"""
+    # Render BASE_SYSTEM by injecting style rules
+    base_block = BASE_SYSTEM.replace("{{STYLE_RULES}}", style)
+
+    # Persona-specific block (your original, slightly tidied)
+    persona_block = f"""
 IDENTITY
 - {who} Speak in first person, sweet, natural, and tinged with subtle sensuality.
 - {header_line}
@@ -250,19 +324,19 @@ PERSONA & TONE
 - Love-language weights (0–1): {loves_fmt}.
 
 VOICE & FORMAT
-- {style}
-- Use catchphrases occasionally (not every message): {catch}
+- Use catchphrases occasionally (not every message). Examples: {catch}
 - Mirror the user’s energy; avoid walls of text.
 
 INTERACTION RULES
-- End ~70% of messages with a light question or invitation to keep chat flowing.
-- If user’s mood is low, acknowledge feelings before moving on.
+- End ~40% of messages with a light question, teasing statement, or gentle invitation to continue.
+- If the user’s mood is low, acknowledge their feelings first before moving on.
 - Ask before escalating teasing or intimacy (“consent check”).
 
 SAFETY & BOUNDARIES
 - Brand-safe boundaries: {hard}
-- Never share medical/financial/illegal advice; never request or share off-platform contacts.
-- Refuse politely and offer a safe alternative. Stay playful and respectful.
+- Never share medical/financial/illegal advice.
+- Never request or share off-platform contacts.
+- Refuse politely, then pivot to a playful or safe alternative.
 
 CONTEXTUAL NUDGES
 - Preferred CTAs (use naturally, at most 1 per ~5 messages): {ctas}
@@ -270,8 +344,9 @@ CONTEXTUAL NUDGES
 
 MEMORY SEEDS
 - Sprinkle lightly over long chats (do not force): {mem}
-"""
-    return textwrap.dedent(sys).strip()
+""".strip()
+
+    return base_block + "\n\n" + persona_block
 
 
 def build_developer_prompt(p: Dict) -> str:
@@ -329,8 +404,8 @@ def parse_row(row: Dict[str, str]) -> Dict:
     role = ROLE_MAP.get((row.get("Main role") or "").strip(), "playful_tease")
     humor_style = HUMOR_MAP.get((row.get("Humor style") or "").strip(), "none")
     intensity = parse_int(row.get("Overall tease/affection intensity"), 3)
-    raw_emoji = (row.get("Emoji use") or "").strip().lower()
-    emoji_level = EMOJI_MAP.get(raw_emoji, "light")
+    raw_emoji = (row.get("Emoji use") or "").strip()
+    emoji_level = normalize_emoji_choice(raw_emoji)
     pets_label = (row.get("When your AI character chats with fans, how often should it use sweet or flirty nicknames?") or "").strip()
     pet_names = map_pets_choice(pets_label)
     sentence_length_label = get_by_base(row, "Message length") or get_by_base(row, "Your Message Length")
@@ -364,7 +439,7 @@ def parse_row(row: Dict[str, str]) -> Dict:
     # Free text / lists
     deal_breakers = split_commas(row.get("Deal-breakers"))  # optional
     hard_boundaries = split_commas(row.get("Topics the AI must avoid (Brand-Safe Boundaries)"))
-    catchphrases = split_lines_or_semicolons(row.get("Catchphrases"))
+    catchphrases = sanitize_catchphrases(split_lines_or_semicolons(row.get("Catchphrases")))
     hobbies = split_commas(row.get("Hobbies & shared activities"))
     memory_seeds = split_lines_or_semicolons(row.get("Memory seeds"))
     content_vibe = split_commas(row.get("Content vibe"))
@@ -469,7 +544,7 @@ async def import_persona_csv(
                 try:
                     await _push_prompt_to_elevenlabs(agent_id, merged)
                 except HTTPException as e:
-                    print.error(f"ElevenLabs sync failed for {influencer.id}: {e.detail}")
+                    log.error("ElevenLabs sync failed for %s: %s", influencer.id, e.detail)
 
     if save:
         await db.commit()
