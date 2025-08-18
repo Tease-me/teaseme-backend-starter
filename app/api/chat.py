@@ -1,6 +1,11 @@
+from __future__ import annotations
 
+import asyncio
+import logging
 import io
+import asyncio
 
+from typing import Dict, List, Optional
 from fastapi import APIRouter, WebSocket, Depends, File, UploadFile, HTTPException, Form, Query
 from app.agents.turn_handler import handle_turn
 from app.db.session import get_db
@@ -8,10 +13,8 @@ from app.db.models import Message
 from jose import jwt
 from app.api.utils import get_embedding
 from starlette.websockets import WebSocketDisconnect
-
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.services.chat_service import get_or_create_chat
 from app.schemas.chat import ChatCreateRequest,PaginatedMessages
 from app.core.config import settings
@@ -24,6 +27,8 @@ ALGORITHM = settings.ALGORITHM
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
+log = logging.getLogger("chat")
+
 @router.post("/")
 async def start_chat(
     data: ChatCreateRequest, 
@@ -32,65 +37,210 @@ async def start_chat(
     chat_id = await get_or_create_chat(db, data.user_id, data.influencer_id)
     return {"chat_id": chat_id}
 
+# ---------- Buffer state ----------
+class _Buf:
+    __slots__ = ("messages", "timer", "lock")
+    def __init__(self) -> None:
+        self.messages: List[str] = []
+        self.timer: Optional[asyncio.Task] = None
+        self.lock = asyncio.Lock()
+
+_buffers: Dict[str, _Buf] = {}  # chat_id -> _Buf
+
+# ---------- Heuristic: did the message end a thought? ----------
+def _ends_thought(msg: str) -> bool:
+    if not msg:
+        return False
+    msg = msg.strip()
+    strong = (".", "!", "?", "…")
+    end_emojis = ("👍", "😉", "😂", "😅", "🤣", "😍", "😘")
+    return msg.endswith(strong) or msg.endswith(end_emojis)
+
+# ---------- Queue message and schedule flush ----------
+async def _queue_message(
+    chat_id: str,
+    msg: str,
+    ws: WebSocket,
+    influencer_id: str,
+    user_id: int,
+    db: AsyncSession,
+    timeout_sec: float = 2.5,
+) -> None:
+    buf = _buffers.setdefault(chat_id, _Buf())
+    async with buf.lock:
+        buf.messages.append(msg)
+        log.info("[BUF %s] queued: %r (len=%d)", chat_id, msg, len(buf.messages))
+
+        # cancel previous timer if any
+        if buf.timer and not buf.timer.done():
+            log.info("[BUF %s] cancel previous timer", chat_id)
+            buf.timer.cancel()
+
+        # immediate flush if thought ended
+        if _ends_thought(msg):
+            log.info("[BUF %s] ends_thought=True -> flush now", chat_id)
+            await _flush_buffer(chat_id, ws, influencer_id, user_id, db)
+            return
+
+        # otherwise, arm a timeout to flush later
+        log.info("[BUF %s] schedule flush in %.2fs", chat_id, timeout_sec)
+        buf.timer = asyncio.create_task(
+            _wait_and_flush(chat_id, ws, influencer_id, user_id, db, timeout_sec)
+        )
+
+
+async def _wait_and_flush(
+    chat_id: str,
+    ws: WebSocket,
+    influencer_id: str,
+    user_id: int,
+    db: AsyncSession,
+    delay: float,
+) -> None:
+    try:
+        await asyncio.sleep(delay)
+        await _flush_buffer(chat_id, ws, influencer_id, user_id, db)
+    except asyncio.CancelledError:
+        # timer canceled due to a newer incoming message
+        return
+
+# ---------- Do the flush: concat, charge, call LLM, persist, reply ----------
+async def _flush_buffer(
+    chat_id: str,
+    ws: WebSocket,
+    influencer_id: str,
+    user_id: int,
+    db: AsyncSession,
+) -> None:
+    buf = _buffers.get(chat_id)
+    if not buf:
+        return
+
+    async with buf.lock:
+        if not buf.messages:
+            return
+
+        user_text = " ".join(m.strip() for m in buf.messages if m and m.strip())
+        buf.messages.clear()
+        buf.timer = None
+
+    if not user_text:
+        return
+
+    log.info("[BUF %s] FLUSH start; user_text=%r", chat_id, user_text)
+
+    # bill per flush (burst)
+    try:
+        await charge_feature(
+            db, user_id=user_id, feature="text", units=1, meta={"chat_id": chat_id, "burst": True}
+        )
+        await db.commit()
+    except Exception as bill_err:
+        await db.rollback()
+        log.exception("[WS %s] Billing error", chat_id)
+
+    # call your turn handler (LLM, memories, Redis history, etc.)
+    try:
+        log.info("[BUF %s] calling handle_turn()", chat_id)
+        reply = await handle_turn(
+            message=user_text,
+            chat_id=chat_id,
+            influencer_id=influencer_id,
+            user_id=user_id,
+            db=db,
+            is_audio=False,
+        )
+        log.info("[BUF %s] handle_turn ok (reply_len=%d)", chat_id, len(reply or ""))
+    except Exception:
+        log.exception("[WS %s] handle_turn error", chat_id)
+        try:
+            await ws.send_json({"reply": "Sorry, something went wrong. 😔"})
+        except Exception:
+            pass
+        return
+
+    # persist AI reply
+    try:
+        db.add(Message(chat_id=chat_id, sender="ai", content=reply))
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        log.exception("[WS %s] Failed to save AI message", chat_id)
+
+    # send to client
+    try:
+        await ws.send_json({"reply": reply})
+        log.info("[BUF %s] ws.send_json done", chat_id)
+    except Exception:
+        log.exception("[WS %s] Failed to send reply", chat_id)
+
+
+# ---------- WebSocket entrypoint ----------
 @router.websocket("/ws/{influencer_id}")
-async def websocket_chat(ws: WebSocket, influencer_id: str, db=Depends(get_db)):
+async def websocket_chat(
+    ws: WebSocket,
+    influencer_id: str,
+    db: AsyncSession = Depends(get_db),
+):
     await ws.accept()
+
+    # simple token auth: ?token=...
     token = ws.query_params.get("token")
     if not token:
         await ws.close(code=4001)
         return
+
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id = int(payload.get("sub"))
     except WebSocketDisconnect:
-        print(f"[WS] Client disconnected from chat/persona={influencer_id}")
+        log.info("[WS] Client disconnected before auth (persona=%s)", influencer_id)
+        return
     except Exception as e:
         await ws.close(code=4002)
-        print("JWT decode error:", e)
+        log.error("[WS] JWT decode error: %s", e)
         return
 
-    while True:
-        try:
+    try:
+        while True:
             raw = await ws.receive_json()
-            chat_id = raw.get("chat_id")
-            if not chat_id:
-                chat_id = f"{user_id}_{influencer_id}"
+            text = (raw.get("message") or "").strip()
+            if not text:
+                continue
 
-            await charge_feature(
-                db, user_id=user_id, feature="text", units=1,
-                meta={"chat_id": chat_id}
-            )
+            chat_id = raw.get("chat_id") or f"{user_id}_{influencer_id}"
 
-            embedding = await get_embedding(raw["message"])
-            db.add(Message(
-                chat_id=chat_id,
-                sender='user',
-                content=raw["message"],
-                embedding=embedding
-            ))
-            await db.commit()
-            reply = await handle_turn(
-                raw["message"],
-                chat_id=chat_id,
-                influencer_id=influencer_id,
-                user_id=user_id,
-                db=db
-            )
-            db.add(Message(
-                chat_id=chat_id,
-                sender='ai',
-                content=reply
-            ))
-            await db.commit()
-            await ws.send_json({"reply": reply})
-        
-        except WebSocketDisconnect:
-            print(f"[WS] Client {user_id} disconnected from {influencer_id}")
-            break
-        except Exception as e:
-            print(f"[WS] Unexpected error: {e}")
+            # save user message (with embedding)
+            try:
+                emb = await get_embedding(text)
+                db.add(Message(chat_id=chat_id, sender="user", content=text, embedding=emb))
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                log.exception("[WS %s] Failed to save user message", chat_id)
+
+            # enqueue; buffer decides when to respond
+            await _queue_message(chat_id, text, ws, influencer_id, user_id, db)
+
+            # optional: client can force immediate flush by sending {"final": true}
+            if raw.get("final") is True:
+                log.info("[BUF %s] client requested final flush", chat_id)
+                await _flush_buffer(chat_id, ws, influencer_id, user_id, db)
+
+    except WebSocketDisconnect:
+        log.info("[WS] Client %s disconnected from %s", user_id, influencer_id)
+        # try a last flush so we don't leave unsent content
+        try:
+            chat_id = f"{user_id}_{influencer_id}"
+            await _flush_buffer(chat_id, ws, influencer_id, user_id, db)
+        except Exception:
+            pass
+    except Exception:
+        log.exception("[WS] Unexpected error")
+        try:
             await ws.close(code=4003)
-            break
+        except Exception:
+            pass
 
 @router.get("/history/{chat_id}", response_model=PaginatedMessages)
 async def get_chat_history(
@@ -182,10 +332,10 @@ async def chat_audio(
         if not audio_bytes:
             raise HTTPException(status_code=500, detail="No audio returned from any TTS provider.")
         
-    # 6. Salve o áudio da IA
+    # 6. Save AI audio to S3
     ai_audio_url = await save_ia_audio_to_s3(audio_bytes, user_id)
 
-    # 7. Salve a mensagem da IA no banco
+    # 7. Save AI message with audio URL
     msg_ai = Message(
         chat_id=chat_id,
         sender="ai",

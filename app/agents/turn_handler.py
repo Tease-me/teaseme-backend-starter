@@ -17,7 +17,6 @@ def redis_history(chat_id: str):
     return RedisChatMessageHistory(
         session_id=chat_id, url=settings.REDIS_URL, ttl=settings.HISTORY_TTL)
 
-
 async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: str | None = None, db=None, is_audio: bool = False) -> str:
     cid = uuid4().hex[:8]
     start = time.perf_counter()

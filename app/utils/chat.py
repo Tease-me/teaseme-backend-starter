@@ -1,18 +1,15 @@
 import os
 import io
 import wave
+import openai
+import tempfile
+import httpx
 
 from fastapi import  Depends, HTTPException
-
 from app.agents.turn_handler import handle_turn
 from app.db.session import get_db
 from app.core.config import settings
 from app.db.models import Influencer
-
-import openai
-import tempfile
-
-import httpx
 
 BLAND_API_KEY =settings.BLAND_API_KEY
 BLAND_VOICE_ID = settings.BLAND_VOICE_ID
