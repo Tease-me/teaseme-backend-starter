@@ -2,6 +2,7 @@ import hmac
 import json
 import os
 import time
+import logging
 from hashlib import sha256
 from typing import Any, Dict, Optional
 
@@ -19,6 +20,17 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 ELEVENLABS_CONVAI_WEBHOOK_SECRET = settings.ELEVENLABS_CONVAI_WEBHOOK_SECRET
 ELEVEN_BASE_URL = "https://api.elevenlabs.io/v1"
 
+log = logging.getLogger(__name__)  # <-- logger
+
+
+def _redact(val: Optional[str]) -> str:
+    """Redact potentially sensitive IDs in logs."""
+    if not val:
+        return "-"
+    if len(val) <= 6:
+        return "***"
+    return f"{val[:3]}…{val[-2:]}"
+
 
 def _verify_hmac(raw_body: bytes, signature_header: Optional[str]) -> None:
     """
@@ -27,30 +39,41 @@ def _verify_hmac(raw_body: bytes, signature_header: Optional[str]) -> None:
     using ELEVENLABS_CONVAI_WEBHOOK_SECRET.
     """
     if not ELEVENLABS_CONVAI_WEBHOOK_SECRET:
+        log.error("webhook.hmac.missing_secret")
         raise HTTPException(500, "ELEVENLABS_CONVAI_WEBHOOK_SECRET not configured")
     if not signature_header:
+        log.warning("webhook.hmac.missing_signature_header")
         raise HTTPException(401, "Missing ElevenLabs-Signature")
 
     try:
         parts = dict(p.split("=", 1) for p in signature_header.split(","))
-        ts = int(parts["t"])
+        ts_str = parts["t"]
         v0 = parts["v0"]
+        ts = int(ts_str)
     except Exception:
+        log.warning("webhook.hmac.malformed_header header=%s", signature_header)
         raise HTTPException(401, "Malformed ElevenLabs-Signature")
 
+    now = int(time.time())
     # Reject very old signatures (30 minutes)
-    if ts < int(time.time()) - 30 * 60:
+    if ts < now - 30 * 60:
+        log.warning("webhook.hmac.stale_signature ts=%s now=%s skew=%ss", ts, now, now - ts)
         raise HTTPException(401, "Stale signature")
 
-    mac = hmac.new(
-        ELEVENLABS_CONVAI_WEBHOOK_SECRET.encode("utf-8"),
-        f"{ts}.{raw_body.decode('utf-8')}".encode("utf-8"),
-        sha256,
-    ).hexdigest()
+    msg = f"{ts}.{raw_body.decode('utf-8')}".encode("utf-8")
+    mac = hmac.new(ELEVENLABS_CONVAI_WEBHOOK_SECRET.encode("utf-8"), msg, sha256).hexdigest()
     expected = "v0=" + mac
     provided = v0 if v0.startswith("v0=") else "v0=" + v0
+
     if not hmac.compare_digest(provided, expected):
+        log.warning(
+            "webhook.hmac.invalid_signature provided=%s expected_prefix=%s",
+            provided[:10] + "…",
+            expected[:10] + "…",
+        )
         raise HTTPException(401, "Invalid signature")
+
+    log.debug("webhook.hmac.valid ts=%s", ts)
 
 
 async def _resolve_user_for_conversation(db: AsyncSession, conversation_id: str) -> Dict[str, Any]:
@@ -61,7 +84,10 @@ async def _resolve_user_for_conversation(db: AsyncSession, conversation_id: str)
     """
     # TODO:
     # row = await db.execute(select(Calls).where(Calls.conversation_id == conversation_id))
-    # return {"user_id": row.user_id, "influencer_id": row.influencer_id, "sid": row.sid}
+    # ret = {"user_id": row.user_id, "influencer_id": row.influencer_id, "sid": row.sid}
+    # log.debug("webhook.resolve_user hit conversation_id=%s user_id=%s", conversation_id, _redact(ret['user_id']))
+    # return ret
+    log.debug("webhook.resolve_user.stub conversation_id=%s", conversation_id)
     return {"user_id": None, "influencer_id": None, "sid": conversation_id}
 
 
@@ -73,8 +99,12 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
     - Bills when status == "done" (idempotent by conversation_id).
     - Responds 200 quickly (webhooks may be disabled after repeated failures).
     """
+    client_ip = request.client.host if request.client else "-"
+    te = (request.headers.get("transfer-encoding") or "").lower()
+    log.info("webhook.receive start ip=%s transfer_encoding=%s", client_ip, te)
+
     # Handle possible chunked bodies (when "Send audio data" is enabled)
-    if request.headers.get("transfer-encoding", "").lower() == "chunked":
+    if te == "chunked":
         buf = bytearray()
         async for chunk in request.stream():
             buf.extend(chunk)
@@ -82,24 +112,33 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
     else:
         raw = await request.body()
 
+    log.debug("webhook.receive.body bytes=%d", len(raw))
+
     sig = request.headers.get("ElevenLabs-Signature") or request.headers.get("elevenlabs-signature")
     _verify_hmac(raw, sig)
+    log.info("webhook.verified ip=%s", client_ip)
 
     try:
         payload = json.loads(raw.decode("utf-8"))
     except Exception:
+        log.warning("webhook.json.invalid ip=%s", client_ip)
         raise HTTPException(400, "Invalid JSON payload")
 
     event_type = payload.get("type")  # "post_call_transcription" or "post_call_audio"
     data = payload.get("data") or {}
 
     conversation_id = data.get("conversation_id")
-    if not conversation_id:
-        # Nothing we can do without a conversation_id
-        return {"ok": False, "reason": "no-conversation-id"}
-
     status = (data.get("status") or "done").lower()
     total_seconds = _extract_total_seconds(data)
+
+    log.info(
+        "webhook.parsed type=%s conv_id=%s status=%s seconds=%s ip=%s",
+        event_type, _redact(conversation_id), status, total_seconds, client_ip
+    )
+
+    if not conversation_id:
+        log.warning("webhook.no_conversation_id ip=%s", client_ip)
+        return {"ok": False, "reason": "no-conversation-id"}
 
     # Derive your user mapping. Prefer the stored mapping from /register.
     meta_map = await _resolve_user_for_conversation(db, conversation_id)
@@ -120,8 +159,36 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
             "source": "webhook",
             "event_type": event_type,
         }
-        # Important: charge_feature must be idempotent by conversation_id
-        charge_feature(db, user_id, "live_chat", int(total_seconds), meta=meta)
+        log.info(
+            "webhook.billing.start user=%s conv_id=%s seconds=%s",
+            _redact(user_id), _redact(conversation_id), total_seconds
+        )
+        try:
+            # Important: charge_feature must be idempotent by conversation_id
+            charge_feature(db, user_id, "live_chat", int(total_seconds), meta=meta)
+            log.info(
+                "webhook.billing.success user=%s conv_id=%s seconds=%s",
+                _redact(user_id), _redact(conversation_id), total_seconds
+            )
+        except Exception as e:
+            # Keep behavior: let the exception bubble (you may choose to swallow and still 200)
+            log.exception(
+                "webhook.billing.error user=%s conv_id=%s err=%s",
+                _redact(user_id), _redact(conversation_id), repr(e)
+            )
+            raise
 
+    else:
+        # Not billing: either not done or no user mapping
+        reason = "not_done" if status != "done" else "no_user"
+        log.info(
+            "webhook.billing.skipped reason=%s conv_id=%s status=%s user=%s",
+            reason, _redact(conversation_id), status, _redact(user_id)
+        )
+
+    log.info(
+        "webhook.response ok=True conv_id=%s status=%s seconds=%s",
+        _redact(conversation_id), status, total_seconds
+    )
     # Always respond quickly with 200 on success.
     return {"ok": True, "conversation_id": conversation_id, "status": status, "total_seconds": int(total_seconds)}
