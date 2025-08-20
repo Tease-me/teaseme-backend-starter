@@ -14,6 +14,7 @@ from app.schemas.elevenlabs import FinalizeConversationBody, RegisterConversatio
 from app.services.billing import charge_feature
 from sqlalchemy import insert, select
 from app.db.models import CallRecord 
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 router = APIRouter(prefix="/elevenlabs", tags=["elevenlabs"])
 log = logging.getLogger(__name__)
@@ -297,28 +298,33 @@ async def get_signed_url(
 async def save_pending_conversation(
     db: AsyncSession,
     conversation_id: str,
-    user_id: str,
+    user_id: int,
     influencer_id: Optional[str],
     sid: Optional[str],
 ) -> None:
     """
-    Upsert a pending conversation mapping.
-    Idempotent by conversation_id.
+    Upsert a pending conversation mapping (PostgreSQL).
+    Idempotent on the primary key (conversation_id).
     """
-    stmt = insert(CallRecord).values(
-        conversation_id=conversation_id,
-        user_id=(user_id),
-        influencer_id=influencer_id,
-        sid=sid,
-        status="pending",
-    ).on_conflict_do_update(
-        index_elements=[CallRecord.conversation_id],
-        set_={
-            "user_id": (user_id),
-            "influencer_id": influencer_id,
-            "sid": sid,
-            "status": "pending",
-        },
+    stmt = (
+        pg_insert(CallRecord)
+        .values(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            influencer_id=influencer_id,
+            sid=sid,
+            status="pending",
+        )
+        # Use the PK or a unique constraint name here
+        .on_conflict_do_update(
+            index_elements=[CallRecord.conversation_id],
+            set_={
+                "user_id": user_id,
+                "influencer_id": influencer_id,
+                "sid": sid,
+                "status": "pending",
+            },
+        )
     )
     await db.execute(stmt)
     await db.commit()
