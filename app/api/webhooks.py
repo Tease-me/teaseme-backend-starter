@@ -1,12 +1,11 @@
 import hmac
 import json
-import os
 import time
 import logging
 import logging
 
 from hashlib import sha256
-from typing import Optional
+from typing import Optional, Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
@@ -26,13 +25,14 @@ ELEVEN_BASE_URL = "https://api.elevenlabs.io/v1"
 log = logging.getLogger(__name__)  # <-- logger
 
 
-def _redact(val: Optional[str]) -> str:
-    """Redact potentially sensitive IDs in logs."""
-    if not val:
+def _redact(val: Any) -> str:
+    """Redact potentially sensitive IDs in logs; works for int/str/None."""
+    if val is None:
         return "-"
-    if len(val) <= 6:
+    s = str(val)
+    if len(s) <= 6:
         return "***"
-    return f"{val[:3]}…{val[-2:]}"
+    return f"{s[:3]}…{s[-2:]}"
 
 
 def _verify_hmac(raw_body: bytes, signature_header: Optional[str]) -> None:
