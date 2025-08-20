@@ -167,7 +167,13 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
         )
         try:
             # Important: charge_feature must be idempotent by conversation_id
-            charge_feature(db, user_id, "live_chat", int(total_seconds), meta=meta)
+            await charge_feature(
+                db,
+                user_id=user_id,
+                feature="live_chat",
+                units=int(total_seconds),
+                meta=meta,
+            )
             log.info(
                 "webhook.billing.success user=%s conv_id=%s seconds=%s",
                 _redact(user_id), _redact(conversation_id), total_seconds
