@@ -307,14 +307,14 @@ async def save_pending_conversation(
     """
     stmt = insert(CallRecord).values(
         conversation_id=conversation_id,
-        user_id=str(user_id),
+        user_id=(user_id),
         influencer_id=influencer_id,
         sid=sid,
         status="pending",
     ).on_conflict_do_update(
         index_elements=[CallRecord.conversation_id],
         set_={
-            "user_id": str(user_id),
+            "user_id": (user_id),
             "influencer_id": influencer_id,
             "sid": sid,
             "status": "pending",
