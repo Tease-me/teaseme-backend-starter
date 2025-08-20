@@ -131,7 +131,7 @@ class CallRecord(Base):
     conversation_id: Mapped[str] = mapped_column(String, primary_key=True)
 
     # Your app's user id (string or int — match your type)
-    user_id: Mapped[str] = mapped_column(String, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
 
     # Optional metadata
     influencer_id: Mapped[str | None] = mapped_column(String, nullable=True)
