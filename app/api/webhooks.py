@@ -3,17 +3,20 @@ import json
 import os
 import time
 import logging
-from hashlib import sha256
-from typing import Any, Dict, Optional
+import logging
 
-import httpx
+from hashlib import sha256
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core.config import settings
 from app.db.session import get_db
 from app.services.billing import charge_feature  # must be idempotent by conversation_id
 from app.api.elevenlabs import _extract_total_seconds  # reuse the same logic
+from sqlalchemy import select
+from app.db.models import CallRecord
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
@@ -76,19 +79,18 @@ def _verify_hmac(raw_body: bytes, signature_header: Optional[str]) -> None:
     log.debug("webhook.hmac.valid ts=%s", ts)
 
 
-async def _resolve_user_for_conversation(db: AsyncSession, conversation_id: str) -> Dict[str, Any]:
-    """
-    Look up your user/influencer/sid for a given conversation_id.
-    This assumes the client called /register when the call started.
-    Implement this to match your DB schema (calls table).
-    """
-    # TODO:
-    # row = await db.execute(select(Calls).where(Calls.conversation_id == conversation_id))
-    # ret = {"user_id": row.user_id, "influencer_id": row.influencer_id, "sid": row.sid}
-    # log.debug("webhook.resolve_user hit conversation_id=%s user_id=%s", conversation_id, _redact(ret['user_id']))
-    # return ret
-    log.debug("webhook.resolve_user.stub conversation_id=%s", conversation_id)
-    return {"user_id": None, "influencer_id": None, "sid": conversation_id}
+async def _resolve_user_for_conversation(db, conversation_id: str):
+    log.info("resolver.called conversation_id=%s", conversation_id)
+    q = select(CallRecord.user_id, CallRecord.influencer_id, CallRecord.sid)\
+        .where(CallRecord.conversation_id == conversation_id)
+    res = await db.execute(q)
+    row = res.first()
+    if not row:
+        log.info("resolver.miss conversation_id=%s", conversation_id)
+        return {"user_id": None, "influencer_id": None, "sid": conversation_id}
+    user_id, influencer_id, sid = row
+    log.info("resolver.hit conversation_id=%s user_id=%s", conversation_id, user_id)
+    return {"user_id": user_id, "influencer_id": influencer_id, "sid": sid or conversation_id}
 
 
 @router.post("/elevenlabs")
