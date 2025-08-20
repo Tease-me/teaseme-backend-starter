@@ -1,18 +1,19 @@
 import asyncio
 import logging
 import random
-from itertools import chain
-from typing import Any, Dict, List, Optional
-
 import httpx
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from itertools import chain
+from typing import Any, Dict, List, Optional
 from app.core.config import settings
 from app.db.models import Influencer
 from app.db.session import get_db
 from app.schemas.elevenlabs import FinalizeConversationBody, RegisterConversationBody
-from app.services.billing import charge_feature  # must be idempotent by conversation_id
+from app.services.billing import charge_feature
+from sqlalchemy import insert, select
+from app.db.models import CallRecord 
 
 router = APIRouter(prefix="/elevenlabs", tags=["elevenlabs"])
 log = logging.getLogger(__name__)
@@ -301,21 +302,33 @@ async def save_pending_conversation(
     sid: Optional[str],
 ) -> None:
     """
-    Insert or upsert a 'pending' record for this conversation (idempotent by conversation_id).
-    Example table schema: calls(conversation_id PK, user_id, influencer_id, sid, status='pending').
-    Implement this to match your DB schema.
+    Upsert a pending conversation mapping.
+    Idempotent by conversation_id.
     """
-    # TODO: implement your upsert
-    return None
+    stmt = insert(CallRecord).values(
+        conversation_id=conversation_id,
+        user_id=str(user_id),
+        influencer_id=influencer_id,
+        sid=sid,
+        status="pending",
+    ).on_conflict_do_update(
+        index_elements=[CallRecord.conversation_id],
+        set_={
+            "user_id": str(user_id),
+            "influencer_id": influencer_id,
+            "sid": sid,
+            "status": "pending",
+        },
+    )
+    await db.execute(stmt)
+    await db.commit()
 
 
 async def was_already_billed(db: AsyncSession, conversation_id: str) -> bool:
-    """
-    Return True if a charge exists for this conversation_id (idempotency guard).
-    Implement this to match your DB schema.
-    """
-    # TODO: SELECT 1 FROM charges WHERE conversation_id = :id LIMIT 1
-    return False
+    q = select(CallRecord.status).where(CallRecord.conversation_id == conversation_id)
+    res = await db.execute(q)
+    row = res.first()
+    return bool(row and row[0] == "billed")
 
 
 @router.post("/conversations/{conversation_id}/register")
