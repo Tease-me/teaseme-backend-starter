@@ -21,6 +21,7 @@ class Influencer(Base):
     owner_id:       Mapped[int | None]   = mapped_column(ForeignKey("users.id"), nullable=True)
     voice_id:       Mapped[str | None]   = mapped_column(String, nullable=True)        # ElevenLabs, etc.
     prompt_template:Mapped[str]          = mapped_column(Text, nullable=False)
+    voice_prompt:   Mapped[str | None] = mapped_column(String, nullable=True)
     daily_scripts:  Mapped[List[str] | None] = mapped_column(JSON, nullable=True)
     influencer_agent_id_third_part: Mapped[str | None] = mapped_column(String, nullable=True)  
     created_at:     Mapped[datetime]     = mapped_column(DateTime, default=datetime.utcnow)
@@ -126,19 +127,15 @@ class DailyUsage(Base):
 
 class CallRecord(Base):
     __tablename__ = "calls"
-
     # ElevenLabs conversation id (primary key)
     conversation_id: Mapped[str] = mapped_column(String, primary_key=True)
-
     # Your app's user id (string or int — match your type)
     user_id: Mapped[int] = mapped_column(Integer, index=True)
-
     # Optional metadata
     influencer_id: Mapped[str | None] = mapped_column(String, nullable=True)
     sid: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="pending")  # pending|billed|failed
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
     __table_args__ = (
         Index("idx_calls_user_created", "user_id", "created_at"),
     )

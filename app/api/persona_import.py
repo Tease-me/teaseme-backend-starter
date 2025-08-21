@@ -1,15 +1,15 @@
-# app/api/persona_import.py
+import csv, io, re, textwrap
+import logging
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import List, Dict, Optional
-import csv, io, re, textwrap
-
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.db.models import Influencer
 from app.api.elevenlabs import _push_prompt_to_elevenlabs
-import logging
+from app.agents.prompt_utils import BASE_SYSTEM
+
 log = logging.getLogger("persona-import")
 
 # =========================
@@ -26,11 +26,13 @@ class PromptItem(BaseModel):
     nickname: Optional[str]
     system_prompt: str            # merged system + developer
     raw_persona: Dict
+    voice_prompt: str 
 
 class ImportResponse(BaseModel):
     total_rows: int
     imported_count: int
     prompts: List[PromptItem]
+
 
 # =========================
 # Helpers
@@ -386,6 +388,55 @@ def build_merged_prompt(system: str, developer: str) -> str:
         + "\n\n---\nDEVELOPER RULES (follow strictly):\n"
         + developer.strip()
     )
+def build_elevenlabs_prompt(p: dict) -> str:
+    """
+    ElevenLabs prompt curto, só para orientar entonação/emoção.
+    Usa campos existentes: name, age, humor_style, romantic_vibe, catchphrases (opcional).
+    """
+    name = p.get("name") or "the speaker"
+    age = p.get("age") or ""
+    age_txt = f"{age} year old " if age else ""
+
+    # Humor/estilo → palavras naturais
+    style = (p.get("humor_style") or "playful").replace("_", " ")
+    # Vibe romântica → frase amigável pra voz
+    vibe_map_words = {
+        "cozy_nights_in": "soft, intimate, late-night whisper vibe",
+        "travel_adventure": "curious, upbeat, a touch of wanderlust",
+        "beach_sunsets": "warm, relaxed, sunset glow",
+        "city_dates": "confident, flirty, urban sparkle",
+        "cottagecore": "gentle, cozy, down-to-earth charm",
+        "night_owl_chats": "hushed, intimate, after-midnight warmth",
+    }
+    vibe = vibe_map_words.get(p.get("romantic_vibe"), "soft, teasing, affectionate")
+
+    # Intensidade (1..5) ajuda a calibrar energia sem virar ‘robô’
+    intensity = int(p.get("intensity") or 3)
+    intensity_txt = {
+        1: "very gentle, low energy",
+        2: "gentle, relaxed",
+        3: "balanced, warm",
+        4: "playfully intense",
+        5: "highly energetic and bold",
+    }.get(intensity, "balanced, warm")
+
+    # Catchphrases: pegue 1 para influenciar levemente a cor
+    catch = ""
+    if (p.get("catchphrases") or []):
+        ex = p["catchphrases"][0].strip()
+        if ex:
+            catch = f' Use this kind of phrasing occasionally: "{ex}".'
+
+    # Emojis: se persona pediu “none/light”, peça fala natural sem overacting
+    emoji_level = (p.get("emoji_level") or "light").lower()
+    emoji_hint = " Keep it natural and never overact." if emoji_level in ("none", "light") else ""
+
+    return (
+        f"You are {name}, a {age_txt}{style} voice. "
+        f"Overall tone: {vibe}. Energy: {intensity_txt}. "
+        "Speak warmly, intimately, and a touch teasing; sound like a real person, not a narrator."
+        f"{catch}{emoji_hint}"
+    )
 
 # =========================
 # CSV Row Parser (EXACT column names)
@@ -513,18 +564,20 @@ async def import_persona_csv(
     prompts: List[PromptItem] = []
     saved_count = 0
 
-    for idx, row in enumerate(rows, start=2):  # header=1, first data row=2
+    for idx, row in enumerate(rows, start=2):
         p = parse_row(row)
         system = build_system_prompt(p)
         developer = build_developer_prompt(p)
         merged = build_merged_prompt(system, developer)
+        voice_prompt = build_elevenlabs_prompt(p)
 
         prompts.append(PromptItem(
             influencer_id=p.get("influencer_id"),
             name=p.get("name"),
             nickname=p.get("nickname"),
             system_prompt=merged,
-            raw_persona=p
+            raw_persona=p,
+            voice_prompt=voice_prompt
         ))
 
         if save:
@@ -533,16 +586,21 @@ async def import_persona_csv(
                 raise HTTPException(400, f"Row {idx}: missing 'influencer_id'.")
             influencer = await db.get(Influencer, influencer_id)
             if influencer is None:
-                influencer = Influencer(id=influencer_id, prompt_template=merged)
+                influencer = Influencer(
+                    id=influencer_id,
+                    prompt_template=merged,
+                    voice_prompt=voice_prompt
+                )
                 db.add(influencer)
             else:
                 influencer.prompt_template = merged
+                influencer.voice_prompt = voice_prompt
             saved_count += 1
 
             agent_id = getattr(influencer, "influencer_agent_id_third_part", None)
             if agent_id:
                 try:
-                    await _push_prompt_to_elevenlabs(agent_id, merged)
+                    await _push_prompt_to_elevenlabs(agent_id, voice_prompt)
                 except HTTPException as e:
                     log.error("ElevenLabs sync failed for %s: %s", influencer.id, e.detail)
 
