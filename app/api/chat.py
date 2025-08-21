@@ -67,6 +67,9 @@ async def _queue_message(
     timeout_sec: float = 2.5,
 ) -> None:
     buf = _buffers.setdefault(chat_id, _Buf())
+
+    # ---- mutate buffer under lock
+    flush_now = False
     async with buf.lock:
         buf.messages.append(msg)
         log.info("[BUF %s] queued: %r (len=%d)", chat_id, msg, len(buf.messages))
@@ -75,18 +78,32 @@ async def _queue_message(
         if buf.timer and not buf.timer.done():
             log.info("[BUF %s] cancel previous timer", chat_id)
             buf.timer.cancel()
+            buf.timer = None
 
-        # immediate flush if thought ended
+        # decide behavior
         if _ends_thought(msg):
-            log.info("[BUF %s] ends_thought=True -> flush now", chat_id)
-            await _flush_buffer(chat_id, ws, influencer_id, user_id, db)
-            return
+            flush_now = True
+        else:
+            log.info("[BUF %s] schedule flush in %.2fs", chat_id, timeout_sec)
 
-        # otherwise, arm a timeout to flush later
-        log.info("[BUF %s] schedule flush in %.2fs", chat_id, timeout_sec)
-        buf.timer = asyncio.create_task(
-            _wait_and_flush(chat_id, ws, influencer_id, user_id, db, timeout_sec)
-        )
+            async def _wait_and_flush():
+                try:
+                    await asyncio.sleep(timeout_sec)
+                    await _flush_buffer(chat_id, ws, influencer_id, user_id, db)
+                except asyncio.CancelledError:
+                    return
+                except Exception:
+                    log.exception("[BUF %s] scheduled-flush failed", chat_id)
+
+            buf.timer = asyncio.create_task(_wait_and_flush())
+
+    # ---- outside the lock: perform the flush now if needed
+    if flush_now:
+        log.info("[BUF %s] ends_thought=True -> flush now", chat_id)
+        try:
+            await _flush_buffer(chat_id, ws, influencer_id, user_id, db)
+        except Exception:
+            log.exception("[BUF %s] flush-now failed", chat_id)
 
 
 async def _wait_and_flush(
@@ -116,10 +133,10 @@ async def _flush_buffer(
     if not buf:
         return
 
+    # Drain messages atomically
     async with buf.lock:
         if not buf.messages:
             return
-
         user_text = " ".join(m.strip() for m in buf.messages if m and m.strip())
         buf.messages.clear()
         buf.timer = None
@@ -129,17 +146,27 @@ async def _flush_buffer(
 
     log.info("[BUF %s] FLUSH start; user_text=%r", chat_id, user_text)
 
-    # bill per flush (burst)
+    # 1) Billing per flush (burst)
     try:
         await charge_feature(
-            db, user_id=user_id, feature="text", units=1, meta={"chat_id": chat_id, "burst": True}
+            db,
+            user_id=user_id,
+            feature="text",
+            units=1,
+            meta={"chat_id": chat_id, "burst": True},
         )
-        await db.commit()
-    except Exception as bill_err:
-        await db.rollback()
-        log.exception("[WS %s] Billing error", chat_id)
+        # ⚠ If charge_feature() commits internally, don't commit here.
+        # If it does NOT commit, you may commit here with a guarded commit.
+        # await db.commit()
+    except Exception:
+        # Avoid rollback conflict if callee already committed/rolled back
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        log.exception("[BUF %s] Billing error", chat_id)
 
-    # call your turn handler (LLM, memories, Redis history, etc.)
+    # 2) Get LLM reply
     try:
         log.info("[BUF %s] calling handle_turn()", chat_id)
         reply = await handle_turn(
@@ -152,27 +179,31 @@ async def _flush_buffer(
         )
         log.info("[BUF %s] handle_turn ok (reply_len=%d)", chat_id, len(reply or ""))
     except Exception:
-        log.exception("[WS %s] handle_turn error", chat_id)
+        log.exception("[BUF %s] handle_turn error", chat_id)
+        # try to tell the client but don't crash if socket closed
         try:
             await ws.send_json({"reply": "Sorry, something went wrong. 😔"})
         except Exception:
             pass
         return
 
-    # persist AI reply
+    # 3) Persist AI reply
     try:
         db.add(Message(chat_id=chat_id, sender="ai", content=reply))
         await db.commit()
     except Exception:
-        await db.rollback()
-        log.exception("[WS %s] Failed to save AI message", chat_id)
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        log.exception("[BUF %s] Failed to save AI message", chat_id)
 
-    # send to client
+    # 4) Send to client
     try:
         await ws.send_json({"reply": reply})
         log.info("[BUF %s] ws.send_json done", chat_id)
     except Exception:
-        log.exception("[WS %s] Failed to send reply", chat_id)
+        log.exception("[BUF %s] Failed to send reply", chat_id)
 
 
 # ---------- WebSocket entrypoint ----------
