@@ -15,6 +15,7 @@ from app.services.billing import charge_feature
 from sqlalchemy import insert, select
 from app.db.models import CallRecord 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from app.services.billing import can_afford, get_remaining_units
 
 router = APIRouter(prefix="/elevenlabs", tags=["elevenlabs"])
 log = logging.getLogger(__name__)
@@ -271,17 +272,35 @@ def _extract_total_seconds(conversation_json: Dict[str, Any]) -> int:
 @router.get("/signed-url")
 async def get_signed_url(
     influencer_id: str,
+    user_id: int = Query(..., description="Numeric user id"),
     db: AsyncSession = Depends(get_db),
     first_message: Optional[str] = Query(None),
     # "random" or "rr" (round-robin). Use pattern instead of deprecated regex.
     greeting_mode: str = Query("random", pattern="^(random|rr)$"),
 ):
     """
-    (1) Optionally update the agent's first_message (greeting).
-    (2) Return a signed_url for the client to open a conversation.
-    WARNING: PATCHing the agent updates it globally. If concurrent users need distinct
-    greetings, prefer a per-conversation override mechanism if available.
+    (1) Check user credits before starting a live chat call.
+    (2) Optionally update the agent's first_message (greeting).
+    (3) Return a signed_url for the client to open a conversation.
+    
+    NOTE: PATCHing the agent updates it globally.
+    If concurrent users need distinct greetings, prefer a per-conversation override.
     """
+    # --- Check credits before starting call ---
+    ok, cost_cents, free_left = await can_afford(
+        db, user_id=user_id, feature="live_chat", units=10   # Reserve 10s minimum
+    )
+    if not ok:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "error": "INSUFFICIENT_CREDITS",
+                "needed_cents": cost_cents,
+                "free_left": free_left,
+            },
+        )
+    credits_remainder_secs = await get_remaining_units(db, user_id, feature="live_chat")
+
     agent_id = await get_agent_id_from_influencer(db, influencer_id)
     greeting = first_message or _pick_greeting(influencer_id, greeting_mode)
 
@@ -290,7 +309,12 @@ async def get_signed_url(
         await _patch_agent_config(client, agent_id, first_message=greeting)
         signed_url = await _get_conversation_signed_url(client, agent_id)
 
-    return {"signed_url": signed_url, "greeting_used": greeting, "agent_id": agent_id}
+    return {
+        "signed_url": signed_url,
+        "greeting_used": greeting,
+        "agent_id": agent_id,
+        "credits_remainder_secs": credits_remainder_secs,
+    }
 
 
 # ---------- Persistence hooks (stubs) ----------

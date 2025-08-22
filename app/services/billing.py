@@ -201,3 +201,34 @@ async def can_afford(
 
     ok = balance >= cost_cents
     return ok or (cost_cents == 0), cost_cents, free_left
+
+async def get_remaining_units(db: AsyncSession, user_id: int, feature: str) -> int:
+    """
+    Compute how many units (messages, seconds, etc.) the user can still afford
+    = free_allowance_left + wallet_balance / unit_price
+    """
+    from sqlalchemy import select
+    from datetime import date
+    from app.db.models import Pricing, DailyUsage, CreditWallet
+
+    price: Pricing | None = await db.scalar(
+        select(Pricing).where(Pricing.feature == feature, Pricing.is_active.is_(True))
+    )
+    if not price:
+        return 0
+
+    unit_price_cents = price.price_cents
+    free_allowance = price.free_allowance or 0
+
+    # usage today
+    today = date.today()
+    usage: DailyUsage | None = await db.get(DailyUsage, (user_id, today))
+    used = getattr(usage, f"{feature}_secs", 0) if usage else 0
+    free_left = max(free_allowance - (used or 0), 0)
+
+    # wallet
+    wallet: CreditWallet | None = await db.get(CreditWallet, user_id)
+    balance_cents = wallet.balance_cents if wallet else 0
+    paid = balance_cents // unit_price_cents if unit_price_cents > 0 else 0
+
+    return int(free_left + paid)
