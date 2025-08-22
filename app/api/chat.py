@@ -20,7 +20,7 @@ from app.schemas.chat import ChatCreateRequest,PaginatedMessages
 from app.core.config import settings
 from app.utils.chat import transcribe_audio, synthesize_audio_with_elevenlabs, synthesize_audio_with_bland_ai, get_ai_reply_via_websocket
 from app.utils.s3 import save_audio_to_s3, save_ia_audio_to_s3, generate_presigned_url, message_to_schema_with_presigned
-from app.services.billing import charge_feature, get_duration_seconds
+from app.services.billing import charge_feature, get_duration_seconds, can_afford
 
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = settings.ALGORITHM
@@ -37,6 +37,7 @@ async def start_chat(
     chat_id = await get_or_create_chat(db, data.user_id, data.influencer_id)
     return {"chat_id": chat_id}
 
+# TODO: add code in the right place
 # ---------- Buffer state ----------
 class _Buf:
     __slots__ = ("messages", "timer", "lock")
@@ -104,7 +105,6 @@ async def _queue_message(
             await _flush_buffer(chat_id, ws, influencer_id, user_id, db)
         except Exception:
             log.exception("[BUF %s] flush-now failed", chat_id)
-
 
 async def _wait_and_flush(
     chat_id: str,
@@ -241,6 +241,22 @@ async def websocket_chat(
 
             chat_id = raw.get("chat_id") or f"{user_id}_{influencer_id}"
 
+            # 🔒 PRE-CHECK: deny if user cannot afford a burst (1 unit)
+            ok, cost, free_left = await can_afford(db, user_id=user_id, feature="text", units=1)
+            if not ok:
+                # send a structured error and DO NOT save/enqueue
+                await ws.send_json({
+                    "ok": False,
+                    "type": "billing_error",
+                    "error": "INSUFFICIENT_CREDITS",
+                    "message": "You’re out of free texts and credits. Please top up to continue.",
+                    "needed_cents": cost,
+                    "free_left": free_left,
+                })
+                # optionally close socket with specific code:
+                # await ws.close(code=4402)
+                continue
+
             # save user message (with embedding)
             try:
                 emb = await get_embedding(text)
@@ -327,6 +343,20 @@ async def chat_audio(
     
     seconds = get_duration_seconds(file_bytes, file.content_type)
 
+     # 🔒 PRE-CHECK: deny if cannot afford 'seconds' of voice
+    ok, cost, free_left = await can_afford(db, user_id=user_id, feature="voice", units=int(seconds))
+    if not ok:
+        # 402 Payment Required with structured detail
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "error": "INSUFFICIENT_CREDITS",
+                "message": "You’re out of free voice and credits. Please top up to continue.",
+                "needed_cents": cost,
+                "free_left": free_left,
+            },
+        )
+    
     # ◆ charge before heavy calls
     await charge_feature(
         db, user_id=user_id, feature="voice",
