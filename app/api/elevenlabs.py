@@ -351,12 +351,6 @@ async def get_signed_url(
             "method": "POST",
             "request_headers": { "X-Webhook-Token": WEBHOOK_SECRET or "" }
         },
-        # ⬇️ valores CONCRETOS, sem placeholders
-        "dynamic_variables": {
-            "chat_id": '3f1c3f2d-cf3d-43cf-b8c6-e0cfe5b0b669',
-            "user_id": 1,
-            "influencer_id": 'bella'
-        }
     }
 
     # Força o agente a usar o tool a cada turno
@@ -374,6 +368,11 @@ async def get_signed_url(
                 "first_message": greeting,   # (global)
                 **agent_rules,
                 "tools": [tool_def],
+                "dynamic_variables": {
+                    "chat_id": '3f1c3f2d-cf3d-43cf-b8c6-e0cfe5b0b669',
+                    "user_id": 1,
+                    "influencer_id": 'bella'
+                }
             },
             "conversation": {
                 "client_events": ["conversation_initiation_metadata"]
