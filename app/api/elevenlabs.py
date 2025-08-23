@@ -347,7 +347,7 @@ async def get_signed_url(
         "name": "reply_with_backend",
         "type": "webhook",
         "api_schema": {
-            "url": f"{PUBLIC_BASE}/elevenlabs/reply",
+            "url": f"{PUBLIC_BASE}/webhooks/reply",
             "method": "POST",
             "request_headers": { "X-Webhook-Token": WEBHOOK_SECRET or "" }
         },
