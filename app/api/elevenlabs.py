@@ -269,8 +269,8 @@ def _extract_total_seconds(conversation_json: Dict[str, Any]) -> int:
     return max(0, int(max_sec))
 
 
-@router.get("/signed-url")
-async def get_signed_url(
+@router.get("/signed-url-free")
+async def get_signed_url_free(
     influencer_id: str,
     user_id: int = Query(..., description="Numeric user id"),
     db: AsyncSession = Depends(get_db),
@@ -287,8 +287,39 @@ async def get_signed_url(
     If concurrent users need distinct greetings, prefer a per-conversation override.
     """
     # --- Check credits before starting call ---
+
+    agent_id = await get_agent_id_from_influencer(db, influencer_id)
+    greeting = first_message or _pick_greeting(influencer_id, greeting_mode)
+
+    async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
+        # Only update first_message here. Prompt updates should use _push_prompt_to_elevenlabs elsewhere.
+        await _patch_agent_config(client, agent_id, first_message=greeting)
+        signed_url = await _get_conversation_signed_url(client, agent_id)
+
+    return {
+        "signed_url": signed_url,
+        "greeting_used": greeting,
+        "agent_id": agent_id,
+    }
+
+@router.get("/signed-url")
+async def get_signed_url(
+    influencer_id: str,
+    user_id: int = Query(..., description="Numeric user id"),
+    db: AsyncSession = Depends(get_db),
+    first_message: Optional[str] = Query(None),
+    greeting_mode: str = Query("random", pattern="^(random|rr)$"),
+):
+    """
+    (1) Check user credits before starting a live chat call.
+    (2) Optionally update the agent's first_message (greeting).
+    (3) Return a signed_url for the client to open a conversation.
+
+    NOTE: PATCHing the agent updates it globally.
+    """
+    # --- Check credits before starting call ---
     ok, cost_cents, free_left = await can_afford(
-        db, user_id=user_id, feature="live_chat", units=10   # Reserve 10s minimum
+        db, user_id=user_id, feature="live_chat", units=10
     )
     if not ok:
         raise HTTPException(
@@ -301,13 +332,82 @@ async def get_signed_url(
         )
     credits_remainder_secs = await get_remaining_units(db, user_id, feature="live_chat")
 
+    # --- Resolve agent + greeting ---
     agent_id = await get_agent_id_from_influencer(db, influencer_id)
     greeting = first_message or _pick_greeting(influencer_id, greeting_mode)
 
-    async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
-        # Only update first_message here. Prompt updates should use _push_prompt_to_elevenlabs elsewhere.
-        await _patch_agent_config(client, agent_id, first_message=greeting)
-        signed_url = await _get_conversation_signed_url(client, agent_id)
+    # --- Concrete per-call meta for the webhook tool ---
+    chat_id = f"{user_id}_{influencer_id}"
+    PUBLIC_BASE = settings.PUBLIC_BASE_URL
+    WEBHOOK_SECRET = settings.ELEVENLABS_CONVAI_WEBHOOK_SECRET
+    if not PUBLIC_BASE:
+        raise HTTPException(500, "PUBLIC_BASE_URL is not configured")
+
+    tool_def = {
+        "name": "reply_with_backend",
+        "type": "webhook",
+        "api_schema": {
+            "url": f"{PUBLIC_BASE}/webhooks/reply",
+            "method": "POST",
+            "request_headers": { "X-Webhook-Token": WEBHOOK_SECRET or "" }
+        },
+    }
+
+    # Força o agente a usar o tool a cada turno
+    agent_rules = {
+        "prompt": {
+            "prompt": "For every user turn, always call the tool `reply_with_backend`. Do not compose responses yourself."
+        }
+    }
+
+    # PATCH payload: mantém first_message + tools + client_events
+    patch_payload = {
+        "agent_id": agent_id,
+        "conversation_config": {
+            "agent": {
+                "first_message": greeting,   # (global)
+                **agent_rules,
+                "tools": [tool_def],
+            },
+            "conversation": {
+                "client_events": ["conversation_initiation_metadata"],
+                 "client_data": {
+                    "chat_id": '3f1c3f2d-cf3d-43cf-b8c6-e0cfe5b0b669',
+                    "user_id": 1,
+                    "influencer_id": 'bella'
+                }
+            }
+        }
+    }
+
+    # HTTP/2 fallback se h2 não estiver instalado
+    try:
+        import h2  # noqa: F401
+        _http2 = True
+    except Exception:
+        _http2 = False
+
+    async with httpx.AsyncClient(http2=_http2, base_url=ELEVEN_BASE_URL, timeout=20.0) as client:
+        # PATCH com greeting + tool + client_events
+        patch = await client.patch(
+            f"/convai/agents/{agent_id}",
+            headers=_headers(),
+            json=patch_payload,
+        )
+        if patch.status_code >= 400:
+            log.error("ElevenLabs PATCH failed: %s %s", patch.status_code, patch.text[:500])
+            raise HTTPException(status_code=424, detail="Failed to update agent config")
+
+        # GET signed URL
+        r = await client.get(
+            "/convai/conversation/get-signed-url",
+            params={"agent_id": agent_id},
+            headers=_headers(),
+        )
+        if r.status_code != 200:
+            log.error("signed-url failed: %s %s", r.status_code, r.text[:500])
+            raise HTTPException(status_code=400, detail="Failed to get signed url")
+        signed_url = r.json()["signed_url"]
 
     return {
         "signed_url": signed_url,
@@ -456,3 +556,4 @@ async def finalize_conversation(
         "total_seconds": total_seconds,
         "meta": meta,
     }
+
