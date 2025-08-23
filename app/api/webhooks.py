@@ -6,7 +6,7 @@ import logging
 
 from hashlib import sha256
 from typing import Optional, Any
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.session import get_db
@@ -14,6 +14,7 @@ from app.services.billing import charge_feature  # must be idempotent by convers
 from app.api.elevenlabs import _extract_total_seconds  # reuse the same logic
 from sqlalchemy import select
 from app.db.models import CallRecord
+from app.agents.turn_handler import handle_turn
 
 log = logging.getLogger(__name__)
 
@@ -23,7 +24,6 @@ ELEVENLABS_CONVAI_WEBHOOK_SECRET = settings.ELEVENLABS_CONVAI_WEBHOOK_SECRET
 ELEVEN_BASE_URL = "https://api.elevenlabs.io/v1"
 
 log = logging.getLogger(__name__)  # <-- logger
-
 
 def _redact(val: Any) -> str:
     """Redact potentially sensitive IDs in logs; works for int/str/None."""
@@ -92,6 +92,74 @@ async def _resolve_user_for_conversation(db, conversation_id: str):
     log.info("resolver.hit conversation_id=%s user_id=%s", conversation_id, user_id)
     return {"user_id": user_id, "influencer_id": influencer_id, "sid": sid or conversation_id}
 
+def _verify_token(shared: str, token: str | None) -> None:
+    """Simple shared-secret check (constant time if you prefer)."""
+    if not shared:  # secret disabled
+        return
+    if not token:
+        raise HTTPException(status_code=403, detail="Missing webhook token")
+    # constant-time compare (avoid timing attacks)
+    if not hmac.compare_digest(shared, token):
+        raise HTTPException(status_code=403, detail="Invalid webhook token")
+
+@router.post("/reply")
+async def eleven_webhook_reply(
+    req: Request,
+    db: AsyncSession = Depends(get_db),
+    x_webhook_token: str | None = Header(default=None),
+):
+    """
+    Webhook tool for ElevenLabs ConvAI.
+    Called every time the user speaks; returns the text Eleven should say.
+    """
+    # 1) Auth
+    _verify_token(ELEVENLABS_CONVAI_WEBHOOK_SECRET, x_webhook_token)
+
+    # 2) Parse payload safely
+    try:
+        payload = await req.json()
+    except Exception:
+        # Keep response fast & safe to avoid ConvAI timeouts
+        return {"text": "Sorry, I didn’t catch that. Could you repeat?"}
+
+    # Optional: don’t dump full payload in prod logs (PII). Truncate.
+    try:
+        log.info("[EL TOOL] payload(head)=%s", str(payload)[:800])
+    except Exception:
+        pass
+
+    # 3) Extract user text (accept common shapes)
+    user_text = (
+        (payload.get("text") or "").strip()
+        or (payload.get("input") or "").strip()
+        or (payload.get("arguments", {}).get("text") or "").strip()
+    )
+
+    meta = payload.get("meta") or {}
+    user_id       = meta.get("user_id")
+    influencer_id = meta.get("influencer_id") or "anna"
+    chat_id       = meta.get("chat_id") or (f"{user_id}_{influencer_id}" if user_id else "unknown_chat")
+
+    if not user_text:
+        return {"text": "I didn’t catch that. Could you repeat?"}
+
+    # 4) Generate reply via your pipeline
+    try:
+        reply = await handle_turn(
+            message=user_text,
+            chat_id=chat_id,
+            influencer_id=influencer_id,
+            user_id=user_id,
+            db=db,
+            is_audio=True,
+        )
+    except Exception as e:
+        log.exception("[EL TOOL] handle_turn failed: %s", e)
+        reply = "Sorry, something went wrong."
+
+    # 5) Return exactly what the agent should say
+    # Keep it short & natural; your prompts will enforce this.
+    return {"text": reply}
 
 @router.post("/elevenlabs")
 async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_db)):
@@ -126,7 +194,7 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
         log.warning("webhook.json.invalid ip=%s", client_ip)
         raise HTTPException(400, "Invalid JSON payload")
 
-    event_type = payload.get("type")  # "post_call_transcription" or "post_call_audio"
+    event_type = payload.get("type")
     data = payload.get("data") or {}
 
     conversation_id = data.get("conversation_id")
