@@ -269,8 +269,8 @@ def _extract_total_seconds(conversation_json: Dict[str, Any]) -> int:
     return max(0, int(max_sec))
 
 
-@router.get("/signed-url")
-async def get_signed_url(
+@router.get("/signed-url-free")
+async def get_signed_url_free(
     influencer_id: str,
     user_id: int = Query(..., description="Numeric user id"),
     db: AsyncSession = Depends(get_db),
@@ -302,8 +302,8 @@ async def get_signed_url(
         "agent_id": agent_id,
     }
 
-@router.get("/signed-url_test")
-async def get_signed_url_test(
+@router.get("/signed-url")
+async def get_signed_url(
     influencer_id: str,
     user_id: int = Query(..., description="Numeric user id"),
     db: AsyncSession = Depends(get_db),
@@ -351,6 +351,11 @@ async def get_signed_url_test(
             "method": "POST",
             "request_headers": { "X-Webhook-Token": WEBHOOK_SECRET or "" }
         },
+        "dynamic_variables": {
+                    "chat_id": '3f1c3f2d-cf3d-43cf-b8c6-e0cfe5b0b669',
+                    "user_id": 1,
+                    "influencer_id": 'bella'
+        }
     }
 
     # Força o agente a usar o tool a cada turno
@@ -371,11 +376,7 @@ async def get_signed_url_test(
             },
             "conversation": {
                 "client_events": ["conversation_initiation_metadata"],
-                 "client_data": {
-                    "chat_id": '3f1c3f2d-cf3d-43cf-b8c6-e0cfe5b0b669',
-                    "user_id": 1,
-                    "influencer_id": 'bella'
-                }
+                 
             }
         }
     }
