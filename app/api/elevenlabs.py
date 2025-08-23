@@ -316,9 +316,7 @@ async def get_signed_url(
         "credits_remainder_secs": credits_remainder_secs,
     }
 
-
 # ---------- Persistence hooks (stubs) ----------
-
 async def save_pending_conversation(
     db: AsyncSession,
     conversation_id: str,
