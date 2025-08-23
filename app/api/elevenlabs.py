@@ -371,7 +371,11 @@ async def get_signed_url(
             },
             "conversation": {
                 "client_events": ["conversation_initiation_metadata"],
-                 
+                 "client_data": {
+                    "chat_id": '3f1c3f2d-cf3d-43cf-b8c6-e0cfe5b0b669',
+                    "user_id": 1,
+                    "influencer_id": 'bella'
+                }
             }
         }
     }
