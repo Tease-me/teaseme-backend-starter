@@ -269,8 +269,8 @@ def _extract_total_seconds(conversation_json: Dict[str, Any]) -> int:
     return max(0, int(max_sec))
 
 
-@router.get("/signed-url-free")
-async def get_signed_url_free(
+@router.get("/signed-url")
+async def get_signed_url(
     influencer_id: str,
     user_id: int = Query(..., description="Numeric user id"),
     db: AsyncSession = Depends(get_db),
@@ -302,8 +302,8 @@ async def get_signed_url_free(
         "agent_id": agent_id,
     }
 
-@router.get("/signed-url")
-async def get_signed_url(
+@router.get("/signed-url_test")
+async def get_signed_url_test(
     influencer_id: str,
     user_id: int = Query(..., description="Numeric user id"),
     db: AsyncSession = Depends(get_db),
