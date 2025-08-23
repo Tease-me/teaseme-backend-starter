@@ -353,9 +353,9 @@ async def get_signed_url(
         },
         # ⬇️ valores CONCRETOS, sem placeholders
         "dynamic_variables": {
-            "chat_id": chat_id,
-            "user_id": user_id,
-            "influencer_id": influencer_id
+            "chat_id": '3f1c3f2d-cf3d-43cf-b8c6-e0cfe5b0b669',
+            "user_id": 1,
+            "influencer_id": 'bella'
         }
     }
 
