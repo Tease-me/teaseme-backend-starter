@@ -131,8 +131,8 @@ class CallRecord(Base):
     conversation_id: Mapped[str] = mapped_column(String, primary_key=True)
     user_id: Mapped[int] = mapped_column(Integer, index=True)
     influencer_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    chat_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("chats.id"), nullable=True, index=True
+    chat_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("chats.id"), nullable=True, index=True
     )
     sid: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="pending")
