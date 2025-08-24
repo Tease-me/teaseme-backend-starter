@@ -122,18 +122,12 @@ async def _wait_and_flush(
         return
 
 # ---------- Do the flush: concat, charge, call LLM, persist, reply ----------
-async def _flush_buffer(
-    chat_id: str,
-    ws: WebSocket,
-    influencer_id: str,
-    user_id: int,
-    db: AsyncSession,  # keep the signature, but DO NOT use this to write in here
-) -> None:
+
+async def _flush_buffer(chat_id: str, ws: WebSocket, influencer_id: str, user_id: int, db: AsyncSession) -> None:
     buf = _buffers.get(chat_id)
     if not buf:
         return
 
-    # Drain messages atomically
     async with buf.lock:
         if not buf.messages:
             return
@@ -146,14 +140,11 @@ async def _flush_buffer(
 
     log.info("[BUF %s] FLUSH start; user_text=%r", chat_id, user_text)
 
-    # 1) Billing per flush (burst) - use a fresh session
+    # 1) Billing – fresh session
     async for db_bill in get_db():
         try:
             await charge_feature(
-                db_bill,
-                user_id=user_id,
-                feature="text",
-                units=1,
+                db_bill, user_id=user_id, feature="text", units=1,
                 meta={"chat_id": chat_id, "burst": True},
             )
             await db_bill.commit()
@@ -161,21 +152,23 @@ async def _flush_buffer(
             await db_bill.rollback()
             log.error("[WS %s] Billing error: %s", chat_id, e)
         finally:
-            break  # close fresh session
+            break
 
-    # 2) Get LLM reply (avoid writing with shared session here)
+    # 2) Get LLM reply – fresh session for handle_turn
     try:
         log.info("[BUF %s] calling handle_turn()", chat_id)
-        # safest: do not pass the shared session; inside handle_turn,
-        # if you need DB, open / close its own session like above
-        reply = await handle_turn(
-            message=user_text,
-            chat_id=chat_id,
-            influencer_id=influencer_id,
-            user_id=user_id,
-            db=None,         # <- avoid reusing 'db' here
-            is_audio=False,
-        )
+        async for db_ht in get_db():
+            try:
+                reply = await handle_turn(
+                    message=user_text,
+                    chat_id=chat_id,
+                    influencer_id=influencer_id,
+                    user_id=user_id,
+                    db=db_ht,           # <<<<<<<<<< give it a real session
+                    is_audio=False,
+                )
+            finally:
+                break
         log.info("[BUF %s] handle_turn ok (reply_len=%d)", chat_id, len(reply or ""))
     except Exception:
         log.exception("[BUF %s] handle_turn error", chat_id)
@@ -185,26 +178,18 @@ async def _flush_buffer(
             pass
         return
 
-    # 3) Persist AI reply - use another fresh session
+    # 3) Persist AI reply – fresh session
     async for db_ai in get_db():
         try:
-            # Option A: ORM
-            # db_ai.add(Message(chat_id=chat_id, sender="ai", content=reply))
-
-            # Option B (safer in flush contexts): Core INSERT
             await db_ai.execute(
-                insert(Message).values(
-                    chat_id=chat_id,
-                    sender="ai",
-                    content=reply,
-                )
+                insert(Message).values(chat_id=chat_id, sender="ai", content=reply)
             )
             await db_ai.commit()
         except Exception:
             await db_ai.rollback()
             log.exception("[WS %s] Failed to save AI message", chat_id)
         finally:
-            break  # close fresh session
+            break
 
     # 4) Send to client
     try:
