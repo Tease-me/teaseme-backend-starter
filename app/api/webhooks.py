@@ -152,8 +152,7 @@ async def eleven_webhook_reply(
             if rec:
                 user_id       = user_id or rec.user_id
                 influencer_id = influencer_id or rec.influencer_id
-                if not chat_id and rec.user_id and rec.influencer_id:
-                    chat_id = f"{rec.user_id}_{rec.influencer_id}"
+                chat_id = rec.chat_id
         except Exception as e:
             log.exception("[EL TOOL] lookup CallRecord failed: %s", e)
 

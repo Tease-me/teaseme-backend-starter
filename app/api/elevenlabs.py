@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from itertools import chain
 from typing import Any, Dict, List, Optional
 from app.core.config import settings
-from app.db.models import Influencer
+from app.db.models import Influencer, Chat
 from app.db.session import get_db
 from app.schemas.elevenlabs import FinalizeConversationBody, RegisterConversationBody
 from app.services.billing import charge_feature
@@ -328,12 +328,22 @@ async def save_pending_conversation(
     Upsert a pending conversation mapping (PostgreSQL).
     Idempotent on the primary key (conversation_id).
     """
+    result = await db.execute(
+        select(Chat).where(Chat.user_id == user_id, Chat.influencer_id == influencer_id)
+    )
+    chat = result.scalar_one_or_none()
+    if not chat:
+        chat = Chat(user_id=user_id, influencer_id=influencer_id)
+        db.add(chat)
+        await db.flush()
+
     stmt = (
         pg_insert(CallRecord)
         .values(
             conversation_id=conversation_id,
             user_id=user_id,
             influencer_id=influencer_id,
+            chat_id=chat.id,
             sid=sid,
             status="pending",
         )
@@ -343,6 +353,7 @@ async def save_pending_conversation(
             set_={
                 "user_id": user_id,
                 "influencer_id": influencer_id,
+                "chat_id": chat.id,
                 "sid": sid,
                 "status": "pending",
             },
