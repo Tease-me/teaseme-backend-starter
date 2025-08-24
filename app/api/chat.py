@@ -13,7 +13,7 @@ from app.db.models import Message
 from jose import jwt
 from app.api.utils import get_embedding
 from starlette.websockets import WebSocketDisconnect
-from sqlalchemy import select, func
+from sqlalchemy import select, func, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.chat_service import get_or_create_chat
 from app.schemas.chat import ChatCreateRequest,PaginatedMessages
@@ -127,7 +127,7 @@ async def _flush_buffer(
     ws: WebSocket,
     influencer_id: str,
     user_id: int,
-    db: AsyncSession,
+    db: AsyncSession,  # keep the signature, but DO NOT use this to write in here
 ) -> None:
     buf = _buffers.get(chat_id)
     if not buf:
@@ -146,64 +146,72 @@ async def _flush_buffer(
 
     log.info("[BUF %s] FLUSH start; user_text=%r", chat_id, user_text)
 
-    # 1) Billing per flush (burst)
-    try:
-        await charge_feature(
-            db,
-            user_id=user_id,
-            feature="text",
-            units=1,
-            meta={"chat_id": chat_id, "burst": True},
-        )
-        # ⚠ If charge_feature() commits internally, don't commit here.
-        # If it does NOT commit, you may commit here with a guarded commit.
-        # await db.commit()
-    except Exception:
-        # Avoid rollback conflict if callee already committed/rolled back
+    # 1) Billing per flush (burst) - use a fresh session
+    async for db_bill in get_db():
         try:
-            await db.rollback()
-        except Exception:
-            pass
-        log.exception("[BUF %s] Billing error", chat_id)
+            await charge_feature(
+                db_bill,
+                user_id=user_id,
+                feature="text",
+                units=1,
+                meta={"chat_id": chat_id, "burst": True},
+            )
+            await db_bill.commit()
+        except Exception as e:
+            await db_bill.rollback()
+            log.error("[WS %s] Billing error: %s", chat_id, e)
+        finally:
+            break  # close fresh session
 
-    # 2) Get LLM reply
+    # 2) Get LLM reply (avoid writing with shared session here)
     try:
         log.info("[BUF %s] calling handle_turn()", chat_id)
+        # safest: do not pass the shared session; inside handle_turn,
+        # if you need DB, open / close its own session like above
         reply = await handle_turn(
             message=user_text,
             chat_id=chat_id,
             influencer_id=influencer_id,
             user_id=user_id,
-            db=db,
+            db=None,         # <- avoid reusing 'db' here
             is_audio=False,
         )
         log.info("[BUF %s] handle_turn ok (reply_len=%d)", chat_id, len(reply or ""))
     except Exception:
         log.exception("[BUF %s] handle_turn error", chat_id)
-        # try to tell the client but don't crash if socket closed
         try:
             await ws.send_json({"reply": "Sorry, something went wrong. 😔"})
         except Exception:
             pass
         return
 
-    # 3) Persist AI reply
-    try:
-        db.add(Message(chat_id=chat_id, sender="ai", content=reply))
-        await db.commit()
-    except Exception:
+    # 3) Persist AI reply - use another fresh session
+    async for db_ai in get_db():
         try:
-            await db.rollback()
+            # Option A: ORM
+            # db_ai.add(Message(chat_id=chat_id, sender="ai", content=reply))
+
+            # Option B (safer in flush contexts): Core INSERT
+            await db_ai.execute(
+                insert(Message).values(
+                    chat_id=chat_id,
+                    sender="ai",
+                    content=reply,
+                )
+            )
+            await db_ai.commit()
         except Exception:
-            pass
-        log.exception("[BUF %s] Failed to save AI message", chat_id)
+            await db_ai.rollback()
+            log.exception("[WS %s] Failed to save AI message", chat_id)
+        finally:
+            break  # close fresh session
 
     # 4) Send to client
     try:
         await ws.send_json({"reply": reply})
         log.info("[BUF %s] ws.send_json done", chat_id)
     except Exception:
-        log.exception("[BUF %s] Failed to send reply", chat_id)
+        log.exception("[WS %s] Failed to send reply", chat_id)
 
 
 # ---------- WebSocket entrypoint ----------
