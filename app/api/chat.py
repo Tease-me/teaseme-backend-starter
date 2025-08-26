@@ -29,7 +29,7 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 log = logging.getLogger("chat")
 
-@router.post("/")
+@router.post("")
 async def start_chat(
     data: ChatCreateRequest, 
     db: AsyncSession = Depends(get_db)
