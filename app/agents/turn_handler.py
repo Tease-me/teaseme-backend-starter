@@ -10,6 +10,7 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import RedisChatMessageHistory
 from app.db.models import Influencer
 from fastapi import HTTPException
+from app.utils.tts_sanitizer import sanitize_tts_text
 
 log = logging.getLogger("teaseme-turn")
 
@@ -48,9 +49,7 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
 
     history = redis_history(chat_id)
 
-    # ---- LOG the fully-rendered prompt (for debugging only) ----
     try:
-        # Use existing messages; if you trimmed them above, use the trimmed list.
         hist_msgs = history.messages
         rendered = prompt.format_prompt(input=message, history=hist_msgs)
         full_prompt_text = rendered.to_string()          # or: "\n".join([m.content for m in rendered.to_messages()])
@@ -69,17 +68,12 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     runnable = RunnableWithMessageHistory(
         chain, lambda _: history, input_messages_key="input", history_messages_key="history")
     
-    #log.debug("[%s] ==== FINAL PROMPT ====\n%s", cid, persona_rules)
-
     try:
         result = await runnable.ainvoke({"input": message}, config={"configurable": {"session_id": chat_id}})
         reply = result.content
     except Exception as e:
         log.error("[%s] LLM error: %s", cid, e, exc_info=True)
         return "Sorry, something went wrong. 😔"
-    
-    #log.debug("[%s] persona_len=%d mem_len=%d daily_len=%d", 
-          #cid, len(persona_rules), len(mem_block), len((await get_today_script(db, influencer_id)) or ""))
 
     update_score(user_id or chat_id, influencer_id, extract_score(reply, score))
 
@@ -95,5 +89,7 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     except Exception as ex:
         log.error("[%s] Fact extraction failed: %s", cid, ex, exc_info=True)
 
-    #log.info("[%s] END %.1f ms", cid, (time.perf_counter() - start) * 1000)
+    if is_audio:
+        tts_text = sanitize_tts_text(reply)
+        return tts_text
     return reply
