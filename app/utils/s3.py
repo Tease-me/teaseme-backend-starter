@@ -1,8 +1,7 @@
 import boto3
 import uuid
 import io
-from fastapi import UploadFile
-from app.core.config import settings
+from app.schemas.chat import MessageSchema
 
 s3 = boto3.client("s3")
 BUCKET_NAME = "bucket-audio-message-tease-me"
@@ -27,4 +26,17 @@ def generate_presigned_url(key: str, expires: int = 3600) -> str:
         "get_object",
         Params={"Bucket": BUCKET_NAME, "Key": key},
         ExpiresIn=expires
+    )
+
+def message_to_schema_with_presigned(msg):
+    audio_url = msg.audio_url
+    if audio_url:
+        audio_url = generate_presigned_url(audio_url)
+    return MessageSchema(
+        id=msg.id,
+        chat_id=msg.chat_id,
+        sender=msg.sender,
+        content=msg.content,
+        created_at=msg.created_at,
+        audio_url=audio_url
     )

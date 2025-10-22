@@ -1,18 +1,15 @@
 import os
 import io
 import wave
+import openai
+import tempfile
+import httpx
 
 from fastapi import  Depends, HTTPException
-
 from app.agents.turn_handler import handle_turn
 from app.db.session import get_db
 from app.core.config import settings
 from app.db.models import Influencer
-
-import openai
-import tempfile
-
-import httpx
 
 BLAND_API_KEY =settings.BLAND_API_KEY
 BLAND_VOICE_ID = settings.BLAND_VOICE_ID
@@ -61,7 +58,6 @@ async def get_ai_reply_via_websocket(chat_id: str,message: str, influencer_id: s
     return reply
 
 async def synthesize_audio_with_elevenlabs(text: str, db, influencer_id: str = None):
-
     influencer = await db.get(Influencer, influencer_id)
     if not influencer:
         raise HTTPException(404, "Influencer not found")
@@ -69,7 +65,6 @@ async def synthesize_audio_with_elevenlabs(text: str, db, influencer_id: str = N
         raise HTTPException(500, f"Voice ID not set for influencer '{influencer_id}'")
 
     voice_id = influencer.voice_id
-
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
     headers = {
         "xi-api-key": ELEVENLABS_API_KEY,
@@ -77,17 +72,20 @@ async def synthesize_audio_with_elevenlabs(text: str, db, influencer_id: str = N
         "Content-Type": "application/json",
     }
     data = {
-        "text": text,
-        "model_id": "eleven_monolingual_v1",
+        "text": text,  # aqui envie o output do LLM (já com audio tags / SSML)
+        "model_id": "eleven_multilingual_v3",  # ou "eleven_v3"
         "voice_settings": {
-            "stability": 0.5,
-            "similarity_boost": 0.75
-        }
+            "stability": 0.35,
+            "similarity_boost": 0.8,
+            "style": 0.5,
+            "use_speaker_boost": True
+        },
+        "output_format": "mp3_44100_128"
     }
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=120) as client:
         resp = await client.post(url, headers=headers, json=data)
         if resp.status_code != 200:
-            print("ElevenLabs error:", resp.text)
+            print("ElevenLabs error:", resp.status_code, resp.text)
             return None, None
         return resp.content, "audio/mpeg"
     

@@ -11,14 +11,14 @@ from app.db.session import get_db
 from app.db.models import User
 from app.schemas.auth import RegisterRequest, LoginRequest, Token, PasswordResetRequest
 from app.core.config import settings
-from app.api.deps import get_current_user
+from app.utils.deps import get_current_user
 from app.utils.email import send_verification_email, send_password_reset_email
 from app.utils.auth import create_token
 from app.api.notify_ws import notify_email_verified
 
 import secrets
 
-router = APIRouter()
+router = APIRouter(prefix="/auth", tags=["auth"])
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 

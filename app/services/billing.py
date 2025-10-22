@@ -1,7 +1,8 @@
 import subprocess
 import tempfile
-
+import os
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date
 from fastapi import HTTPException
 from app.db.models import CreditWallet, CreditTransaction, DailyUsage, Pricing
@@ -76,8 +77,6 @@ async def topup_wallet(db, user_id: int, cents: int, source: str):
     await db.commit()
     return wallet.balance_cents
 
-
-
 def get_audio_duration_ffmpeg(file_bytes: bytes) -> float:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as tmp:
         tmp.write(file_bytes)
@@ -147,3 +146,89 @@ def get_duration_seconds(file_bytes: bytes, mime: str | None = None) -> int:
     if duration <= 0:
         duration = 10.0
     return max(1, math.ceil(duration))
+
+# map feature -> which counter to read on DailyUsage
+_USAGE_FIELD = {
+    "text": "text_count",
+    "voice": "voice_secs",
+    "live_chat": "live_secs",
+}
+
+async def can_afford(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    feature: str,
+    units: int,
+) -> tuple[bool, int, int]:
+    """
+    Returns (ok, cost_cents, free_left)
+      - ok = True if user can afford 'units'
+      - cost_cents = how much would be charged (after free allowance)
+      - free_left = remaining free allowance for that feature today
+    No DB mutations.
+    """
+    # pricing
+    price: Pricing | None = await db.scalar(
+        select(Pricing).where(Pricing.feature == feature, Pricing.is_active.is_(True))
+    )
+    if not price:
+        # no pricing? don't block
+        return True, 0, 0
+
+    # usage today
+    today = date.today()
+    usage: DailyUsage | None = await db.get(DailyUsage, (user_id, today))
+    # base counters
+    text_used = getattr(usage, "text_count", 0) if usage else 0
+    voice_used = getattr(usage, "voice_secs", 0) if usage else 0
+    live_used  = getattr(usage, "live_secs",  0) if usage else 0
+
+    if feature == "text":
+        used = text_used
+    elif feature == "voice":
+        used = voice_used
+    else:
+        used = live_used
+
+    free_left = max((price.free_allowance or 0) - (used or 0), 0)
+    billable = max(units - free_left, 0)
+    cost_cents = billable * (price.price_cents or 0)
+
+    # wallet
+    wallet = await db.get(CreditWallet, user_id)
+    balance = wallet.balance_cents if wallet and wallet.balance_cents is not None else 0
+
+    ok = balance >= cost_cents
+    return ok or (cost_cents == 0), cost_cents, free_left
+
+async def get_remaining_units(db: AsyncSession, user_id: int, feature: str) -> int:
+    """
+    Compute how many units (messages, seconds, etc.) the user can still afford
+    = free_allowance_left + wallet_balance / unit_price
+    """
+    from sqlalchemy import select
+    from datetime import date
+    from app.db.models import Pricing, DailyUsage, CreditWallet
+
+    price: Pricing | None = await db.scalar(
+        select(Pricing).where(Pricing.feature == feature, Pricing.is_active.is_(True))
+    )
+    if not price:
+        return 0
+
+    unit_price_cents = price.price_cents
+    free_allowance = price.free_allowance or 0
+
+    # usage today
+    today = date.today()
+    usage: DailyUsage | None = await db.get(DailyUsage, (user_id, today))
+    used = getattr(usage, f"{feature}_secs", 0) if usage else 0
+    free_left = max(free_allowance - (used or 0), 0)
+
+    # wallet
+    wallet: CreditWallet | None = await db.get(CreditWallet, user_id)
+    balance_cents = wallet.balance_cents if wallet else 0
+    paid = balance_cents // unit_price_cents if unit_price_cents > 0 else 0
+
+    return int(free_left + paid)

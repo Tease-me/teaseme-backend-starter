@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 
 
@@ -12,10 +12,14 @@ class MessageSchema(BaseModel):
     chat_id: str
     sender: str
     content: str
+    audio_url: Optional[str] = None
     created_at: datetime  
 
     class Config:
         from_attributes = True
+        json_encoders = {
+            type(None): lambda v: None
+        }
 
 class PaginatedMessages(BaseModel):
     total: int

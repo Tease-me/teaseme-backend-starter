@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     BLAND_VOICE_ID: str
     ELEVENLABS_API_KEY: str
     ELEVENLABS_VOICE_ID: str
+    ELEVENLABS_CONVAI_WEBHOOK_SECRET: str
+    
     VAPID_PUBLIC_KEY: str
     VAPID_PRIVATE_KEY: str
     VAPID_EMAIL: str | None = None
