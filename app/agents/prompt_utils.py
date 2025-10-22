@@ -114,11 +114,13 @@ async def build_system_prompt(
     system_prompt = BASE_AUDIO_SYSTEM if is_audio else BASE_SYSTEM
     daily_context = await get_today_script(db, influencer_id)
 
+    memories_text = "\n".join(memories)
+
     prompt = (
         f"{system_prompt}\n"
         f"{persona_rules}\n"
         f"Today's inspiration: {daily_context}\n"
-        f"Relevant memories:\n{'\n'.join(memories)}\n"
+        f"Relevant memories:\n{memories_text}\n"
     )
     if last_user_message:
         prompt += (

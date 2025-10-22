@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -18,7 +20,7 @@ class Settings(BaseSettings):
     BLAND_VOICE_ID: str
     ELEVENLABS_API_KEY: str
     ELEVENLABS_VOICE_ID: str
-    ELEVENLABS_CONVAI_WEBHOOK_SECRET: str
+    ELEVENLABS_CONVAI_WEBHOOK_SECRET: str | None = None
     
     VAPID_PUBLIC_KEY: str
     VAPID_PRIVATE_KEY: str
@@ -30,6 +32,10 @@ class Settings(BaseSettings):
     AWS_ACCESS_KEY_ID: str
     AWS_SECRET_ACCESS_KEY: str
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8",extra='ignore' )
+    model_config = SettingsConfigDict(
+        env_file=Path(__file__).resolve().parents[1].parent / ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 settings = Settings()
