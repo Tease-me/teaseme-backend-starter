@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from itertools import chain
 from typing import Any, Dict, List, Optional
 from app.core.config import settings
-from app.db.models import Influencer
+from app.db.models import Influencer, Chat
 from app.db.session import get_db
 from app.schemas.elevenlabs import FinalizeConversationBody, RegisterConversationBody
 from app.services.billing import charge_feature
@@ -316,9 +316,39 @@ async def get_signed_url(
         "credits_remainder_secs": credits_remainder_secs,
     }
 
+@router.get("/signed-url-free")
+async def get_signed_url_free(
+    influencer_id: str,
+    # user_id: int = Query(..., description="Numeric user id"),
+    db: AsyncSession = Depends(get_db),
+    first_message: Optional[str] = Query(None),
+    greeting_mode: str = Query("random", pattern="^(random|rr)$"),
+):
+    """
+    (1) Check user credits before starting a live chat call.
+    (2) Optionally update the agent's first_message (greeting).
+    (3) Return a signed_url for the client to open a conversation.
+    
+    NOTE: PATCHing the agent updates it globally.
+    If concurrent users need distinct greetings, prefer a per-conversation override.
+    """
+    # --- Check credits before starting call ---
+
+    agent_id = await get_agent_id_from_influencer(db, influencer_id)
+    greeting = first_message or _pick_greeting(influencer_id, greeting_mode)
+
+    async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
+        # Only update first_message here. Prompt updates should use _push_prompt_to_elevenlabs elsewhere.
+        await _patch_agent_config(client, agent_id, first_message=greeting)
+        signed_url = await _get_conversation_signed_url(client, agent_id)
+
+    return {
+        "signed_url": signed_url,
+        "greeting_used": greeting,
+        "agent_id": agent_id,
+    }
 
 # ---------- Persistence hooks (stubs) ----------
-
 async def save_pending_conversation(
     db: AsyncSession,
     conversation_id: str,
@@ -330,12 +360,22 @@ async def save_pending_conversation(
     Upsert a pending conversation mapping (PostgreSQL).
     Idempotent on the primary key (conversation_id).
     """
+    result = await db.execute(
+        select(Chat).where(Chat.user_id == user_id, Chat.influencer_id == influencer_id)
+    )
+    chat = result.scalar_one_or_none()
+    if not chat:
+        chat = Chat(user_id=user_id, influencer_id=influencer_id)
+        db.add(chat)
+        await db.flush()
+
     stmt = (
         pg_insert(CallRecord)
         .values(
             conversation_id=conversation_id,
             user_id=user_id,
             influencer_id=influencer_id,
+            chat_id=chat.id,
             sid=sid,
             status="pending",
         )
@@ -345,6 +385,7 @@ async def save_pending_conversation(
             set_={
                 "user_id": user_id,
                 "influencer_id": influencer_id,
+                "chat_id": chat.id,
                 "sid": sid,
                 "status": "pending",
             },

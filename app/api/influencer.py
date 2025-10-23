@@ -8,7 +8,7 @@ from sqlalchemy.future import select
 
 router = APIRouter(prefix="/influencer", tags=["influencer"])
 
-@router.get("/", response_model=List[InfluencerOut])
+@router.get("", response_model=List[InfluencerOut])
 async def list_influencers(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Influencer))
     return result.scalars().all()
