@@ -33,8 +33,8 @@ def upgrade() -> None:
     op.create_index('idx_calls_user_created', 'calls', ['user_id', 'created_at'], unique=False)
     op.create_index(op.f('ix_calls_user_id'), 'calls', ['user_id'], unique=False)
     op.add_column("influencers", sa.Column("voice_prompt", sa.Text(), nullable=True))
-    op.drop_index(op.f('idx_memories_chat_id'), table_name='memories')
-    op.drop_index(op.f('idx_memories_embedding_cosine'), table_name='memories', postgresql_with={'lists': '100'}, postgresql_using='ivfflat')
+    op.execute(sa.text('DROP INDEX IF EXISTS idx_memories_chat_id'))
+    op.execute(sa.text('DROP INDEX IF EXISTS idx_memories_embedding_cosine'))
     # ### end Alembic commands ###
 
 

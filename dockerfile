@@ -24,8 +24,9 @@ COPY ./poetry.lock ./
 COPY ./pyproject.toml ./
 COPY ./redis_dump_all.py ./
 COPY .env ./
+COPY ./.cert ./
 # Expose the port FastAPI will run on
 EXPOSE 8000
 
 # Default command (run migrations then start the app)
-CMD ["sh", "-c", "poetry run alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
+CMD ["sh", "-c", "poetry run alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload --ssl-keyfile=./.cert/key.pem --ssl-certfile=./.cert/cert.pem"]
