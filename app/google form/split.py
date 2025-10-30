@@ -1,132 +1,108 @@
 #!/usr/bin/env python3
-import argparse, csv, os, re, sys
-from typing import List
+# -*- coding: utf-8 -*-
+
+"""
+Refined deterministic splitter for 'Sky.csv'
+--------------------------------------------
+
+Splits a single-profile dataset into:
+• Persona_Prompt.csv  — personality, tone, and communication behavior
+• Brain_Memory.csv    — memories, experiences, personal facts
+• Split_Audit.csv     — list of all columns + their assigned category
+
+Logic:
+* Automatically detects "persona" columns based on common prefixes or tone/style keywords.
+* Everything else (except excluded) becomes "brain".
+* Handles flexible column sets so it works with future updated question formats.
+"""
+
+import argparse
+import os
+import re
+import sys
 import pandas as pd
 
-# ---------- Config ----------
-PROMPT_EXACT = {
-    "1) Formality of writing style",
-    "6) Emoji & emoticon use",
-    "10) Conversation role (leading vs. following)",
-    "13) Disagreement style",
-    "18) Greeting warmth/energy",
-    "19) Closing/sign-off style",
-    "F1) Invite tone you tend to use",
-    "L1) Low-energy day text style",
-    "L4) Your go-to low-energy sign-off (exact words)",
-}
-PROMPT_ALIASES = {
-    "closing / sign-off style": "19) Closing-sign-off style",
-    "closing sign-off style": "19) Closing-sign-off style",
-    "greeting warmth / energy": "18) Greeting warmth/energy",
-    "greeting warmth and energy": "18) Greeting warmth/energy",
-}
-EXCLUDED_EXACT = {"Timestamp"}
-FORCE_BRAIN_EXACT = {
-    "Full Name", "Nickname / Preferred Name", "Date Of Birth (DD/MM/YY)"
-}
-
-# Tight patterns for prompt scales only (avoid grabbing flirty/romantic “lettered” items)
-PROMPT_REGEXES = [
-    re.compile(r"^\s*(1|6|10|13|18|19)\)\s", re.I),  # numbered scales we keep
-    re.compile(r"^\s*(F1|L1|L4)\)\s", re.I),         # specific lettered prompt items
+# --- Patterns that indicate PROMPT (persona/communication style) columns ---
+PROMPT_KEYWORDS = [
+    r"(?i)\b(formality|writing style|tone|style|emoji|emoticon|sarcasm|humor|playfulness|conversation role|greeting|closing|sign[- ]?off)\b",
+    r"(?i)\b(disagreement|patience|reaction|comfort|boundary|warmth|energy|empathy|validation)\b",
+    r"(?i)\b(f1|f2|f3|f4|f5|l1|l2|l3|l4|n1|n2|n3|o1|o2|o3)\b",  # section codes
+    r"(?i)\b(tease|flirt|consent|check[- ]?in|aftercare|repair)\b",
 ]
 
-# Strong hints for “Brain” (identity + flirty/romantic/teasing)
-BRAIN_REGEXES = [
-    re.compile(r"^\s*(A|B|C|D|E|G|H|I|J|K|M|O)\d+\)", re.I),  # lettered sections (except F/L handled above)
-    re.compile(r"\b(Identity|Birth|Zodiac|Nationality|Ethnicity|Heritage|Cultural Background)\b", re.I),
-    re.compile(r"\b(Hobbies|Weekend|Favorite|Music|Devices|Pet|Snack|Travel|Cuisine|Food)\b", re.I),
-    re.compile(r"\b(Consent|Aftercare|Boundar|Flirt|Opener|Compliment|Teas|Affection|Vulnerab|Exclusiv|Jealous)\b", re.I),
-]
+# --- Excluded or system-only columns ---
+EXCLUDED_COLUMNS = {"Timestamp"}  # add more if needed
 
-def normalize_header(h: str) -> str:
-    return re.sub(r"\s+", " ", h or "").strip().lower()
+def classify_column(col: str) -> str:
+    """Return category: PROMPT, BRAIN, or EXCLUDED based on column name."""
+    if col in EXCLUDED_COLUMNS:
+        return "EXCLUDED"
+    for pattern in PROMPT_KEYWORDS:
+        if re.search(pattern, col or ""):
+            return "PROMPT"
+    return "BRAIN"
 
-def is_prompt_header(h: str) -> bool:
-    if h in PROMPT_EXACT:
-        return True
-    if normalize_header(h) in PROMPT_ALIASES:
-        return True
-    return any(rx.search(h) for rx in PROMPT_REGEXES)
+def main() -> None:
+    ap = argparse.ArgumentParser(description="Split a CSV into Persona_Prompt / Brain_Memory by column names.")
+    ap.add_argument("--input", "-i", default="Sky.csv", help="Input CSV path (default: Sky.csv)")
+    ap.add_argument("--outdir", "-o", default=".", help="Output directory (default: current dir)")
+    ap.add_argument("--encoding", default="utf-8-sig", help="CSV encoding (default: utf-8-sig)")
+    args = ap.parse_args()
 
-def is_brain_header(h: str) -> bool:
-    if h in FORCE_BRAIN_EXACT:
-        return True
-    if h in EXCLUDED_EXACT:
-        return False
-    return any(rx.search(h) for rx in BRAIN_REGEXES)
+    # Load CSV
+    try:
+        df = pd.read_csv(args.input, encoding=args.encoding)
+    except FileNotFoundError:
+        print(f"❌ File not found: {args.input}", file=sys.stderr)
+        sys.exit(1)
+    except UnicodeDecodeError as e:
+        print(f"❌ Encoding error reading {args.input}: {e}", file=sys.stderr)
+        sys.exit(1)
 
-def classify_columns(columns):
-    prompt, brain, excluded = [], [], []
-    for c in columns:
-        if c in EXCLUDED_EXACT:
-            excluded.append(c)
-        elif c in FORCE_BRAIN_EXACT or is_brain_header(c):
-            brain.append(c)
-        elif is_prompt_header(c):
-            prompt.append(c)
-        else:
-            # default to Brain to avoid leaking identity/preferences into Prompt
-            brain.append(c)
-    return prompt, brain, excluded
-
-def split_csv(input_path: str, outdir: str = ".", encoding: str = "utf-8-sig", strict: bool = False) -> None:
-    df = pd.read_csv(input_path, encoding=encoding)
     cols = list(df.columns)
 
-    # strict only checks for our *required* prompt items; we still regex-map others
-    missing_prompt = [c for c in PROMPT_EXACT if c not in cols]
-    if strict and missing_prompt:
-        sys.exit(f"Strict mode: missing PROMPT columns: {missing_prompt}")
+    # Classify columns
+    categories = {c: classify_column(c) for c in cols}
+    prompt_cols = [c for c, t in categories.items() if t == "PROMPT"]
+    brain_cols  = [c for c, t in categories.items() if t == "BRAIN"]
+    excluded_cols = [c for c, t in categories.items() if t == "EXCLUDED"]
 
-    prompt_cols, brain_cols, excluded_cols = classify_columns(cols)
-
-    # Coverage guard: anything unlabeled goes to Brain (never drop data)
-    covered = set(prompt_cols) | set(brain_cols) | set(excluded_cols)
-    for c in cols:
-        if c not in covered:
-            brain_cols.append(c)
-
+    # Slice dataframes
     persona_df = df[prompt_cols] if prompt_cols else pd.DataFrame()
     brain_df   = df[brain_cols]  if brain_cols  else pd.DataFrame()
 
-    os.makedirs(outdir, exist_ok=True)
-    persona_path = os.path.join(outdir, "Persona_Prompt.csv")
-    brain_path   = os.path.join(outdir, "Brain_Memory.csv")
-    audit_path   = os.path.join(outdir, "Split_Audit.csv")
+    # Prepare output
+    os.makedirs(args.outdir, exist_ok=True)
+    persona_path = os.path.join(args.outdir, "Persona_Prompt.csv")
+    brain_path   = os.path.join(args.outdir, "Brain_Memory.csv")
+    audit_path   = os.path.join(args.outdir, "Split_Audit.csv")
 
-    persona_df.to_csv(persona_path, index=False, encoding=encoding)
-    brain_df.to_csv(brain_path,   index=False, encoding=encoding)
+    # Write outputs
+    if not persona_df.empty:
+        persona_df.to_csv(persona_path, index=False, encoding=args.encoding)
+    if not brain_df.empty:
+        brain_df.to_csv(brain_path, index=False, encoding=args.encoding)
 
-    with open(audit_path, "w", newline="", encoding=encoding) as f:
-        w = csv.writer(f); w.writerow(["Column", "Category"])
-        for c in cols:
-            if c in excluded_cols:
-                w.writerow([c, "EXCLUDED"])
-            elif c in prompt_cols:
-                w.writerow([c, "PROMPT"])
-            elif c in brain_cols:
-                w.writerow([c, "BRAIN"])
-            else:
-                w.writerow([c, "UNCLASSIFIED"])
+    audit_df = pd.DataFrame([(c, categories[c]) for c in cols], columns=["Column", "Category"])
+    audit_df.to_csv(audit_path, index=False, encoding=args.encoding)
 
+    # Summary
     print("✅ Split complete.")
-    print(f"Input: {input_path}")
-    print(f"→ {persona_path}  (PROMPT columns: {len(prompt_cols)})")
-    print(f"→ {brain_path}    (BRAIN  columns: {len(brain_cols)})")
-    print(f"→ {audit_path}    (All {len(cols)} columns labeled)")
-    if excluded_cols:
-        print(f"Excluded columns ({len(excluded_cols)}): {excluded_cols}")
+    if not persona_df.empty:
+        print(f"→ {persona_path}")
+    else:
+        print("→ Persona_Prompt.csv (no PROMPT columns detected; file not written)")
 
-def main():
-    ap = argparse.ArgumentParser(description="Split CSV into Persona Prompt vs Brain using title-aware rules.")
-    ap.add_argument("--input", "-i", default="Teasing Brain.csv", help="Input CSV path")
-    ap.add_argument("--outdir", "-o", default=".", help="Output directory")
-    ap.add_argument("--encoding", default="utf-8-sig", help="Encoding for outputs")
-    ap.add_argument("--strict", action="store_true", help="Fail if any required PROMPT columns are missing")
-    args = ap.parse_args()
-    split_csv(args.input, args.outdir, args.encoding, args.strict)
+    if not brain_df.empty:
+        print(f"→ {brain_path}")
+    else:
+        print("→ Brain_Memory.csv (no BRAIN columns detected; file not written)")
+
+    print(f"→ {audit_path}")
+    print(f"PROMPT columns: {len(prompt_cols)}")
+    print(f"BRAIN  columns: {len(brain_cols)}")
+    if excluded_cols:
+        print(f"EXCLUDED columns: {excluded_cols}")
 
 if __name__ == "__main__":
     main()
