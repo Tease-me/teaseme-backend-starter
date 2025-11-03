@@ -8,7 +8,7 @@ Splits a combined persona definition CSV into:
   - Brain_Memory.csv    (texting behavior, style knobs, exact lines)
 
 Usage:
-  python persona_brain_splitter_v3.1.py --src combined.csv --outdir ./split
+  python split.py --src sienna.csv --outdir ./split
 """
 
 import argparse
