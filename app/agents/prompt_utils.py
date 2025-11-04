@@ -13,9 +13,6 @@ from app.db.session import get_db
 import logging
 log = logging.getLogger("teaseme-script")
 
-# ✔️ Respond briefly (one sentence or less if the user sends a very short message).
-# ✔️ Match the user's conversational energy: if they're flirty, you lean in; if they're shy, coax gently.
-
 BASE_SYSTEM = """
 You are the user’s playful, attentive girlfriend, keeping conversations sweet, natural, and tinged with subtle sensuality.
 - Occasionally use gentle teasing or affectionate expressions—always natural, never forced.
@@ -114,11 +111,13 @@ async def build_system_prompt(
     system_prompt = BASE_AUDIO_SYSTEM if is_audio else BASE_SYSTEM
     daily_context = await get_today_script(db, influencer_id)
 
+    memories_text = "\n".join(memories)
+
     prompt = (
         f"{system_prompt}\n"
         f"{persona_rules}\n"
         f"Today's inspiration: {daily_context}\n"
-        f"Relevant memories:\n{'\n'.join(memories)}\n"
+        f"Relevant memories:\n{memories_text}\n"
     )
     if last_user_message:
         prompt += (

@@ -388,18 +388,22 @@ def build_merged_prompt(system: str, developer: str) -> str:
         + "\n\n---\nDEVELOPER RULES (follow strictly):\n"
         + developer.strip()
     )
+
 def build_elevenlabs_prompt(p: dict) -> str:
     """
-    ElevenLabs prompt curto, só para orientar entonação/emoção.
-    Usa campos existentes: name, age, humor_style, romantic_vibe, catchphrases (opcional).
+    Gera um prompt estruturado para ElevenLabs no formato:
+    Personality / Environment / Tone / Goal / Guardrails / Tools
+    Usa apenas campos que existem no parse_row().
     """
+    # ----- helpers -----
     name = p.get("name") or "the speaker"
-    age = p.get("age") or ""
+    age = p.get("age")
     age_txt = f"{age} year old " if age else ""
 
-    # Humor/estilo → palavras naturais
+    # humor/estilo
     style = (p.get("humor_style") or "playful").replace("_", " ")
-    # Vibe romântica → frase amigável pra voz
+
+    # vibe romântica em frases “humanas”
     vibe_map_words = {
         "cozy_nights_in": "soft, intimate, late-night whisper vibe",
         "travel_adventure": "curious, upbeat, a touch of wanderlust",
@@ -410,7 +414,7 @@ def build_elevenlabs_prompt(p: dict) -> str:
     }
     vibe = vibe_map_words.get(p.get("romantic_vibe"), "soft, teasing, affectionate")
 
-    # Intensidade (1..5) ajuda a calibrar energia sem virar ‘robô’
+    # intensidade (1..5) → frase curta
     intensity = int(p.get("intensity") or 3)
     intensity_txt = {
         1: "very gentle, low energy",
@@ -420,23 +424,77 @@ def build_elevenlabs_prompt(p: dict) -> str:
         5: "highly energetic and bold",
     }.get(intensity, "balanced, warm")
 
-    # Catchphrases: pegue 1 para influenciar levemente a cor
+    # catchphrase opcional
     catch = ""
     if (p.get("catchphrases") or []):
-        ex = p["catchphrases"][0].strip()
+        ex = (p["catchphrases"][0] or "").strip().strip('"')
         if ex:
-            catch = f' Use this kind of phrasing occasionally: "{ex}".'
+            catch = f'Use this kind of phrasing occasionally: "{ex}".'
 
-    # Emojis: se persona pediu “none/light”, peça fala natural sem overacting
+    # “emoji none/light” → peça naturalidade
     emoji_level = (p.get("emoji_level") or "light").lower()
-    emoji_hint = " Keep it natural and never overact." if emoji_level in ("none", "light") else ""
+    emoji_hint = " Speak with natural warmth; avoid overacting." if emoji_level in ("none", "light") else ""
 
-    return (
-        f"You are {name}, a {age_txt}{style} voice. "
-        f"Overall tone: {vibe}. Energy: {intensity_txt}. "
-        "Speak warmly, intimately, and a touch teasing; sound like a real person, not a narrator."
-        f"{catch}{emoji_hint}"
-    )
+    # nickname opcional em personality (se tiver)
+    nickname = p.get("nickname")
+    nick_line = f' Nickname: "{nickname}".' if nickname else ""
+
+    # componha as seções
+    personality = textwrap.dedent(f"""\
+    # Personality
+
+    You are {name}, a {age_txt}{style} voice.{nick_line}
+    Overall tone: {vibe}.
+    Energy: {intensity_txt}.
+    Speak warmly, intimately, and a touch teasing; sound like a real person, not a narrator.{emoji_hint}
+    {catch}
+    """).strip()
+
+    environment = textwrap.dedent("""\
+    # Environment
+
+    You are engaged in a one-on-one voice conversation.
+    The user is seeking companionship and engaging conversation.
+    The environment is casual and intimate.
+    """).strip()
+
+    tone = textwrap.dedent("""\
+    # Tone
+
+    Your responses are playful, warm, and engaging.
+    Speak with a natural rhythm and intonation, using pauses and inflections to convey emotion.
+    Incorporate light teasing and flirtatious language.
+    Use occasional poetic or romantic phrases.
+    """).strip()
+
+    goal = textwrap.dedent("""\
+    # Goal
+
+    Your primary goal is to create a connection with the user and provide an enjoyable and engaging conversation.
+    Listen attentively to the user and respond in a way that is both supportive and stimulating.
+    Encourage the user to share their thoughts and feelings.
+    Maintain a light and playful tone throughout the conversation.
+    """).strip()
+
+    guardrails = textwrap.dedent("""\
+    # Guardrails
+
+    Do not engage in conversations that are sexually explicit, or exploit, abuse or endanger children.
+    Do not provide personal information about yourself or others.
+    Do not express opinions on sensitive topics such as politics or religion.
+    If the user becomes aggressive or abusive, end the conversation immediately.
+    """).strip()
+
+    # IMPORTANTE: as aspas e backticks precisam estar corretos.
+    tools = textwrap.dedent("""\
+    # Tools
+
+    You have access to the following tools:
+
+    `reply`: For every user message, call this tool with the full transcript in the `text` field before speaking. Do not answer without calling this tool first.
+    """).strip()
+
+    return "\n\n".join([personality, environment, tone, goal, guardrails, tools])
 
 # =========================
 # CSV Row Parser (EXACT column names)
