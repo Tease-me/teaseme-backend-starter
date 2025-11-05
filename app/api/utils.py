@@ -32,7 +32,7 @@ async def search_similar_memories(db, chat_id, embedding, top_k=5):
 
 
 from sqlalchemy import text
-from datetime import datetime
+from datetime import datetime, timezone
 
 async def upsert_memory(
     db,
@@ -84,7 +84,7 @@ async def upsert_memory(
             "content": content,
             "embedding": embedding_str,
             "sender": sender,
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.now(timezone.utc),
         }
         await db.execute(sql_update, params_update)
         result_action = "update"
@@ -99,7 +99,7 @@ async def upsert_memory(
             "content": content,
             "embedding": embedding_str,
             "sender": sender,
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.now(timezone.utc),
         }
         await db.execute(sql_insert, params_insert)
         result_action = "insert"
