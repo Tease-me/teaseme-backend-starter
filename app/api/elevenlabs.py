@@ -8,14 +8,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from itertools import chain
 from typing import Any, Dict, List, Optional
 from app.core.config import settings
-from app.db.models import Influencer, Chat
+from app.db.models import Influencer, Chat, Message, CallRecord
 from app.db.session import get_db
 from app.schemas.elevenlabs import FinalizeConversationBody, RegisterConversationBody
 from app.services.billing import charge_feature
-from sqlalchemy import insert, select
-from app.db.models import CallRecord 
+from sqlalchemy import insert, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.services.billing import can_afford, get_remaining_units
+from app.services.chat_service import get_or_create_chat
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
 
 router = APIRouter(prefix="/elevenlabs", tags=["elevenlabs"])
 log = logging.getLogger(__name__)
@@ -64,6 +66,92 @@ def _pick_greeting(influencer_id: str, mode: str) -> str:
         _rr_index[influencer_id] = i
         return options[i]
     return random.choice(options)
+
+
+try:
+    GREETING_GENERATOR: Optional[ChatOpenAI] = ChatOpenAI(
+        api_key=settings.OPENAI_API_KEY,
+        model="gpt-4o-mini",
+        temperature=0.7,
+        max_tokens=120,
+    )
+except Exception as exc:  # pragma: no cover - fallback only when misconfigured
+    GREETING_GENERATOR = None
+    log.warning("Contextual greeting generator disabled: %s", exc)
+
+
+GREETING_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            (
+                "You are {influencer_name}, an affectionate AI companion speaking English. "
+                "Craft the very next thing you would say when a live voice call resumes. "
+                "Keep it to one or two short spoken sentences. "
+                "Reference the recent conversation naturally, acknowledge the user, and sound warm. "
+                "Do not repeat earlier lines verbatim, do not mention calling or reconnecting explicitly, "
+                "and avoid filler like 'uh' or 'um'."
+            ),
+        ),
+        (
+            "human",
+            (
+                "Recent conversation between you and the user:\n"
+                "{transcript}\n\n"
+                "Respond with your next spoken greeting. Output only the greeting text."
+            ),
+        ),
+    ]
+)
+
+
+def _format_history(messages: List[Message]) -> str:
+    lines: List[str] = []
+    for msg in messages:
+        speaker = "User" if msg.sender == "user" else "AI"
+        content = (msg.content or "").strip().replace("\n", " ")
+        if not content:
+            continue
+        lines.append(f"{speaker}: {content}")
+    return "\n".join(lines)
+
+
+async def _generate_contextual_greeting(
+    db: AsyncSession, chat_id: str, influencer_id: str
+) -> Optional[str]:
+    if GREETING_GENERATOR is None:
+        return None
+
+    result = await db.execute(
+        select(Message)
+        .where(Message.chat_id == chat_id)
+        .order_by(Message.created_at.desc())
+        .limit(8)
+    )
+    db_messages = list(result.scalars().all())
+    if not db_messages:
+        return None
+
+    db_messages.reverse()
+    transcript = _format_history(db_messages)
+    if not transcript:
+        return None
+
+    influencer = await db.get(Influencer, influencer_id)
+    persona_name = (
+        influencer.display_name if influencer and influencer.display_name else influencer_id
+    )
+
+    try:
+        chain = GREETING_PROMPT.partial(influencer_name=persona_name) | GREETING_GENERATOR
+        llm_response = await chain.ainvoke({"transcript": transcript})
+        greeting = (llm_response.content or "").strip()
+        if greeting.startswith('"') and greeting.endswith('"'):
+            greeting = greeting[1:-1]
+        return greeting if greeting else None
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("Failed to generate contextual greeting for %s: %s", chat_id, exc)
+        return None
 
 
 async def get_agent_id_from_influencer(db: AsyncSession, influencer_id: str) -> str:
@@ -302,7 +390,13 @@ async def get_signed_url(
     credits_remainder_secs = await get_remaining_units(db, user_id, feature="live_chat")
 
     agent_id = await get_agent_id_from_influencer(db, influencer_id)
-    greeting = first_message or _pick_greeting(influencer_id, greeting_mode)
+    chat_id = await get_or_create_chat(db, user_id, influencer_id)
+
+    greeting: Optional[str] = first_message
+    if not greeting:
+        greeting = await _generate_contextual_greeting(db, chat_id, influencer_id)
+    if not greeting:
+        greeting = _pick_greeting(influencer_id, greeting_mode)
 
     async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
         # Only update first_message here. Prompt updates should use _push_prompt_to_elevenlabs elsewhere.
@@ -314,6 +408,7 @@ async def get_signed_url(
         "greeting_used": greeting,
         "agent_id": agent_id,
         "credits_remainder_secs": credits_remainder_secs,
+        "chat_id": chat_id,
     }
 
 @router.get("/signed-url-free")

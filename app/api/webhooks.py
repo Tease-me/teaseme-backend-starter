@@ -262,7 +262,7 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
             "agent_id": data.get("agent_id"),
             "start_time_unix_secs": (data.get("metadata") or {}).get("start_time_unix_secs"),
             "has_audio": data.get("has_audio", False),
-            "has_user_audio": data.get("has_user_audio", False),
+            "has_user_audio": data.get("has_user_auƒdio", False),
             "has_response_audio": data.get("has_response_audio", False),
             "source": "webhook",
             "event_type": event_type,
