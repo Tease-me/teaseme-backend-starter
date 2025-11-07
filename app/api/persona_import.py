@@ -577,6 +577,8 @@ async def import_persona_csv(
         if not influencer_id:
             raise HTTPException(status_code=400, detail=f"Row {idx}: missing Influencer_ID.")
 
+        display_name = name or nickname or influencer_id
+
         prompt_item = PromptItem(
             influencer_id=influencer_id,
             name=name,
@@ -592,6 +594,7 @@ async def import_persona_csv(
             if influencer is None:
                 influencer = Influencer(
                     id=influencer_id,
+                    display_name=display_name,
                     prompt_template=instructions,
                     voice_prompt=voice_prompt,
                 )
