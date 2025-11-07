@@ -399,8 +399,6 @@ async def get_signed_url(
         greeting = _pick_greeting(influencer_id, greeting_mode)
 
     async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
-        # Only update first_message here. Prompt updates should use _push_prompt_to_elevenlabs elsewhere.
-        await _patch_agent_config(client, agent_id, first_message=greeting)
         signed_url = await _get_conversation_signed_url(client, agent_id)
 
     return {
@@ -433,8 +431,6 @@ async def get_signed_url_free(
     greeting = first_message or _pick_greeting(influencer_id, greeting_mode)
 
     async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
-        # Only update first_message here. Prompt updates should use _push_prompt_to_elevenlabs elsewhere.
-        await _patch_agent_config(client, agent_id, first_message=greeting)
         signed_url = await _get_conversation_signed_url(client, agent_id)
 
     return {
