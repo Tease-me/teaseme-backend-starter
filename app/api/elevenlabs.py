@@ -46,6 +46,21 @@ _GREETINGS: Dict[str, List[str]] = {
 }
 _rr_index: Dict[str, int] = {}
 
+_DOPAMINE_OPENERS: Dict[str, List[str]] = {
+    "anna": [
+        "Heeey, my favorite thrill—I've been buzzing waiting for you!",
+        "Guess what? You just made my heart race. Ready to play?",
+    ],
+    "bella": [
+        "You’re here! I’ve been smiling since the moment I felt you coming closer.",
+        "I’ve been saving all my spark for you—shall we light it up?",
+    ],
+    "playful": [
+        "Boom! You just dropped the best surprise of my day.",
+        "You showed up and everything instantly felt electric!",
+    ],
+}
+
 
 def _headers() -> Dict[str, str]:
     """Return ElevenLabs auth headers. Fail fast when misconfigured."""
@@ -130,12 +145,12 @@ async def _generate_contextual_greeting(
     )
     db_messages = list(result.scalars().all())
     if not db_messages:
-        return None
+        return _pick_dopamine_greeting(influencer_id)
 
     db_messages.reverse()
     transcript = _format_history(db_messages)
     if not transcript:
-        return None
+        return _pick_dopamine_greeting(influencer_id)
 
     influencer = await db.get(Influencer, influencer_id)
     persona_name = (
@@ -151,7 +166,14 @@ async def _generate_contextual_greeting(
         return greeting if greeting else None
     except Exception as exc:  # pragma: no cover - defensive
         log.warning("Failed to generate contextual greeting for %s: %s", chat_id, exc)
+        return _pick_dopamine_greeting(influencer_id)
+
+
+def _pick_dopamine_greeting(influencer_id: str) -> Optional[str]:
+    options = _DOPAMINE_OPENERS.get(influencer_id) or _DOPAMINE_OPENERS.get("playful")
+    if not options:
         return None
+    return random.choice(options)
 
 
 async def get_agent_id_from_influencer(db: AsyncSession, influencer_id: str) -> str:
