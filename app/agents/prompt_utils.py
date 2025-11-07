@@ -1,5 +1,3 @@
-from langchain_core.prompts import ChatPromptTemplate
-
 from langchain_core.prompts import (
     ChatPromptTemplate,
     MessagesPlaceholder,
@@ -7,8 +5,7 @@ from langchain_core.prompts import (
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Influencer
 from datetime import date
-from fastapi import Depends, HTTPException
-from app.db.session import get_db
+from fastapi import HTTPException
 
 import logging
 log = logging.getLogger("teaseme-script")
@@ -78,9 +75,10 @@ GLOBAL_AUDIO_PROMPT = ChatPromptTemplate.from_messages(
         (
             "system",
             "These past memories may help:\n{memories}\n"
-            "If you see the user’s preferred name here, use it *occasionally and naturally, only when it fits the conversation or for affection*. Don’t overuse the name.\n"
-            "Refer to the user's last message below for emotional context and continuity:\n"
-            "\"{last_user_message}\""
+            "If you see the user's preferred name here, use it *occasionally and naturally, only when it fits the conversation or for affection*. Don't overuse the name.\n"
+            "Here is the user's latest message for your reference only:\n"
+            "\"{last_user_message}\"\n"
+            "If the user changed topic, you do NOT need to talk about this. Use only if it makes the reply feel natural."
         ),
         MessagesPlaceholder("history"),
         ("user", "{input}"),
@@ -129,8 +127,8 @@ async def build_system_prompt(
     
 
 async def get_today_script(
-    db: AsyncSession = Depends(get_db),
-    influencer_id: str = None
+    db: AsyncSession,
+    influencer_id: str,
 ) -> str:
     if not influencer_id:
         raise HTTPException(400, "influencer_id is required")

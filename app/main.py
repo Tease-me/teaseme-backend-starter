@@ -15,6 +15,7 @@ from app.api.webhooks import router as webhooks_router
 from app.api.persona_import import router as persona_import_router
 
 from .api import health_router
+from app.mcp.router import router as mcp_router
 
 log = logging.getLogger("teaseme")
 logging.basicConfig(
@@ -49,3 +50,4 @@ app.include_router(elevenlabs_router)
 app.include_router(health_router.router)
 app.include_router(persona_import_router)
 app.include_router(webhooks_router)
+app.include_router(mcp_router)

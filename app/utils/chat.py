@@ -4,14 +4,17 @@ import wave
 import openai
 import tempfile
 import httpx
+import logging
 
-from fastapi import  Depends, HTTPException
+from fastapi import HTTPException
 from app.agents.turn_handler import handle_turn
-from app.db.session import get_db
 from app.core.config import settings
 from app.db.models import Influencer
+from sqlalchemy.ext.asyncio import AsyncSession
 
-BLAND_API_KEY =settings.BLAND_API_KEY
+logger = logging.getLogger(__name__)
+
+BLAND_API_KEY = settings.BLAND_API_KEY
 BLAND_VOICE_ID = settings.BLAND_VOICE_ID
 ELEVENLABS_API_KEY = settings.ELEVENLABS_API_KEY
 ELEVENLABS_VOICE_ID = settings.ELEVENLABS_VOICE_ID
@@ -47,14 +50,31 @@ async def transcribe_audio(file_or_bytesio, filename=None, content_type=None):
             model="whisper-1"
         )
     os.remove(tmp_path)
-    print("Transcription:", transcript.text)
+    logger.info(f"Transcription successful: {transcript.text[:50]}...")
     return {"text": transcript.text}
 
-async def get_ai_reply_via_websocket(chat_id: str,message: str, influencer_id: str, token: str, db: Depends(get_db) ): # type: ignore
-    # Use websockets.client to connect to your /ws/chat/{influencer_id} endpoint
-    # Or, refactor your logic to call the same handle_turn() function directly!
-    # For demo, let's assume you can just call handle_turn():
-    reply = await handle_turn(message, chat_id=chat_id, influencer_id=influencer_id, user_id=1, db=db,is_audio=True)  # mock user/db
+async def get_ai_reply_via_websocket(
+    chat_id: str,
+    message: str,
+    influencer_id: str,
+    user_id: int,
+    db: AsyncSession,
+) -> str:
+    """
+    Get AI reply using handle_turn function.
+    This function should be called with a validated user_id from the token.
+    """
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID is required")
+    
+    reply = await handle_turn(
+        message,
+        chat_id=chat_id,
+        influencer_id=influencer_id,
+        user_id=user_id,
+        db=db,
+        is_audio=True
+    )
     return reply
 
 async def synthesize_audio_with_elevenlabs(text: str, db, influencer_id: str = None):
@@ -85,7 +105,7 @@ async def synthesize_audio_with_elevenlabs(text: str, db, influencer_id: str = N
     async with httpx.AsyncClient(timeout=120) as client:
         resp = await client.post(url, headers=headers, json=data)
         if resp.status_code != 200:
-            print("ElevenLabs error:", resp.status_code, resp.text)
+            logger.error(f"ElevenLabs error: {resp.status_code} - {resp.text}")
             return None, None
         return resp.content, "audio/mpeg"
     
@@ -103,15 +123,17 @@ async def synthesize_audio_with_bland_ai(text: str):
     async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(url, headers=headers, json=data)
         content_type = resp.headers.get("content-type", "")
-        print("Bland AI status:", resp.status_code)
-        print("Content-Type:", content_type)
+        
         if resp.status_code != 200:
-            print("Bland AI error:", resp.text)
+            logger.error(f"Bland AI error: {resp.status_code} - {resp.text}")
             return None, None
+        
         if "application/json" in content_type:
             result = resp.json()
-            print("Bland AI JSON response:", result)
+            logger.error(f"Bland AI returned JSON instead of audio: {result}")
             return None, None 
+        
+        logger.info(f"Bland AI synthesis successful: {resp.status_code}, content-type: {content_type}")
         return resp.content, content_type
 
 def pcm_bytes_to_wav_bytes(pcm_bytes, sample_rate=44100):

@@ -2,7 +2,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from app.db.models import Chat
-from datetime import datetime
+from datetime import datetime, timezone
 
 async def check_chat(db: AsyncSession, user_id: int, influencer_id: str):
     result = await db.execute(
@@ -18,7 +18,7 @@ async def create_chat(db: AsyncSession, user_id: int, influencer_id: str, chat_i
         id=chat_id,
         user_id=user_id,
         influencer_id=influencer_id,
-        started_at=datetime.utcnow(),
+        started_at=datetime.now(timezone.utc),
     )
     db.add(new_chat)
     await db.commit()

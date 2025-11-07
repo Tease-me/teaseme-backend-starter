@@ -2,7 +2,7 @@ from sqlalchemy.orm import DeclarativeBase, mapped_column, Mapped, relationship
 from sqlalchemy import Integer, String, Boolean, Text, ForeignKey, DateTime, JSON, Index
 from typing import Optional, List
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pgvector.sqlalchemy import Vector
 
 class Base(DeclarativeBase):
@@ -24,7 +24,7 @@ class Influencer(Base):
     voice_prompt:   Mapped[str | None] = mapped_column(String, nullable=True)
     daily_scripts:  Mapped[List[str] | None] = mapped_column(JSON, nullable=True)
     influencer_agent_id_third_part: Mapped[str | None] = mapped_column(String, nullable=True)  
-    created_at:     Mapped[datetime]     = mapped_column(DateTime, default=datetime.utcnow)
+    created_at:     Mapped[datetime]     = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     chats:          Mapped[List["Chat"]] = relationship(back_populates="influencer")
 
 class User(Base):
@@ -40,7 +40,7 @@ class User(Base):
     email_token: Mapped[str] = mapped_column(String, nullable=True)
     password_reset_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     password_reset_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     chats = relationship("Chat", back_populates="user")
 
@@ -50,10 +50,9 @@ class Chat(Base):
     id:           Mapped[str]  = mapped_column(String, primary_key=True)  # UUID
     user_id:      Mapped[int]  = mapped_column(ForeignKey("users.id"))
     influencer_id:Mapped[str]  = mapped_column(ForeignKey("influencers.id"))
-    started_at:   Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    started_at:   Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     # relationships
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     user = relationship("User", back_populates="chats")
     influencer:  Mapped["Influencer"] = relationship(back_populates="chats")
     messages = relationship("Message", back_populates="chat", cascade="all, delete-orphan")
@@ -113,7 +112,7 @@ class CreditTransaction(Base):
     units: Mapped[int]       = mapped_column(Integer)     # -1 msg, -30 secs, +10000 topup
     amount_cents: Mapped[int] = mapped_column(Integer)    # -5, -60, +1000 …
     meta: Mapped[dict]       = mapped_column(JSON, nullable=True)
-    ts: Mapped[datetime]     = mapped_column(DateTime, default=datetime.utcnow)
+    ts: Mapped[datetime]     = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class DailyUsage(Base):
     """Daily counter that resets at midnight UTC (for free tier usage)."""
@@ -136,7 +135,7 @@ class CallRecord(Base):
     )
     sid: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="pending")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index("idx_calls_user_created", "user_id", "created_at"),
