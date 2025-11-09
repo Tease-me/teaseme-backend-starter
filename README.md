@@ -23,7 +23,7 @@
 - app/main.py # FastAPI entrypoint
 - app/api/router.py # WebSocket chat endpoint
 - app/db/models.py # SQLAlchemy+pgvector models
-
+c
 # TeaseMe Backend
 
 TeaseMe is a multi-persona conversational AI platform with audio, memory, and customizable “brains” per agent.

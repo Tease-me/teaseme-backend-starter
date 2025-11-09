@@ -13,6 +13,7 @@ from app.api.elevenlabs import _push_prompt_to_elevenlabs
 from app.agents.prompt_utils import BASE_SYSTEM
 from app.db.models import Influencer
 from app.db.session import get_db
+from app.services.openai_assistants import upsert_influencer_agent
 
 log = logging.getLogger("persona-import")
 
@@ -481,8 +482,8 @@ def compose_instructions(
         sections.append(style_hint)
     if examples_hint:
         sections.append(examples_hint)
-    sections.append(f"[Persona]\n{persona_text}")
-    sections.append(f"[Brain]\n{brain_text}")
+    sections.append(f"[Persona_Prompt.csv]\n{persona_text}")
+    sections.append(f"[Brain_Memory.txt]\n{brain_text}")
     return "\n\n".join(sections)
 
 
@@ -602,6 +603,16 @@ async def import_persona_csv(
             else:
                 influencer.prompt_template = instructions
                 influencer.voice_prompt = voice_prompt
+
+            try:
+                assistant_id = await upsert_influencer_agent(
+                    name=display_name,
+                    instructions=instructions,
+                    assistant_id=getattr(influencer, "influencer_gpt_agent_id", None),
+                )
+                influencer.influencer_gpt_agent_id = assistant_id
+            except Exception as exc:  # pragma: no cover - OpenAI/network issues
+                log.error("Failed to sync OpenAI assistant for %s: %s", influencer_id, exc)
 
             agent_id = getattr(influencer, "influencer_agent_id_third_part", None)
             if agent_id:
