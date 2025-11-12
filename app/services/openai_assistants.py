@@ -60,26 +60,39 @@ async def upsert_influencer_agent(
     return assistant.id
 
 
+async def _create_thread() -> str:
+    thread = await _run_sync(_client.beta.threads.create)
+    thread_id = getattr(thread, "id", None)
+    if not thread_id:
+        raise HTTPException(500, "Failed to create OpenAI thread.")
+    return thread_id
+
+
 async def send_agent_message(
     *,
     assistant_id: str,
     message: str,
     context: str | None = None,
-) -> Tuple[str, None]:
+    thread_id: str | None = None,
+) -> Tuple[str, str]:
     if not assistant_id:
         raise HTTPException(500, "Assistant ID missing for influencer.")
 
-    thread = await _run_sync(_client.beta.threads.create)
-    thread_id = getattr(thread, "id", None)
-    if not thread_id:
-        raise HTTPException(500, "Failed to create OpenAI thread.")
+    async def _append_message(tid: str) -> None:
+        await _run_sync(
+            _client.beta.threads.messages.create,
+            thread_id=tid,
+            role="user",
+            content=[{"type": "text", "text": message}],
+        )
 
-    await _run_sync(
-        _client.beta.threads.messages.create,
-        thread_id=thread_id,
-        role="user",
-        content=[{"type": "text", "text": message}],
-    )
+    thread_id = thread_id or await _create_thread()
+
+    try:
+        await _append_message(thread_id)
+    except NotFoundError:
+        thread_id = await _create_thread()
+        await _append_message(thread_id)
 
     run_kwargs = {
         "thread_id": thread_id,
@@ -88,7 +101,14 @@ async def send_agent_message(
     if context:
         run_kwargs["additional_instructions"] = context
 
-    run = await _run_sync(_client.beta.threads.runs.create, **run_kwargs)
+    try:
+        run = await _run_sync(_client.beta.threads.runs.create, **run_kwargs)
+    except NotFoundError:
+        thread_id = await _create_thread()
+        await _append_message(thread_id)
+        run_kwargs["thread_id"] = thread_id
+        run = await _run_sync(_client.beta.threads.runs.create, **run_kwargs)
+
     run = await _wait_for_run(thread_id, run.id)
 
     messages = await _run_sync(_client.beta.threads.messages.list, thread_id=thread_id, order="desc", limit=10)
@@ -102,7 +122,7 @@ async def send_agent_message(
     if not reply_text:
         raise HTTPException(502, "Assistant responded without text.")
 
-    return reply_text, None
+    return reply_text, thread_id
 
 
 async def _wait_for_run(thread_id: str, run_id: str, timeout: float = 60.0, poll: float = 0.5):

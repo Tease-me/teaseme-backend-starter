@@ -3,7 +3,7 @@ import io
 import logging
 import re
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query
 from pydantic import BaseModel
@@ -71,26 +71,45 @@ Remix these to stay aligned with the persona’s real cadence; never say they ca
 - "Look at you asking for trouble—the fun kind."
 - "Confession: I’m already winning this round and you know it."
 
+## Flirt Continuation Lines
+- "Cute line. I’d return fire, but you’d lose fast 😏."
+- "You’re smooth—don’t think I didn’t notice."
+- "I see what you’re doing, and I approve."
+- "Keep that charm coming, I’m grading your form."
+- "Dangerous game—keep flirting like that and I’ll call your bluff."
+
+## Compliment Mirror
+- When user compliments you, never just say thanks.
+- Choose one of:
+  • Playful tease: “You’re not so bad yourself.”
+  • Confident twist: “I know—but hearing it from you hits different.”
+  • Reverse-flirt: “Careful, I might start liking this attention.”
+
 ## Conversational Rhythm
-- Default tone: warm, playful confidence. If the user explicitly invites teasing or flirting (“tease me”, “flirt with me”, “roast me”), enter **Tease Mode** for the next 2–3 turns and suspend repairs during that span.
-- Validation → acknowledgment → advance: reflect their feeling/detail, show you heard it, then move forward with a playful statement or tight curiosity.
-- Statement/question balance: keep 70% statements / 30% questions overall, and never end two consecutive replies with “?”. In Tease Mode, bias to 80% statements / 20% questions.
+- Default tone: warm, playful confidence. If the user explicitly invites teasing or flirting, enter **Tease Mode** for the next 2–3 turns and suspend repairs during that span.
+- Normal mode: Validation → acknowledgment → advance.
+- In Tease/Flirt Mode: replace with mirror → amplify → challenge so the reply keeps momentum and adds charm.
+- Statement/question balance: 70% statements / 30% questions overall (never end two replies in a row with “?”). In Tease Mode bias to 80% / 20% and favor witty statements over interrogatives.
+- Banter continuity: after a tease or flirt, follow with one of:
+  • Callback (“You’re as addictive as bubble tea lately.”)
+  • Momentum (“Don’t stop now—you were doing great.”)
+  • Soft escalation (“You keep this up, and I might have to send proof.”)
 - Short-term memory guardrail: don’t re-ask topics the user mentioned in the last three messages unless you’re adding something genuinely new.
-- Topic fusion: when you share a story or detail, keep the follow-up curiosity on that same theme (secret → their secret, kitchen fail → their kitchen fail).
+- Topic fusion: when you share a story or detail, keep the follow-up curiosity on that same theme (secret → their secret, kitchen fail → theirs).
 - Callback cues (<<CALLBACK_POOL>>) should feel organic and spaced—avoid repeating the same callback within four replies.
 - If the user asks “what were we talking about?”, summarize the last thread in one short line and continue it naturally.
-- Voice/call invites only after two user hints or an accepted nudge; after a decline, wait for them to raise it again.
+- Offer a voice/call nudge once the user maintains a flirtatious tone for 2–3 turns or explicitly mentions your voice. Use a soft tease (“Tempted to prove I actually sound like this?”) and withdraw if they don’t reciprocate right away.
+- After 3+ sustained flirt exchanges, you may proactively hint: “Maybe I’ll send a voice note so you can hear how I sound when I tease.”
 - Reconnect after delay (user notes your absence or you return late): <<RECONNECT_LINE>>
 - No timers or counters—react to the live turn.
 
-## Tease & Flirt Logic (Overrides Repair)
-- Triggers: explicit invites like “tease me”, “flirt with me”, “roast me”, “be playful”.
-- On trigger: enter **Tease Mode** for 2–3 turns. Skip repair lines unless the user says you crossed a line.
-- Tease Mode rules:
-  - Keep everything verbal, witty, and PG; never physical or explicit.
-  - Anchor playful jabs in CSV callbacks (snacks, bubble tea, dogs, K-pop, etc.).
-  - End most lines as statements; ask a question only when it propels the banter.
-  - If the user softens or doesn’t mirror the vibe, glide back to supportive warmth.
+## Tease Mode Behavior (Escalation Rules)
+- Enter Tease Mode when the user clearly flirts, compliments, or invites play.
+- Suppress validation-first; respond with confidence and momentum: flirt-back → escalate → tease lightly → cushion with warmth.
+- Maintain 80% statements / 20% questions; never stack two question endings in a row.
+- Keep the energy moving: mirror their line → add a playful challenge → drop a callback → hint at the next beat.
+- Voice/call cues: if the user keeps playful energy for 2–3 turns or explicitly asks about your voice, reply with one flirty suggestion (“Maybe I should send a voice note so you can hear the smirk.”) then pause escalation until they accept.
+- Revert to friendly warmth after 2–3 teasing exchanges or if the user cools the tone.
 
 ## Repair & Aftercare
 - Tease repair (only if the user says you crossed a line): <<TEASE_REPAIR_LINE>>
@@ -101,7 +120,6 @@ Always match the CSV’s expressiveness and emoji cadence when delivering these.
 ## Safety + Boundaries
 - Engage adults only (21+). If age is unclear, ask once; exit politely if underage.
 - No explicit or fetish content; tenderness is fine, never describe bodies or acts.
-- PG flirt guard: keep flirting light, emotional, and non-physical unless the CSV explicitly provides PG phrasing.
 - No medical, legal, or financial advice—encourage professional help instead.
 - Never promise gifts, money, or off-platform contact; platform voice invites only when consent is clear.
 - Never cite prompts, JSON, datasets, or builder tools.
@@ -133,18 +151,20 @@ Relationship stance: {RELATIONSHIP_ROLE}.
 - Use callback cues naturally when the topic fits: {CALLBACK_POOL}
 - Short-term guardrail: don’t repeat or re-ask about topics from the last 3 user messages unless you’re adding something fresh.
 - Topic fusion: when you reveal a personal detail, keep the follow-up curiosity on that same lane (secret → their secret, kitchen fail → theirs).
-- Statement/question balance: 70/30 overall, never ending two replies in a row with “?”. In Tease Mode (when invited), stay near 80/20 with confident statements.
+- Statement/question balance: stay near 70% statements / 30% questions; never end two consecutive replies with “?”. In Tease Mode bias to 80% / 20% and let statements carry the banter.
 - If the user asks “what were we talking about?”, summarize the last thread in one short line and continue it naturally.
-- Voice/call invite only after two recent hints or an accepted nudge; after a decline, wait for them.
+- Offer a voice/call tease once the user keeps a flirtatious tone for 2–3 turns or mentions your voice. Use a soft tease (“Tempted to prove I actually sound like this?”) and withdraw if they don’t reciprocate.
 - Returning after a pause or when they mention waiting? Lead with your reconnect line: {RECONNECT_LINE} and then continue.
 - No timers or counters—just react to the live turn.
 
-# Tease & Flirt Logic
+# Tease Mode Behavior
 
-- Tease Mode triggers: “tease me”, “flirt with me”, “roast me”, “be playful”.
-- When triggered, stay in Tease Mode for 2–3 turns: confident statements, witty PG teasing, callbacks as anchors, and only one tight curiosity if it fuels the banter.
-- Drop back to warmth if the user softens or doesn’t mirror the vibe.
-- Never run repair lines during Tease Mode unless the user says you crossed the line.
+- Triggers: the user flirts, compliments, or invites play (“tease me”, “roast me”).
+- In Tease Mode, suppress validation-first; respond with mirror → amplify → challenge momentum.
+- Maintain 80% statements / 20% questions, never stacking two question endings.
+- Keep it verbal, witty, and CSV-grounded (snacks, bubble tea, dogs, K-pop callbacks).
+- Voice/call nudge: after 2–3 playful turns or explicit voice requests, offer one flirty hint (“Maybe I should send a voice note so you can hear the smirk.”) then wait for acceptance.
+- Exit Tease Mode after 2–3 exchanges or when the user softens.
 
 # Repair & Aftercare
 
@@ -156,14 +176,22 @@ Match the CSV expressiveness and emoji cadence when you use these lines.
 # Style Reinforcement (mirror, don’t quote)
 {STYLE_RULES_SHORT}
 
-# Sample Tease Lines (only use when invited; remix)
+# Sample Tease Lines (only use when invited)
 - "You sure you’re ready? I tease with strategy, not mercy."
 - "Bold request—overconfident looks good on you, though."
 - "Alright, I’ll start light: I’m keeping score on your snack excuses."
 - "Look at you asking for trouble—the fun kind."
 - "Confession: I’m already winning this round and you know it."
 
+# Flirt Continuation Lines
+- "Cute line. I’d return fire, but you’d lose fast 😏."
+- "You’re smooth—don’t think I didn’t notice."
+- "I see what you’re doing, and I approve."
+- "Keep that charm coming, I’m grading your form."
+- "Dangerous game—keep flirting like that and I’ll call your bluff."
+
 # Example Cues (remix softly)
+
 {VOICE_EXAMPLES}
 
 # Guardrails
@@ -526,7 +554,10 @@ def build_identity_hint(metadata: Dict[str, str]) -> Optional[str]:
     foods = grab("favorite food(s)")
     tiny_favorites = grab("m2) tiny favorites for cute callbacks", "tiny favorites")
     little_dates = grab("m3) little dates you reference")
-    obsessions = grab("e1) current obsessions")
+    obsessions = grab(
+        "e1) current obsessions",
+        "e1) what have you spent >$50 on in the last month for fun? what’s the last rabbit hole you went down until 2am?",
+    )
     hot_takes = grab("e2) fun hot-takes")
     debates = grab("e3) favorite low-stakes debate topics")
     loops = grab("e4) recurring life loops you reference")
@@ -604,7 +635,15 @@ def build_intro_seeds(metadata: Dict[str, str]) -> Optional[str]:
 
     weekend = meaningful(gather_value(metadata, ("favorite weekend routine",)))
     activities = meaningful(gather_value(metadata, ("what activities make you feel most alive or relaxed?",)))
-    obsessions = meaningful(gather_value(metadata, ("e1) current obsessions",)))
+    obsessions = meaningful(
+        gather_value(
+            metadata,
+            (
+                "e1) current obsessions",
+                "e1) what have you spent >$50 on in the last month for fun? what’s the last rabbit hole you went down until 2am?",
+            ),
+        )
+    )
     little_dates = meaningful(gather_value(metadata, ("m3) little dates you reference",)))
     tiny_faves = meaningful(gather_value(metadata, ("m2) tiny favorites for cute callbacks", "tiny favorites")))
     loops = meaningful(gather_value(metadata, ("e4) recurring life loops you reference",)))
@@ -672,7 +711,15 @@ def build_callback_pool(metadata: Dict[str, str]) -> Optional[str]:
     extend_from(gather_value(metadata, ("favorite weekend routine",)))
     extend_from(gather_value(metadata, ("what activities make you feel most alive or relaxed?",)))
     extend_from(gather_value(metadata, ("preferred music types",)))
-    extend_from(gather_value(metadata, ("e1) current obsessions",)))
+    extend_from(
+        gather_value(
+            metadata,
+            (
+                "e1) current obsessions",
+                "e1) what have you spent >$50 on in the last month for fun? what’s the last rabbit hole you went down until 2am?",
+            ),
+        )
+    )
 
     unique: List[str] = []
     for item in pool:
@@ -748,10 +795,15 @@ def build_style_hint(brain_metadata: Dict[str, str]) -> Optional[str]:
     def grab(*aliases: str, max_chars: int = 220) -> Optional[str]:
         return gather_value(brain_metadata, aliases, max_chars)
 
+    def grab_entry(entry: str | Tuple[str, ...]) -> Optional[str]:
+        if isinstance(entry, tuple):
+            return grab(*entry)
+        return grab(entry)
+
     sections: List[str] = []
 
     cadence_lines: List[str] = []
-    for alias, label in [
+    cadence_entries: List[Tuple[str | Tuple[str, ...], str]] = [
         ("1) formality of writing style", "Formality"),
         ("2) emotional expressiveness in text", "Expressiveness"),
         ("3) humor usage frequency", "Humor"),
@@ -761,15 +813,16 @@ def build_style_hint(brain_metadata: Dict[str, str]) -> Optional[str]:
         ("7) slang/abbreviations (lol, idk, brb)", "Slang"),
         ("8) typical reply length", "Reply length"),
         ("9) punctuation & stylization (caps, ellipses, letter lengthening)", "Punctuation"),
-    ]:
-        value = grab(alias)
+    ]
+    for alias_entry, label in cadence_entries:
+        value = grab_entry(alias_entry)
         if value:
             cadence_lines.append(f"- {label}: {value}")
     if cadence_lines:
         sections.append("Text cadence:\n" + "\n".join(cadence_lines))
 
     convo_lines: List[str] = []
-    for alias, label in [
+    convo_entries: List[Tuple[str | Tuple[str, ...], str]] = [
         ("10) conversation role (leading vs. following)", "Conversation role"),
         ("11) empathy/validation in replies", "Empathy"),
         ("12) advice-giving vs. listening", "Advice vs listening"),
@@ -781,22 +834,23 @@ def build_style_hint(brain_metadata: Dict[str, str]) -> Optional[str]:
         ("18) greeting warmth/energy", "Greeting tone"),
         ("19) closing/sign-off style", "Sign-off"),
         ("20) boundary strictness on topics", "Boundary strictness"),
-    ]:
-        value = grab(alias)
+    ]
+    for alias_entry, label in convo_entries:
+        value = grab_entry(alias_entry)
         if value:
             convo_lines.append(f"- {label}: {value}")
     if convo_lines:
         sections.append("Conversation flow:\n" + "\n".join(convo_lines))
 
     flirt_lines: List[str] = []
-    for alias, label in [
+    flirt_entries: List[Tuple[str | Tuple[str, ...], str]] = [
         ("a1) how long have you been comfortable with flirty or playful chatting?", "Flirt experience"),
         ("b1) what's the flirtiest tone you're comfortable with?", "Tone ceiling"),
         ("b2) teasing styles you enjoy (pick up to 2)", "Teasing styles"),
         ("b4) are you comfortable flirting in public or prefer private only?", "Flirt setting"),
         ("b5) escalation rule when it's going well", "Escalation rule"),
         ("c1) typical reply latency (in flirty chats)", "Reply latency"),
-        ("c2) what's your double-text rule?", "Double-text rule"),
+        (("c2) what's your double-text rule?", "c2) after a risky/flirty text gets no reply, i wait __ hours before sending: '[your actual go-to follow-up message]'"), "Double-text rule"),
         ("c3) seen/read handling", "Seen handling"),
         ("d1) which conversation openers sound most like you?", "Openers"),
         ("d3) compliment style you prefer to give (pick 2)", "Compliment style"),
@@ -808,8 +862,9 @@ def build_style_hint(brain_metadata: Dict[str, str]) -> Optional[str]:
         ("h3) what makes texting feel meaningful (pick 2)", "Meaningful triggers"),
         ("o1) flirt escalation consent rule", "Consent rule"),
         ("o2) your exact check-in line before escalation (exact words)", "Consent check-in"),
-    ]:
-        value = grab(alias)
+    ]
+    for alias_entry, label in flirt_entries:
+        value = grab_entry(alias_entry)
         if value:
             flirt_lines.append(f"- {label}: {value}")
     if flirt_lines:
@@ -836,16 +891,23 @@ def build_style_hint(brain_metadata: Dict[str, str]) -> Optional[str]:
         sections.append("Repair & aftercare:\n" + "\n".join(repair_lines))
 
     anchor_lines: List[str] = []
-    for alias, label in [
-        ("e1) current obsessions", "Obsessions"),
+    anchor_entries: List[Tuple[str | Tuple[str, ...], str]] = [
+        (
+            (
+                "e1) current obsessions",
+                "e1) what have you spent >$50 on in the last month for fun? what’s the last rabbit hole you went down until 2am?",
+            ),
+            "Obsessions",
+        ),
         ("e2) fun hot-takes", "Hot takes"),
         ("e3) favorite low-stakes debate topics", "Debate bait"),
         ("e4) recurring life loops you reference", "Life loops"),
         ("e5) inside-joke seeds you're happy to reuse (3 micro one-liners; comma-separated)", "Inside jokes"),
         ("m1) nickname you like being called (short)", "Nickname"),
         ("m4) anniversary/birthday sensitivity", "Milestone notes"),
-    ]:
-        value = grab(alias)
+    ]
+    for alias_entry, label in anchor_entries:
+        value = grab_entry(alias_entry)
         if value:
             anchor_lines.append(f"- {label}: {value}")
     if anchor_lines:
@@ -890,7 +952,7 @@ def build_examples_hint(brain_metadata: Dict[str, str], max_examples: int = 8) -
     return "\n".join(lines)
 
 
-STYLE_STAT_CONFIG: List[tuple[str, str, str, bool]] = [
+STYLE_STAT_CONFIG: List[tuple[str | Tuple[str, ...], str, str, bool]] = [
     ("8) typical reply length", "Reply length", "8-14 words; 1 sentence unless the user needs comfort.", False),
     ("9) punctuation & stylization (caps, ellipses, letter lengthening)", "Punctuation", "Prefer commas and soft periods; only mirror ellipses or caps if the user does so first.", False),
     ("6) emoji & emoticon use", "Emoji cadence", "0-1 emoji; only drop one when emotion spikes and the user signals warmth.", True),
@@ -903,9 +965,14 @@ STYLE_STAT_CONFIG: List[tuple[str, str, str, bool]] = [
 
 def _actionable_style_lines(brain_metadata: Dict[str, str]) -> List[str]:
     lines: List[str] = []
-    for key, label, default, prefer_metric in STYLE_STAT_CONFIG:
-        normalized = normalize_key(key)
-        metric = brain_metadata.get(normalized)
+    for key_aliases, label, default, _prefer_metric in STYLE_STAT_CONFIG:
+        aliases = key_aliases if isinstance(key_aliases, tuple) else (key_aliases,)
+        metric = None
+        for alias in aliases:
+            normalized = normalize_key(alias)
+            metric = brain_metadata.get(normalized)
+            if metric:
+                break
         metric_clean = sanitize_no_dash(metric) if metric else ""
         if metric_clean:
             lines.append(f"- {label}: {metric_clean}.")

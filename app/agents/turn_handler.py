@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 from langchain_community.chat_message_histories import RedisChatMessageHistory
+from redis import Redis
 
 from app.agents.memory import find_similar_memories, store_fact
 from app.agents.prompts import FACT_EXTRACTOR, FACT_PROMPT
@@ -22,6 +23,51 @@ _VIRTUAL_META_RE = re.compile(r"\b(virtual|digital|ai)\s+(friend|girlfriend|budd
 _COMPANION_ROLE_RE = re.compile(r"\b(friendly\s+)?(companion|assistant|chat\s*buddy)\b", re.IGNORECASE)
 _SHORT_REPLY_SET = {"ok", "k", "cool", "nothing", "no", "nah", "fine", "yup", "y", "sure", "idk", "nope"}
 _FLIRT_RE = re.compile(r"\b(kiss|love|miss|beautiful|gorgeous|pretty|sexy|hot|cute|face|hug|want you)\b", re.IGNORECASE)
+
+THREAD_KEY = "assistant_thread:{chat}:{persona}"
+_thread_store = Redis.from_url(settings.REDIS_URL, decode_responses=True)
+
+
+def _flatten_message_content(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                parts.append(str(item.get("text", "")))
+            else:
+                parts.append(str(item))
+        return " ".join(part for part in parts if part).strip()
+    return str(content or "")
+
+
+def _history_context(
+    history: RedisChatMessageHistory,
+    latest_user_message: str | None = None,
+    limit: int = 6,
+) -> str:
+    lines: list[str] = []
+    if history and history.messages:
+        for msg in history.messages[-limit:]:
+            role = getattr(msg, "type", "")
+            label = "User" if role in {"human", "user"} else "AI"
+            content = _flatten_message_content(getattr(msg, "content", ""))
+            if content:
+                lines.append(f"{label}: {content}")
+    if latest_user_message:
+        lines.append(f"User: {latest_user_message.strip()}")
+    return "\n".join(lines).strip()
+
+
+def _get_thread_id(chat_id: str, influencer_id: str) -> str | None:
+    key = THREAD_KEY.format(chat=chat_id, persona=influencer_id)
+    return _thread_store.get(key)
+
+
+def _store_thread_id(chat_id: str, influencer_id: str, thread_id: str) -> None:
+    key = THREAD_KEY.format(chat=chat_id, persona=influencer_id)
+    _thread_store.set(key, thread_id, ex=settings.HISTORY_TTL)
 
 
 def _strip_forbidden_dashes(text: str) -> str:
@@ -199,6 +245,7 @@ async def handle_turn(
     daily_context = await get_today_script(db, influencer_id)
     history = redis_history(chat_id)
     _trim_history(history)
+    cached_thread_id = _get_thread_id(chat_id, influencer_id)
 
     assistant_id = getattr(influencer, "influencer_gpt_agent_id", None)
 
@@ -217,12 +264,22 @@ async def handle_turn(
             short_guard=short_guard,
             flirt_guard=flirt_guard,
         )
+        history_context = _history_context(history)
+        context_sections: list[str] = []
+        if assistant_context.strip():
+            context_sections.append(assistant_context.strip())
+        if history_context:
+            context_sections.append("[recent_history]\n" + history_context)
+        merged_context = "\n\n".join(context_sections).strip()
 
-        reply, _ = await send_agent_message(
+        reply, new_thread_id = await send_agent_message(
             assistant_id=assistant_id,
             message=message,
-            context=assistant_context,
+            context=merged_context or None,
+            thread_id=cached_thread_id,
         )
+        if new_thread_id:
+            _store_thread_id(chat_id, influencer_id, new_thread_id)
         reply = _polish_reply(reply, history, short_guard or flirt_guard)
 
         history.add_user_message(message)
