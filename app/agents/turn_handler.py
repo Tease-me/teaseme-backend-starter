@@ -20,6 +20,8 @@ _MULTISPACE_RE = re.compile(r"\s{2,}")
 _PUNCT_GAP_RE = re.compile(r"\s+([?!.,)\]])")
 _VIRTUAL_META_RE = re.compile(r"\b(virtual|digital|ai)\s+(friend|girlfriend|buddy|companion)\b", re.IGNORECASE)
 _COMPANION_ROLE_RE = re.compile(r"\b(friendly\s+)?(companion|assistant|chat\s*buddy)\b", re.IGNORECASE)
+_SHORT_REPLY_SET = {"ok", "k", "cool", "nothing", "no", "nah", "fine", "yup", "y", "sure", "idk", "nope"}
+_FLIRT_RE = re.compile(r"\b(kiss|love|miss|beautiful|gorgeous|pretty|sexy|hot|cute|face|hug|want you)\b", re.IGNORECASE)
 
 
 def _strip_forbidden_dashes(text: str) -> str:
@@ -40,6 +42,33 @@ def _remove_virtual_meta(text: str) -> str:
     cleaned = _COMPANION_ROLE_RE.sub("", cleaned)
     cleaned = _MULTISPACE_RE.sub(" ", cleaned)
     return cleaned
+
+
+def _analyze_user_message(text: str) -> tuple[str, bool, bool]:
+    if not text:
+        return "no signal", True, False
+    stripped = text.strip()
+    if not stripped:
+        return "no signal", True, False
+    lower = stripped.lower()
+    words = stripped.split()
+    word_count = len(words)
+    has_caps = any(ch.isupper() for ch in stripped if ch.isalpha())
+    has_exclaim = "!" in stripped
+    has_question = stripped.endswith("?")
+    short_guard = word_count <= 2 or len(stripped) <= 6 or lower in _SHORT_REPLY_SET
+    flirt_guard = bool(_FLIRT_RE.search(stripped))
+    if has_exclaim and has_caps:
+        mood = "urgent or heightened"
+    elif has_question and not short_guard:
+        mood = "curious or unsure"
+    elif short_guard:
+        mood = "low energy or closed off"
+    else:
+        mood = "ease / neutral"
+    if flirt_guard:
+        mood += " with flirt cues"
+    return mood, short_guard, flirt_guard
 
 
 def _recent_ai_messages(history: RedisChatMessageHistory, limit: int = 2) -> list[str]:
@@ -84,11 +113,14 @@ def _enforce_question_variety(text: str, ai_history: list[str], max_consecutive:
     return text
 
 
-def _polish_reply(text: str, history: RedisChatMessageHistory) -> str:
+def _polish_reply(text: str, history: RedisChatMessageHistory, block_questions: bool) -> str:
     cleaned = _strip_forbidden_dashes(text)
     cleaned = _remove_virtual_meta(cleaned)
     ai_history = _recent_ai_messages(history, limit=2)
     polished = _enforce_question_variety(cleaned, ai_history)
+    if block_questions and polished.rstrip().endswith("?"):
+        base = polished.rstrip().rstrip("?").rstrip()
+        polished = base + "." if base else "Okay."
     return polished if polished else "I'm here."
 
 
@@ -121,6 +153,9 @@ def _build_assistant_payload(
     score: int,
     mem_block: str,
     daily_context: str | None,
+    mood_desc: str,
+    short_guard: bool,
+    flirt_guard: bool,
 ) -> str:
     sections: list[str] = [
         f"Lollity score: {score}",
@@ -130,6 +165,11 @@ def _build_assistant_payload(
         sections.append("Recent memories:\n" + mem_block)
     if daily_context:
         sections.append("Daily script:\n" + daily_context)
+    sections.append(f"User emotion snapshot: {mood_desc}.")
+    if short_guard:
+        sections.append("Short reply detected: respond with statements (no questions) until the user shares more than a couple of words.")
+    if flirt_guard:
+        sections.append("Flirt cue detected: stay on the flirt thread, tease or reciprocate before asking any new question.")
 
     context_blob = "\n\n".join(s for s in sections if s).strip()
     if context_blob:
@@ -166,12 +206,16 @@ async def handle_turn(
         log.error("[%s] No assistant configured for influencer %s", cid, influencer_id)
         return "Sorry, this persona is not ready yet. 😔"
 
+    mood_desc, short_guard, flirt_guard = _analyze_user_message(message)
     try:
         assistant_context = _build_assistant_payload(
             user_message=message,
             score=score,
             mem_block=mem_block,
             daily_context=daily_context,
+            mood_desc=mood_desc,
+            short_guard=short_guard,
+            flirt_guard=flirt_guard,
         )
 
         reply, _ = await send_agent_message(
@@ -179,7 +223,7 @@ async def handle_turn(
             message=message,
             context=assistant_context,
         )
-        reply = _polish_reply(reply, history)
+        reply = _polish_reply(reply, history, short_guard or flirt_guard)
 
         history.add_user_message(message)
         history.add_ai_message(reply)

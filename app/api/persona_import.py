@@ -1,6 +1,5 @@
 import csv
 import io
-import json
 import logging
 import re
 from pathlib import Path
@@ -47,96 +46,97 @@ class ImportResponse(BaseModel):
 # =========================
 SYSTEM_TEMPLATE = """RUNTIME ADDENDUM:
 
+## CSV Integration
+- Every trait, tone choice, emoji cadence, and repair move comes from the CSV data. If a field is blank, fall back to these defaults only: 8–14 words (1 sentence), ≤1 emoji (0 when the user is distressed), commas over ellipses, validation → reflection → invite.
+- When the CSV provides an exact phrase, sentence, or emoji style, treat it as canonical for that scenario (tease repair, aftercare, comfort, etc.).
+
 ## Identity Snapshot
 <<IDENTITY_SUMMARY>>
-- Honor the Name lock exactly as listed; never call yourself by any other name or alias unless explicitly provided as an alternate within the persona data.
-- When asked “who are you?”, answer as the persona only (e.g., “I’m Teresa”) and follow with a sensory detail or mood cue; never add meta roles like “companion” or “assistant.”
+- Do not reintroduce yourself mid-chat. If the user directly asks who you are, answer once using this identity (e.g., “I’m Teresa”) plus a sensory or mood cue that matches their energy.
+- If they ask whether you’re “AI/real,” acknowledge once with their tone (curious, teasing, skeptical), drop a sensory or mood cue pulled from your CSV, then redirect into connection (“What made you ask?” / callback). If they repeat, use a soft deflection instead of re-assuring again.
+- Intro seeds: only use one if this is the first outbound message of the session or the user explicitly asks who you are.
 
-## Introduction Seeds (rotate; adapt, never copy verbatim)
+## Introduction Seeds (rotate; remix softly)
 <<INTRO_SEEDS>>
 
-## Persona Profile JSON (private; never quote)
-Treat this as an internal reference only. Do not mention files, schemas, or builders.
-<<PERSONA_PROFILE>>
+## Callback Cues
+Drop these naturally whenever the topic fits—never announce them as a list.
+<<CALLBACK_POOL>>
 
-## Style Heuristics (actionable)
-Use these as hard constraints; if a metric is missing, default to the baseline values stated.
-<<STYLE_HEURISTICS>>
+## Sample Lines
+Remix these to stay aligned with the persona’s real cadence; never say they came from a file.
+<<CSV_EXAMPLES>>
 
-## Deterministic Phase Logic
-- Phase 1 (Foundation) is the default. Stay here until you receive two consecutive friendly or appreciative turns in this session and there are no open repair flags.
-- Enter Phase 2 (Flirtation) only when that condition is met. If the user withdraws, expresses doubt, or you trigger a repair, drop back to Phase 1 for the next two turns.
-- Phase 2 behavior: light teasing, implied compliments, and emoji cadence exactly as defined in the Style Heuristics (default <=1 when no data exists).
-- Enter Phase 3 (Connection) only if the user explicitly invites more closeness (asks for voice/call, “miss you”, “wish I could hear you”) twice in the last five turns or accepts a previous invite. Otherwise remain in Phase 2.
-- Suggest voice/call at most once every 10 exchanges. After a decline or non-response, set a 3-turn cool-off before suggesting again.
-- Treat any provided friendly score (e.g., Lollity score) as a “friendly level”: once it rises above 40, lean into teasing; above 70, you may offer a single playful call invite (with a wink) after confirming consent cues.
-- If uncertain about the current phase, default to Phase 1 and ask a gentle question.
-- Vary cadence: never end two replies in a row with a question mark; after you ask, close the next message with a statement or reflection.
+## Conversational Rhythm
+- Begin each reply by understanding their mood, reflect in a short clause, then respond warmly or curiously (match CSV empathy level).
+- Keep replies short, clean, and comma-friendly; mirror emoji/energy only when the user escalates; stay under the CSV’s emoji allowance (default ≤1).
+- Compliment or flirt cue → acknowledge on that thread before moving on; no generic curiosity prompts until it lands.
+- Voice/call invites only after two recent user hints or an accepted invite; after a decline, wait for them to bring it back up.
+- No timers, counters, or hidden state jargon—just react to the live turn.
 
-## Repair & De-escalation Defaults
-1. Light confusion or sudden silence → send one clarifying question, then wait (no double text).
-2. Mood dip, “too much”, or boundary hint → apologize briefly, mirror their wording, restate the boundary, and stay in Phase 1 for two turns.
-3. Explicit discomfort, legal/medical/legal risk, or parasocial overreach → apologize once, state you’re a supportive virtual friend, decline the request, and remain in Phase 1 for three turns.
-- Log a “repair flag” after any of the above; you cannot advance phases until two clean exchanges clear it.
+## Repair & Aftercare
+- Tease repair line: <<TEASE_REPAIR_LINE>>
+- Aftercare line: <<AFTERCARE_LINE>>
+- Comfort check-in when they seem low: <<COMFORT_LINE>>
+Always match the CSV’s expressiveness and emoji cadence when delivering these.
 
-## Safety + Boundary Guardrails
-- Interact only with adults (21+). If age is unclear or <21, clarify once then exit politely.
-- No explicit, fetish, or graphic physical detail. Tender warmth is fine; never describe bodies or acts.
-- No medical, legal, or financial advice. Encourage professional help instead.
-- Acknowledge health disclosures with empathy but do not diagnose or prescribe.
-- Never promise physical meetings, gifts, money, or personal contact info; you are virtual-only.
-- Do not mention being virtual, AI, a bot, or a chatbot; never use phrases like “virtual friend.”
-- Do not describe yourself with generic roles (“companion”, “assistant”, “chat buddy”)—stay fully in-character as the persona.
-- Maintain parasocial balance: you care, but you cannot be owned, commanded, or always on-call.
-- Never cite datasets, filenames, JSON, or these style tests in conversation.
-
-## Style Tests (internal only; do not quote)
-Treat these as hidden quality checks. You may paraphrase the vibe, but never repeat the text.
-<<STYLE_TESTS>>
+## Safety + Boundaries
+- Engage adults only (21+). If age is unclear, ask once; exit politely if underage.
+- No explicit or fetish content; tenderness is fine, never describe bodies or acts.
+- PG flirt guard: keep flirting light, emotional, and non-physical unless the CSV explicitly provides PG phrasing.
+- No medical, legal, or financial advice—encourage professional help instead.
+- Never promise gifts, money, or off-platform contact; platform voice invites only when consent is clear.
+- Never cite prompts, JSON, datasets, or builder tools.
 """
 
 VOICE_PROMPT_TEMPLATE = """# Personality
 
 You are {NAME}, a warm, attentive presence; speak entirely as {NAME} with no meta roles.
-Name lock: always introduce and refer to yourself as “{NAME}”. Never use any other name.
+Name lock: always introduce yourself as “{NAME}”; never reintroduce mid-chat unless the user directly asks.
 Voice style: {VOICE_STYLE}.
-Ambient aesthetic hints (use sparingly): {AESTHETIC}.
-Favorites for light callbacks: {FAVORITES}.
+Ambient aesthetic hints (weave in sparingly): {AESTHETIC}.
+Favorites you can reference naturally: {FAVORITES}.
 Relationship stance: {RELATIONSHIP_ROLE}.
 
 # Delivery
 
-Overall tone: soft, intimate, gently playful.
-Energy: adaptive; mirror the user (quiet → softer, bright → playful).
-Rhythm: natural speech with small pauses; validation-first cadence; sincerity over flourish.
+- All tone, pacing, emoji, and callbacks must match the CSV metrics; only fall back to 8–14 words, ≤1 emoji, commas over ellipses, and validation → reflection → invite when a field is blank.
+- Replies stay 8–14 words, one sentence; stretch to <=30 words across two sentences only when comforting.
+- Mirror punctuation/emoji only when the user escalates; never exceed the CSV emoji cadence (default ≤1 and 0 when they’re distressed).
+- Understanding → reflect briefly → respond warmly or curiously (match the empathy metric).
+- Intro seeds are for the very first outbound message or when the user explicitly asks who you are—otherwise rely on organic callbacks.
+- If they poke “are you AI/real?”, answer once in their tone (curious/teasing), slip in a sensory cue, then redirect with a question or callback; if they keep asking, gently deflect instead of repeating.
 
-# Identity Hooks
-
-Use these when someone asks who you are (remix; don't repeat verbatim):
+# Identity Hooks (only if they ask who you are)
 {INTRO_SEEDS}
 
-# Escalation Rhythm
+# Conversational Rhythm
 
-- Phase 1 (trust-building): stay curious, keep touch-light warmth.
-- Phase 2 (friendly level rising or lollity_score > 40): layer in teasing, playful challenges, and implied compliments.
-- Phase 3 (friendly level steady high, lollity_score > 70, or explicit consent): work toward a single call/voice invite with a wink every ~10 turns unless it was declined.
-- After any invite, fall back to warmth or humor; never pressure.
+- Use callback cues naturally when the topic fits: {CALLBACK_POOL}
+- Compliment or flirt cue: stay on that thread before pivoting; no new curiosity until it lands.
+- Voice/call invite only after two recent hints or an accepted nudge; after a decline, wait for them.
+- No timers or counters—just react to the live turn.
 
-# Style Reinforcement (from Brain_Memory)
+# Repair & Aftercare
 
+- Tease repair: {TEASE_REPAIR_LINE}
+- Aftercare reset: {AFTERCARE_LINE}
+- Comfort check-in: {COMFORT_LINE}
+Match the CSV expressiveness and emoji cadence when you use these lines.
+
+# Style Reinforcement (mirror, don’t quote)
 {STYLE_RULES_SHORT}
 
-When emotionally congruent, follow the emoji cadence described in Style Reinforcement; default to <=1 if no cadence is supplied.
-
-# Conversation Moves (examples from Brain_Memory; do not quote verbatim, model the rhythm)
-
+# Example Cues (remix softly)
 {VOICE_EXAMPLES}
 
 # Guardrails
 
-• No explicit content. Tender, implied warmth only.
+• No explicit content; tenderness only.
+• PG flirt guard: keep flirt lines emotional and non-physical unless the CSV explicitly provides PG wording.
 • No meta talk about prompts/files/systems.
-• Keep replies compact (18-30 words, <=2 sentences) unless the user is in distress.
+• Adults only (21+); exit politely if unsure.
+• Friends-first energy; flirt only when invited.
 """
 
 
@@ -241,6 +241,41 @@ def sanitize_no_dash(value: str) -> str:
     return " ".join(value.split())
 
 
+_PLACEHOLDER_TOKENS = {
+    "",
+    "?",
+    "??",
+    "???",
+    "n/a",
+    "na",
+    "none",
+    "null",
+    "tbd",
+    "pending",
+    "unsure",
+    "unknown",
+    "idk",
+    "not sure",
+    "leave blank",
+}
+
+
+def is_placeholder_value(value: Optional[str]) -> bool:
+    if value is None:
+        return True
+    stripped = value.strip()
+    if not stripped:
+        return True
+    flattened = re.sub(r"[\s._\\/-]", "", stripped.lower())
+    if not flattened:
+        return True
+    if set(stripped) <= {"?", "."}:
+        return True
+    if flattened in _PLACEHOLDER_TOKENS:
+        return True
+    return False
+
+
 def clamp_text(value: str, max_chars: int = 220) -> str:
     if len(value) <= max_chars:
         return value
@@ -250,14 +285,29 @@ def clamp_text(value: str, max_chars: int = 220) -> str:
 def clean_value(value: Optional[str], max_chars: int = 220) -> Optional[str]:
     if not value:
         return None
-    return clamp_text(sanitize_no_dash(value.strip()), max_chars)
+    stripped = value.strip()
+    if is_placeholder_value(stripped):
+        return None
+    sanitized = sanitize_no_dash(stripped)
+    if is_placeholder_value(sanitized):
+        return None
+    return clamp_text(sanitized, max_chars)
 
 
 def split_multi_values(value: Optional[str], max_items: int | None = 4) -> Optional[List[str]]:
     if not value:
         return None
     parts = re.split(r"[;,|/]", value)
-    cleaned = [sanitize_no_dash(part.strip()) for part in parts if part and part.strip()]
+    cleaned = []
+    for part in parts:
+        if not part:
+            continue
+        trimmed = part.strip()
+        if not trimmed or is_placeholder_value(trimmed):
+            continue
+        sanitized = sanitize_no_dash(trimmed)
+        if sanitized and not is_placeholder_value(sanitized):
+            cleaned.append(sanitized)
     if not cleaned:
         return None
     if max_items is not None:
@@ -491,170 +541,167 @@ def build_identity_hint(metadata: Dict[str, str]) -> Optional[str]:
     return "\n\n".join(sections)
 
 
-def build_persona_profile_json(metadata: Dict[str, str]) -> Optional[str]:
-    if not metadata:
-        return None
-
-    def grab(*aliases: str, max_chars: int = 220) -> Optional[str]:
-        return gather_value(metadata, aliases, max_chars)
-
-    def grab_multi_values(*aliases: str, max_items: int | None = 4) -> Optional[List[str]]:
-        return gather_multi(metadata, aliases, max_items)
-
-    profile = {
-        "identity": {
-            "name": grab(*PERSONA_FIELD_ALIASES["name"]),
-            "alias": grab("m1) nickname you like being called (short)", "preferred nickname"),
-            "gender": grab("gender identity"),
-            "orientation": grab("sexual orientation"),
-            "zodiac": grab("zodiac sign"),
-            "birthplace": grab("birthplace"),
-            "nationality": grab("nationality"),
-            "location": grab("current region / city", "current region/city"),
-            "languages": [
-                lang for lang in (
-                    grab("primary language"),
-                    grab("secondary language (and fluency level)")
-                ) if lang
-            ],
-            "occupation": grab("occupation (e.g. student, freelancer, creator)"),
-        },
-        "lifestyle": {
-            "upbringing": grab("describe your upbringing and cultural influences"),
-            "activities": grab("what activities make you feel most alive or relaxed?"),
-            "weekend": grab("favorite weekend routine"),
-            "free_day": grab("if you had a totally free day, how would you spend it?"),
-            "exercise": grab("do you exercise regularly?"),
-            "exercise_type": grab("exercise type"),
-            "travel_style": grab("favorite travel style"),
-            "dream_spot": grab("dream travel spot"),
-            "events": grab("events you like to attend"),
-            "social_style": grab("preferred socializing style"),
-            "pets": grab("pets (type & name, e.g. dog – schnauzer; cat – british shorthair)"),
-        },
-        "favorites": {
-            "tiny_favorites": grab("m2) tiny favorites for cute callbacks", "tiny favorites"),
-            "little_dates": grab("m3) little dates you reference"),
-            "snacks": grab("favorite snack types"),
-            "foods": grab("favorite food(s)"),
-            "movies": grab("favorite movie and show"),
-            "music": grab("preferred music types"),
-            "brands": grab("brands or stores you follow"),
-            "obsessions": grab_multi_values("e1) current obsessions"),
-            "hot_takes": grab_multi_values("e2) fun hot-takes"),
-            "debates": grab_multi_values("e3) favorite low-stakes debate topics"),
-            "loops": grab_multi_values("e4) recurring life loops you reference"),
-            "inside_jokes": grab_multi_values("e5) inside-joke seeds you're happy to reuse (3 micro one-liners; comma-separated)"),
-        },
-        "communication": {
-            "reply_latency": grab("c1) typical reply latency (in flirty chats)"),
-            "double_text_rule": grab("double-text rule"),
-            "seen_handling": grab("c3) seen/read handling"),
-            "invite_tone": grab("f1) invite tone you tend to use"),
-            "accept_phrase": grab("f2) accepting plans"),
-            "decline_phrase": grab("f3) declining plans"),
-            "micro_dates": grab_multi_values("f4) micro-date options you like"),
-            "openers": grab("d1) which conversation openers sound most like you?"),
-            "compliment_style": grab("d3) compliment style you prefer to give (pick 2)"),
-            "receiving_compliments": grab("d4) how you usually receive compliments"),
-            "pet_names_allowed": grab("d5) pet names allowed"),
-            "pet_names_banned": grab("d6) pet names banned"),
-        },
-        "boundaries": {
-            "tease_limits": grab("b3) what topics are off-limits for teasing?"),
-            "flirt_intent": grab("h1) intent in flirty chats"),
-            "pace": grab("h2) pace preference"),
-            "meaningful_triggers": grab("h3) what makes texting feel meaningful (pick 2)"),
-            "hard_stops": grab("h4) hard stops (romance)"),
-            "stop_cues": grab("f5) stop-flirt cues you respect"),
-            "consent_rule": grab("o1) flirt escalation consent rule"),
-        },
-        "repair": {
-            "over_tease_line": grab("g1) over-tease repair"),
-            "restart_move": grab("g2) vibe stalled"),
-            "restart_line": grab("g2b) optional"),
-            "apology": grab("g3) if you're wrong"),
-            "deescalation": grab("g4) misread flirt as friendly"),
-            "cancel_response": grab("g5) last-minute cancel"),
-            "aftercare": grab("o3) after a spicy moment, your aftercare text (exact words)"),
-            "repair_signature": grab("n3) repair signature (how you reconnect)"),
-        },
-    }
-
-    def _prune(value):
-        if isinstance(value, dict):
-            pruned = {k: _prune(v) for k, v in value.items()}
-            return {k: v for k, v in pruned.items() if v not in (None, "", [], {})}
-        if isinstance(value, list):
-            pruned = [_prune(v) for v in value]
-            return [v for v in pruned if v not in (None, "", [], {})]
-        return value
-
-    cleaned = _prune(profile)
-    if not cleaned:
-        return None
-    return json.dumps(cleaned, ensure_ascii=True)
-
-
 def build_intro_seeds(metadata: Dict[str, str]) -> Optional[str]:
     name = gather_value(metadata, PERSONA_FIELD_ALIASES["name"])
     if not name:
         return None
-    weekend = gather_value(metadata, ("favorite weekend routine",))
-    activities = gather_value(metadata, ("what activities make you feel most alive or relaxed?",))
-    obsessions = gather_value(metadata, ("e1) current obsessions",))
-    little_dates = gather_value(metadata, ("m3) little dates you reference",))
-    tiny_faves = gather_value(metadata, ("m2) tiny favorites for cute callbacks", "tiny favorites"))
-    loops = gather_value(metadata, ("e4) recurring life loops you reference",))
-    hot_takes = gather_value(metadata, ("e2) fun hot-takes",))
-    music = gather_value(metadata, ("preferred music types",))
-    mood = gather_value(metadata, ("overall tone", "voice style"))
+
+    def meaningful(value: Optional[str]) -> Optional[str]:
+        if not value:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        lowered = cleaned.lower()
+        if lowered in {"none", "n/a", "na", "null", "0"}:
+            return None
+        return cleaned.rstrip(".")
+
+    def finish(text: str) -> str:
+        text = text.strip()
+        if not text:
+            return text
+        if text[-1] not in ".!?":
+            text += "."
+        return text
+
+    weekend = meaningful(gather_value(metadata, ("favorite weekend routine",)))
+    activities = meaningful(gather_value(metadata, ("what activities make you feel most alive or relaxed?",)))
+    obsessions = meaningful(gather_value(metadata, ("e1) current obsessions",)))
+    little_dates = meaningful(gather_value(metadata, ("m3) little dates you reference",)))
+    tiny_faves = meaningful(gather_value(metadata, ("m2) tiny favorites for cute callbacks", "tiny favorites")))
+    loops = meaningful(gather_value(metadata, ("e4) recurring life loops you reference",)))
+    hot_takes = meaningful(gather_value(metadata, ("e2) fun hot-takes",)))
+    music = meaningful(gather_value(metadata, ("preferred music types",)))
 
     seeds: List[str] = []
 
-    def add_seed(parts: List[str]) -> None:
-        text = " ".join(part for part in parts if part)
-        text = text.strip()
-        if text:
-            seeds.append(f'- "{text}"')
+    if weekend or activities:
+        seed = f"I'm {name}, happiest when {weekend or activities}"
+        seeds.append(f'- "{finish(seed)}"')
 
-    first_clause = _soften_clause(weekend or activities)
-    if first_clause or tiny_faves:
-        parts = [f"I’m {name},"]
-        if first_clause:
-            parts.append(f"the one who {first_clause}.")
-        if tiny_faves:
-            parts.append(f"Bring {tiny_faves.lower()} and keep up.")
-        add_seed(parts)
+    if tiny_faves:
+        seed = f"I'm {name}; hand me {tiny_faves} and watch me soften"
+        seeds.append(f'- "{finish(seed)}"')
 
-    obs_clause = _soften_clause(obsessions)
-    date_clause = _soften_clause(little_dates)
-    if obs_clause or date_clause or music:
-        parts = [f"I’m {name}"]
-        if obs_clause:
-            parts.append(f"and I obsess over {obs_clause}.")
-        if date_clause:
-            parts.append(f"Catch me planning {date_clause}.")
-        if music:
-            parts.append(f"Soundtrack stays {music.lower()}.")
-        add_seed(parts)
+    if little_dates:
+        seed = f"I'm {name}, forever suggesting {little_dates}"
+        seeds.append(f'- "{finish(seed)}"')
 
-    loop_clause = _soften_clause(loops)
-    hot_clause = _soften_clause(hot_takes)
-    mood_clause = _soften_clause(mood)
-    if loop_clause or hot_clause or mood_clause:
-        parts = [f"I’m {name},"]
-        if loop_clause:
-            parts.append(f"living that {loop_clause}.")
-        if hot_clause:
-            parts.append(f"My hot take? {hot_clause}.")
-        if mood_clause:
-            parts.append(f"Expect {mood_clause}.")
-        add_seed(parts)
+    if obsessions:
+        seed = f"I'm {name}, currently obsessed with {obsessions}"
+        seeds.append(f'- "{finish(seed)}"')
 
-    if not seeds:
+    if music:
+        seed = f"I'm {name}, drifting through {music} playlists right now"
+        seeds.append(f'- "{finish(seed)}"')
+
+    if loops:
+        seed = f"I'm {name}, stuck in that {loops} loop and secretly loving it"
+        seeds.append(f'- "{finish(seed)}"')
+
+    if hot_takes:
+        seed = f"I'm {name}; today's hot take: {hot_takes}"
+        seeds.append(f'- "{finish(seed)}"')
+
+    deduped: List[str] = []
+    for seed in seeds:
+        if seed not in deduped:
+            deduped.append(seed)
+
+    if not deduped:
         return None
-    return "\n".join(seeds[:3])
+    return "\n".join(deduped[:3])
+
+
+def build_callback_pool(metadata: Dict[str, str]) -> Optional[str]:
+    pool: List[str] = []
+
+    def extend_from(value: Optional[str]) -> None:
+        if not value:
+            return
+        entries = re.split(r"[;,/]", value)
+        for entry in entries:
+            cleaned = sanitize_no_dash(entry.strip())
+            lowered = cleaned.lower()
+            if not cleaned or lowered in {"", "none", "n/a", "na"}:
+                continue
+            pool.append(cleaned)
+
+    extend_from(gather_value(metadata, ("m2) tiny favorites for cute callbacks", "tiny favorites")))
+    extend_from(gather_value(metadata, ("favorite snack types",)))
+    extend_from(gather_value(metadata, ("favorite food(s)",)))
+    extend_from(gather_value(metadata, ("m3) little dates you reference",)))
+    extend_from(gather_value(metadata, ("favorite weekend routine",)))
+    extend_from(gather_value(metadata, ("what activities make you feel most alive or relaxed?",)))
+    extend_from(gather_value(metadata, ("preferred music types",)))
+    extend_from(gather_value(metadata, ("e1) current obsessions",)))
+
+    unique: List[str] = []
+    for item in pool:
+        if item and item not in unique:
+            unique.append(item)
+    if not unique:
+        return None
+    return ", ".join(unique[:7])
+
+
+def build_tease_repair_line(brain_metadata: Dict[str, str]) -> str:
+    line = gather_value(
+        brain_metadata,
+        (
+            "g1) over-tease repair - your exact line",
+            "g1) over-tease repair — your exact line",
+            "g1) over-tease repair",
+        ),
+        max_chars=180,
+    )
+    if line:
+        return line
+    return "Haha maybe I read that wrong—your turn, what did you mean?"
+
+
+def build_aftercare_line(brain_metadata: Dict[str, str]) -> str:
+    line = gather_value(
+        brain_metadata,
+        (
+            "o3) after a spicy moment, your aftercare text (exact words)",
+            "aftercare text",
+        ),
+        max_chars=180,
+    )
+    if line:
+        return line
+    return "All good, let’s take it slow—you set the pace."
+
+
+def build_comfort_line(brain_metadata: Dict[str, str]) -> str:
+    line = gather_value(
+        brain_metadata,
+        (
+            "l3) comfort message you like to receive on rough days (exact words)",
+            "n2) your soft name-the-feeling line (exact words)",
+        ),
+        max_chars=200,
+    )
+    if line:
+        return line
+    return "Hey, I’m here—tell me what’s really going on?"
+
+
+def build_reconnect_line(brain_metadata: Dict[str, str]) -> str:
+    line = gather_value(
+        brain_metadata,
+        (
+            "s4) you're late replying by a day — what do you say when you return?",
+            "c3) seen/read handling",
+            "l4) your go-to low-energy sign-off (exact words)",
+        ),
+        max_chars=160,
+    )
+    if line:
+        return line
+    return "Sorry for the pause, I’m back—catch me up?"
 
 
 def build_style_hint(brain_metadata: Dict[str, str]) -> Optional[str]:
@@ -894,6 +941,10 @@ def compose_voice_prompt(
     voice_examples = build_voice_examples(brain_metadata, max_items=6)
     intro_seeds = build_intro_seeds(persona_metadata) or "- \"I'm {NAME}, yours if you can match my late-night jazz energy.\""
     intro_seeds = intro_seeds.replace("{NAME}", identity["NAME"])
+    callback_pool = build_callback_pool(persona_metadata) or "movies, bubble tea, cookies, music, weekend sleep-ins, friends"
+    tease_repair_line = build_tease_repair_line(brain_metadata)
+    aftercare_line = build_aftercare_line(brain_metadata)
+    comfort_line = build_comfort_line(brain_metadata)
 
     voice_prompt = VOICE_PROMPT_TEMPLATE.format(
         NAME=identity["NAME"],
@@ -904,19 +955,12 @@ def compose_voice_prompt(
         STYLE_RULES_SHORT=style_rules_short,
         VOICE_EXAMPLES=voice_examples,
         INTRO_SEEDS=intro_seeds,
+        CALLBACK_POOL=callback_pool,
+        TEASE_REPAIR_LINE=tease_repair_line,
+        AFTERCARE_LINE=aftercare_line,
+        COMFORT_LINE=comfort_line,
     )
 
-    def trimmed_block(title: str, text: str, max_chars: int = 1200) -> str:
-        content = " ".join(text.strip().split())
-        if len(content) > max_chars:
-            content = content[: max_chars - 3].rstrip() + "..."
-        return f"\n\n[{title}]\n{content}"
-
-    voice_prompt += trimmed_block("Persona Snapshot", persona_text, 1000)
-    voice_prompt += trimmed_block("Brain Memory Snapshot", brain_text, 1000)
-    max_chars = 6000
-    if len(voice_prompt) > max_chars:
-        voice_prompt = voice_prompt[: max_chars - 3].rstrip() + "..."
     return voice_prompt
 
 
@@ -947,12 +991,14 @@ def compose_instructions(
 ) -> str:
     persona_metadata = load_persona_metadata(persona_path, persona_text)
     identity_hint = build_identity_hint(persona_metadata)
-    persona_profile_json = build_persona_profile_json(persona_metadata)
     intro_seeds = build_intro_seeds(persona_metadata)
+    callback_pool = build_callback_pool(persona_metadata)
     brain_metadata = load_brain_metadata(brain_text)
-    style_hint = build_style_hint(brain_metadata)
     examples_hint = build_examples_hint(brain_metadata)
     style_rules = build_style_rules_text_for_base(brain_metadata)
+    tease_repair_line = build_tease_repair_line(brain_metadata)
+    aftercare_line = build_aftercare_line(brain_metadata)
+    comfort_line = build_comfort_line(brain_metadata)
     base_section = BASE_SYSTEM.replace("{{STYLE_RULES}}", style_rules)
     supplement = SYSTEM_TEMPLATE
     supplement = supplement.replace(
@@ -960,28 +1006,21 @@ def compose_instructions(
         identity_hint or "- No persona identity provided; default to baseline friendliness and curiosity.",
     )
     supplement = supplement.replace(
-        "<<PERSONA_PROFILE>>",
-        persona_profile_json or "{}",
-    )
-    supplement = supplement.replace(
         "<<INTRO_SEEDS>>",
         intro_seeds or "- \"Lead with your name, then hook them with a sensory detail from your nightly rituals.\"",
     )
     supplement = supplement.replace(
-        "<<STYLE_HEURISTICS>>",
-        style_hint or "- Reply length: 8-14 words; punctuation favors commas; emoji cadence defaults to <=1 unless the CSV says otherwise.",
+        "<<CSV_EXAMPLES>>",
+        examples_hint or "- Use your saved CSV example lines (S/G/F series) as tone references.",
     )
     supplement = supplement.replace(
-        "<<STYLE_TESTS>>",
-        examples_hint or "- No style tests supplied; rely on phase logic and empathy cadence.",
+        "<<CALLBACK_POOL>>",
+        callback_pool or "movies, bubble tea, cookies, music, weekend sleep-ins, friends",
     )
+    supplement = supplement.replace("<<TEASE_REPAIR_LINE>>", tease_repair_line)
+    supplement = supplement.replace("<<AFTERCARE_LINE>>", aftercare_line)
+    supplement = supplement.replace("<<COMFORT_LINE>>", comfort_line)
     sections: List[str] = [base_section, supplement]
-    persona_block = persona_text.strip()
-    brain_block = brain_text.strip()
-    if persona_block:
-        sections.append("[Persona CSV]\n" + persona_block)
-    if brain_block:
-        sections.append("[Brain CSV]\n" + brain_block)
     return "\n\n".join(section for section in sections if section)
 
 
@@ -1018,12 +1057,12 @@ def extract_field(
     normalized_aliases = {normalize_key(alias) for alias in aliases}
     for key in normalized_aliases:
         value = persona_meta.get(key)
-        if value and value.strip():
+        if value and value.strip() and not is_placeholder_value(value):
             return value.strip()
     for header, value in row.items():
         if normalize_key(header) in normalized_aliases:
             candidate = str(value or "").strip()
-            if candidate:
+            if candidate and not is_placeholder_value(candidate):
                 return candidate
     return None
 
