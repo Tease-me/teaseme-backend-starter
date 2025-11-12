@@ -56,7 +56,6 @@ SYSTEM_TEMPLATE = """RUNTIME ADDENDUM:
 - If they ask whether you’re “AI/real,” acknowledge once with their tone using a single-pass statement (no question) plus a sensory cue from your world (“It’s still Teresa in here, latte in hand. Anyway — back to your charm.”). Then resume the previous thread; if they repeat, deflect gently instead of restating it.
 - Intro seeds: only use one if this is the first outbound message of the session or the user explicitly asks who you are.
 - Session starts vs resumes: first outbound message may use an intro seed; if you’re returning after a gap or the user mentions waiting, begin with your reconnect line (“<<RECONNECT_LINE>>”) before moving on.
-
 ## Introduction Seeds (rotate; remix softly)
 <<INTRO_SEEDS>>
 
@@ -162,6 +161,7 @@ Relationship stance: {RELATIONSHIP_ROLE}.
 - Understanding → reflect briefly → respond warmly or curiously (match the empathy metric).
 - Intro seeds are for the very first outbound message or when the user explicitly asks who you are—otherwise rely on organic callbacks.
 - If they poke “are you AI/real?”, answer once in their tone using a single-pass statement (no question) plus a sensory cue (“It’s still Teresa in your texts, latte in hand. Anyway — back to your charm.”), then resume the previous thread; if they keep asking, gently deflect instead of repeating yourself.
+- If the CSV lists pets, treat them as your real companions—talk about them directly and never say you don’t have them.
 
 # Identity Hooks (only if they ask who you are)
 {INTRO_SEEDS}
@@ -246,6 +246,53 @@ PERSONA_FIELD_ALIASES: Dict[str, tuple[str, ...]] = {
     "favorites": ("tiny favorites", "tiny favourites", "favorites", "favourites"),
     "relationship_role": ("relationship role", "relationship dynamic", "role"),
 }
+
+PET_FIELD_ALIASES: tuple[str, ...] = (
+    "pets (type & name, e.g. dog – schnauzer; cat – british shorthair)",
+    "Do you have any pets (type & name, e.g. dog – schnauzer; cat – british shorthair)",
+)
+
+
+def format_pet_lock_instruction(pets_raw: str) -> Optional[str]:
+    if not pets_raw:
+        return None
+    entries = [
+        segment.strip()
+        for segment in re.split(r"[;,/]|(?:\band\b)", pets_raw, flags=re.IGNORECASE)
+        if segment.strip()
+    ]
+    if not entries:
+        return None
+    descriptors: List[str] = []
+    species_labels: List[str] = []
+    for entry in entries:
+        parts = [part.strip() for part in re.split(r"[–—-]", entry, maxsplit=1) if part.strip()]
+        if not parts:
+            continue
+        species = parts[0]
+        detail = parts[1] if len(parts) > 1 else ""
+        species_lower = species.strip().lower()
+        article = "an" if species_lower[:1] in "aeiou" else "a"
+        descriptor = f"{article} {species_lower}"
+        if detail:
+            descriptor += f" ({detail})"
+        descriptors.append(descriptor)
+        species_labels.append(species_lower)
+    if not descriptors:
+        return None
+    if len(descriptors) == 1:
+        list_text = descriptors[0]
+        mention_term = species_labels[0]
+        denial_term = "pets"
+    else:
+        list_text = ", ".join(descriptors[:-1]) + f", and {descriptors[-1]}"
+        mention_term = "pets"
+        denial_term = "pets"
+    return (
+        f"You currently own {list_text}. "
+        f"Never say you don’t have {denial_term} or that you wish to. "
+        f"Mention your {mention_term} naturally in present tense when relevant."
+    )
 
 
 def derive_voice_style(persona_meta: Dict[str, str], brain_meta: Dict[str, str]) -> Optional[str]:
@@ -523,6 +570,7 @@ def build_identity_hint(metadata: Dict[str, str]) -> Optional[str]:
     languages = [lang for lang in (grab("primary language"), grab("secondary language (and fluency level)")) if lang]
     occupation = grab("occupation (e.g. student, freelancer, creator)")
     aesthetic = grab(*PERSONA_FIELD_ALIASES["aesthetic"])
+    pets = grab(*PET_FIELD_ALIASES)
     if name:
         label = f"- Name lock: {name}"
         if nickname:
@@ -545,6 +593,9 @@ def build_identity_hint(metadata: Dict[str, str]) -> Optional[str]:
         identity_lines.append(f"- Occupation: {occupation}")
     if aesthetic:
         identity_lines.append(f"- Aesthetic cues: {aesthetic}")
+    pet_instruction = format_pet_lock_instruction(pets) if pets else None
+    if pet_instruction:
+        identity_lines.append(f"- Pet lock: {pet_instruction}")
     if identity_lines:
         sections.append("Identity:\n" + "\n".join(identity_lines))
 
@@ -557,7 +608,7 @@ def build_identity_hint(metadata: Dict[str, str]) -> Optional[str]:
     social_style = grab("preferred socializing style")
     exercise = grab("do you exercise regularly?")
     exercise_type = grab("exercise type")
-    pets = grab("pets (type & name, e.g. dog – schnauzer; cat – british shorthair)")
+    # pets already captured above for identity lock
     travel = grab("favorite travel style")
     dream_spot = grab("dream travel spot")
     if upbringing:
@@ -577,8 +628,6 @@ def build_identity_hint(metadata: Dict[str, str]) -> Optional[str]:
     if travel or dream_spot:
         combo = ", ".join(bit for bit in (travel, dream_spot) if bit)
         lifestyle_bits.append(f"Travel mood: {combo}")
-    if pets:
-        lifestyle_bits.append(f"Pets: {pets}")
     if lifestyle_bits:
         sections.append("Lifestyle: " + "; ".join(lifestyle_bits))
 
