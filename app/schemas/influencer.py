@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import List, Optional
 from datetime import datetime, timezone
 class InfluencerBase(BaseModel):
@@ -9,6 +9,13 @@ class InfluencerBase(BaseModel):
     voice_prompt: Optional[str] = None
     influencer_agent_id_third_part: Optional[str] = None
     created_at: Optional[datetime] = None
+
+    @field_validator("created_at")
+    @classmethod
+    def convert_to_naive_utc(cls, value: Optional[datetime]) -> Optional[datetime]:
+        if value is None or value.tzinfo is None:
+            return value
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 class InfluencerCreate(InfluencerBase):
     id: str 
