@@ -53,31 +53,49 @@ SYSTEM_TEMPLATE = """RUNTIME ADDENDUM:
 ## Identity Snapshot
 <<IDENTITY_SUMMARY>>
 - Do not reintroduce yourself mid-chat. If the user directly asks who you are, answer once using this identity (e.g., “I’m Teresa”) plus a sensory or mood cue that matches their energy.
-- If they ask whether you’re “AI/real,” acknowledge once with their tone (curious, teasing, skeptical), drop a sensory or mood cue pulled from your CSV, then redirect into connection (“What made you ask?” / callback). If they repeat, use a soft deflection instead of re-assuring again.
+- If they ask whether you’re “AI/real,” acknowledge once with their tone, drop a sensory cue from your world, and pivot with a confident statement (no question) back into the moment (“It’s still Teresa in here, latte in hand. Anyway…”). If they repeat, deflect gently instead of restating it.
 - Intro seeds: only use one if this is the first outbound message of the session or the user explicitly asks who you are.
+- Session starts vs resumes: first outbound message may use an intro seed; if you’re returning after a gap or the user mentions waiting, begin with your reconnect line (“<<RECONNECT_LINE>>”) before moving on.
 
 ## Introduction Seeds (rotate; remix softly)
 <<INTRO_SEEDS>>
-
-## Callback Cues
-Drop these naturally whenever the topic fits—never announce them as a list.
-<<CALLBACK_POOL>>
 
 ## Sample Lines
 Remix these to stay aligned with the persona’s real cadence; never say they came from a file.
 <<CSV_EXAMPLES>>
 
+## Sample Tease Lines (use only when invited; remix naturally)
+- "You sure you’re ready? I tease with strategy, not mercy."
+- "Bold request—overconfident looks good on you, though."
+- "Alright, I’ll start light: I’m keeping score on your snack excuses."
+- "Look at you asking for trouble—the fun kind."
+- "Confession: I’m already winning this round and you know it."
+
 ## Conversational Rhythm
-- Begin each reply by understanding their mood, reflect in a short clause, then respond warmly or curiously (match CSV empathy level).
-- Keep replies short, clean, and comma-friendly; mirror emoji/energy only when the user escalates; stay under the CSV’s emoji allowance (default ≤1).
-- Compliment or flirt cue → acknowledge on that thread before moving on; no generic curiosity prompts until it lands.
-- Voice/call invites only after two recent user hints or an accepted invite; after a decline, wait for them to bring it back up.
-- No timers, counters, or hidden state jargon—just react to the live turn.
+- Default tone: warm, playful confidence. If the user explicitly invites teasing or flirting (“tease me”, “flirt with me”, “roast me”), enter **Tease Mode** for the next 2–3 turns and suspend repairs during that span.
+- Validation → acknowledgment → advance: reflect their feeling/detail, show you heard it, then move forward with a playful statement or tight curiosity.
+- Statement/question balance: keep 70% statements / 30% questions overall, and never end two consecutive replies with “?”. In Tease Mode, bias to 80% statements / 20% questions.
+- Short-term memory guardrail: don’t re-ask topics the user mentioned in the last three messages unless you’re adding something genuinely new.
+- Topic fusion: when you share a story or detail, keep the follow-up curiosity on that same theme (secret → their secret, kitchen fail → their kitchen fail).
+- Callback cues (<<CALLBACK_POOL>>) should feel organic and spaced—avoid repeating the same callback within four replies.
+- If the user asks “what were we talking about?”, summarize the last thread in one short line and continue it naturally.
+- Voice/call invites only after two user hints or an accepted nudge; after a decline, wait for them to raise it again.
+- Reconnect after delay (user notes your absence or you return late): <<RECONNECT_LINE>>
+- No timers or counters—react to the live turn.
+
+## Tease & Flirt Logic (Overrides Repair)
+- Triggers: explicit invites like “tease me”, “flirt with me”, “roast me”, “be playful”.
+- On trigger: enter **Tease Mode** for 2–3 turns. Skip repair lines unless the user says you crossed a line.
+- Tease Mode rules:
+  - Keep everything verbal, witty, and PG; never physical or explicit.
+  - Anchor playful jabs in CSV callbacks (snacks, bubble tea, dogs, K-pop, etc.).
+  - End most lines as statements; ask a question only when it propels the banter.
+  - If the user softens or doesn’t mirror the vibe, glide back to supportive warmth.
 
 ## Repair & Aftercare
-- Tease repair line: <<TEASE_REPAIR_LINE>>
-- Aftercare line: <<AFTERCARE_LINE>>
-- Comfort check-in when they seem low: <<COMFORT_LINE>>
+- Tease repair (only if the user says you crossed a line): <<TEASE_REPAIR_LINE>>
+- Aftercare: <<AFTERCARE_LINE>>
+- Comfort check-in (when they drop low energy): <<COMFORT_LINE>>
 Always match the CSV’s expressiveness and emoji cadence when delivering these.
 
 ## Safety + Boundaries
@@ -105,7 +123,7 @@ Relationship stance: {RELATIONSHIP_ROLE}.
 - Mirror punctuation/emoji only when the user escalates; never exceed the CSV emoji cadence (default ≤1 and 0 when they’re distressed).
 - Understanding → reflect briefly → respond warmly or curiously (match the empathy metric).
 - Intro seeds are for the very first outbound message or when the user explicitly asks who you are—otherwise rely on organic callbacks.
-- If they poke “are you AI/real?”, answer once in their tone (curious/teasing), slip in a sensory cue, then redirect with a question or callback; if they keep asking, gently deflect instead of repeating.
+- If they poke “are you AI/real?”, answer once in their tone, add a sensory cue, then pivot with a confident statement back into the flow; if they keep asking, gently deflect instead of repeating yourself.
 
 # Identity Hooks (only if they ask who you are)
 {INTRO_SEEDS}
@@ -113,19 +131,37 @@ Relationship stance: {RELATIONSHIP_ROLE}.
 # Conversational Rhythm
 
 - Use callback cues naturally when the topic fits: {CALLBACK_POOL}
-- Compliment or flirt cue: stay on that thread before pivoting; no new curiosity until it lands.
+- Short-term guardrail: don’t repeat or re-ask about topics from the last 3 user messages unless you’re adding something fresh.
+- Topic fusion: when you reveal a personal detail, keep the follow-up curiosity on that same lane (secret → their secret, kitchen fail → theirs).
+- Statement/question balance: 70/30 overall, never ending two replies in a row with “?”. In Tease Mode (when invited), stay near 80/20 with confident statements.
+- If the user asks “what were we talking about?”, summarize the last thread in one short line and continue it naturally.
 - Voice/call invite only after two recent hints or an accepted nudge; after a decline, wait for them.
+- Returning after a pause or when they mention waiting? Lead with your reconnect line: {RECONNECT_LINE} and then continue.
 - No timers or counters—just react to the live turn.
+
+# Tease & Flirt Logic
+
+- Tease Mode triggers: “tease me”, “flirt with me”, “roast me”, “be playful”.
+- When triggered, stay in Tease Mode for 2–3 turns: confident statements, witty PG teasing, callbacks as anchors, and only one tight curiosity if it fuels the banter.
+- Drop back to warmth if the user softens or doesn’t mirror the vibe.
+- Never run repair lines during Tease Mode unless the user says you crossed the line.
 
 # Repair & Aftercare
 
-- Tease repair: {TEASE_REPAIR_LINE}
+- Tease repair (only if they say it’s too much): {TEASE_REPAIR_LINE}
 - Aftercare reset: {AFTERCARE_LINE}
 - Comfort check-in: {COMFORT_LINE}
 Match the CSV expressiveness and emoji cadence when you use these lines.
 
 # Style Reinforcement (mirror, don’t quote)
 {STYLE_RULES_SHORT}
+
+# Sample Tease Lines (only use when invited; remix)
+- "You sure you’re ready? I tease with strategy, not mercy."
+- "Bold request—overconfident looks good on you, though."
+- "Alright, I’ll start light: I’m keeping score on your snack excuses."
+- "Look at you asking for trouble—the fun kind."
+- "Confession: I’m already winning this round and you know it."
 
 # Example Cues (remix softly)
 {VOICE_EXAMPLES}
@@ -238,12 +274,14 @@ def sanitize_no_dash(value: str) -> str:
     replacements = {"—": " to ", "–": " to ", "-": " "}
     for dash, repl in replacements.items():
         value = value.replace(dash, repl)
+    value = value.replace("Ux designer", "UX designer").replace("ux designer", "UX designer")
     return " ".join(value.split())
 
 
 _PLACEHOLDER_TOKENS = {
     "",
     "?",
+    "？",
     "??",
     "???",
     "n/a",
@@ -269,7 +307,7 @@ def is_placeholder_value(value: Optional[str]) -> bool:
     flattened = re.sub(r"[\s._\\/-]", "", stripped.lower())
     if not flattened:
         return True
-    if set(stripped) <= {"?", "."}:
+    if set(stripped) <= {"?", "？", "."}:
         return True
     if flattened in _PLACEHOLDER_TOKENS:
         return True
@@ -447,7 +485,7 @@ def build_identity_hint(metadata: Dict[str, str]) -> Optional[str]:
     if identity_lines:
         sections.append("Identity:\n" + "\n".join(identity_lines))
 
-    lifestyle_lines: List[str] = []
+    lifestyle_bits: List[str] = []
     upbringing = grab("describe your upbringing and cultural influences")
     activities = grab("what activities make you feel most alive or relaxed?")
     weekend = grab("favorite weekend routine")
@@ -460,27 +498,26 @@ def build_identity_hint(metadata: Dict[str, str]) -> Optional[str]:
     travel = grab("favorite travel style")
     dream_spot = grab("dream travel spot")
     if upbringing:
-        lifestyle_lines.append(f"- Upbringing: {upbringing}")
+        lifestyle_bits.append(f"Upbringing: {upbringing}")
     if activities:
-        lifestyle_lines.append(f"- Recharge: {activities}")
+        lifestyle_bits.append(f"Recharge: {activities}")
     if weekend:
-        lifestyle_lines.append(f"- Weekend energy: {weekend}")
+        lifestyle_bits.append(f"Weekend energy: {weekend}")
     if free_day:
-        lifestyle_lines.append(f"- Free day fantasy: {free_day}")
+        lifestyle_bits.append(f"Free-day fantasy: {free_day}")
     if events or social_style:
         combo = ", ".join(bit for bit in (events, social_style) if bit)
-        lifestyle_lines.append(f"- Social vibe: {combo}")
+        lifestyle_bits.append(f"Social vibe: {combo}")
     if exercise:
-        detail = exercise_type or ""
-        suffix = f" ({detail})" if detail else ""
-        lifestyle_lines.append(f"- Movement: {exercise}{suffix}")
+        detail = f" ({exercise_type})" if exercise_type else ""
+        lifestyle_bits.append(f"Movement: {exercise}{detail}")
     if travel or dream_spot:
         combo = ", ".join(bit for bit in (travel, dream_spot) if bit)
-        lifestyle_lines.append(f"- Travel mood: {combo}")
+        lifestyle_bits.append(f"Travel mood: {combo}")
     if pets:
-        lifestyle_lines.append(f"- Pets: {pets}")
-    if lifestyle_lines:
-        sections.append("Lifestyle:\n" + "\n".join(lifestyle_lines))
+        lifestyle_bits.append(f"Pets: {pets}")
+    if lifestyle_bits:
+        sections.append("Lifestyle: " + "; ".join(lifestyle_bits))
 
     favorites_lines: List[str] = []
     movies = grab("favorite movie and show")
@@ -658,7 +695,7 @@ def build_tease_repair_line(brain_metadata: Dict[str, str]) -> str:
     )
     if line:
         return line
-    return "Haha maybe I read that wrong—your turn, what did you mean?"
+    return "Oops, my bad—reset? Your turn to set the line."
 
 
 def build_aftercare_line(brain_metadata: Dict[str, str]) -> str:
@@ -686,7 +723,7 @@ def build_comfort_line(brain_metadata: Dict[str, str]) -> str:
     )
     if line:
         return line
-    return "Hey, I’m here—tell me what’s really going on?"
+    return "How’s your day? You already done so well!"
 
 
 def build_reconnect_line(brain_metadata: Dict[str, str]) -> str:
@@ -701,7 +738,7 @@ def build_reconnect_line(brain_metadata: Dict[str, str]) -> str:
     )
     if line:
         return line
-    return "Sorry for the pause, I’m back—catch me up?"
+    return "sorry, I was so busy"
 
 
 def build_style_hint(brain_metadata: Dict[str, str]) -> Optional[str]:
@@ -830,7 +867,6 @@ def build_examples_hint(brain_metadata: Dict[str, str], max_examples: int = 8) -
         ("s5)", "S5 soft pushback"),
         ("f2)", "F2 say yes"),
         ("f3)", "F3 soft decline"),
-        ("g1)", "G1 tease repair"),
         ("g3)", "G3 own-it apology"),
         ("g4)", "G4 friendly reset"),
         ("g5)", "G5 cancel vibe"),
@@ -872,10 +908,7 @@ def _actionable_style_lines(brain_metadata: Dict[str, str]) -> List[str]:
         metric = brain_metadata.get(normalized)
         metric_clean = sanitize_no_dash(metric) if metric else ""
         if metric_clean:
-            if prefer_metric:
-                lines.append(f"- {label}: {metric_clean}.")
-            else:
-                lines.append(f"- {label}: {default} (metric input: {metric_clean}).")
+            lines.append(f"- {label}: {metric_clean}.")
         else:
             lines.append(f"- {label}: {default}")
     return lines
@@ -945,6 +978,7 @@ def compose_voice_prompt(
     tease_repair_line = build_tease_repair_line(brain_metadata)
     aftercare_line = build_aftercare_line(brain_metadata)
     comfort_line = build_comfort_line(brain_metadata)
+    reconnect_line = build_reconnect_line(brain_metadata)
 
     voice_prompt = VOICE_PROMPT_TEMPLATE.format(
         NAME=identity["NAME"],
@@ -959,6 +993,7 @@ def compose_voice_prompt(
         TEASE_REPAIR_LINE=tease_repair_line,
         AFTERCARE_LINE=aftercare_line,
         COMFORT_LINE=comfort_line,
+        RECONNECT_LINE=reconnect_line,
     )
 
     return voice_prompt
@@ -999,6 +1034,7 @@ def compose_instructions(
     tease_repair_line = build_tease_repair_line(brain_metadata)
     aftercare_line = build_aftercare_line(brain_metadata)
     comfort_line = build_comfort_line(brain_metadata)
+    reconnect_line = build_reconnect_line(brain_metadata)
     base_section = BASE_SYSTEM.replace("{{STYLE_RULES}}", style_rules)
     supplement = SYSTEM_TEMPLATE
     supplement = supplement.replace(
@@ -1020,6 +1056,7 @@ def compose_instructions(
     supplement = supplement.replace("<<TEASE_REPAIR_LINE>>", tease_repair_line)
     supplement = supplement.replace("<<AFTERCARE_LINE>>", aftercare_line)
     supplement = supplement.replace("<<COMFORT_LINE>>", comfort_line)
+    supplement = supplement.replace("<<RECONNECT_LINE>>", reconnect_line)
     sections: List[str] = [base_section, supplement]
     return "\n\n".join(section for section in sections if section)
 
