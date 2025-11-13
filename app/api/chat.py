@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import io
+import random
+import re
 
 from typing import Dict, List, Optional
 from fastapi import APIRouter, WebSocket, Depends, File, UploadFile, HTTPException, Form, Query
@@ -46,6 +48,77 @@ class _Buf:
 
 _buffers: Dict[str, _Buf] = {}  # chat_id -> _Buf
 MAX_BUFFERS = 1000  # Maximum number of active buffers to prevent memory issues
+
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?…])\s+")
+_DOUBLE_TEXT_MIN_SENTENCES = 3
+_DOUBLE_TEXT_MIN_LENGTH = 220
+_DOUBLE_TEXT_MIN_SEGMENT_LEN = 25
+_DOUBLE_TEXT_DELAY_RANGE = (0.55, 1.1)
+
+
+def _split_into_double_text_chunks(text: str) -> List[str]:
+    """
+    Break a single assistant reply into at most two conversational bubbles.
+    Long or multi-sentence replies sound more natural when delivered as staggered texts.
+    """
+    if not text:
+        return [text]
+    stripped = text.strip()
+    if not stripped:
+        return [text]
+
+    sentences = [s.strip() for s in _SENTENCE_SPLIT_RE.split(stripped) if s.strip()]
+    if len(sentences) >= _DOUBLE_TEXT_MIN_SENTENCES:
+        boundary = min(2, len(sentences) - 1)
+        first = " ".join(sentences[:boundary]).strip()
+        second = " ".join(sentences[boundary:]).strip()
+        if len(first) >= _DOUBLE_TEXT_MIN_SEGMENT_LEN and len(second) >= _DOUBLE_TEXT_MIN_SEGMENT_LEN:
+            return [first, second]
+
+    if len(stripped) >= _DOUBLE_TEXT_MIN_LENGTH:
+        midpoint = len(stripped) // 2
+        candidates: List[int] = []
+        right_space = stripped.find(" ", midpoint)
+        if right_space != -1:
+            candidates.append(right_space)
+        left_space = stripped.rfind(" ", 0, midpoint)
+        if left_space != -1:
+            candidates.append(left_space)
+        for pos in candidates:
+            if _DOUBLE_TEXT_MIN_SEGMENT_LEN <= pos <= len(stripped) - _DOUBLE_TEXT_MIN_SEGMENT_LEN:
+                first = stripped[:pos].strip()
+                second = stripped[pos:].strip()
+                if len(first) >= _DOUBLE_TEXT_MIN_SEGMENT_LEN and len(second) >= _DOUBLE_TEXT_MIN_SEGMENT_LEN:
+                    return [first, second]
+
+    return [stripped]
+
+
+async def _save_ai_messages(db_ai: AsyncSession, chat_id: str, chunks: List[str]) -> None:
+    payloads = [
+        {"chat_id": chat_id, "sender": "ai", "content": chunk.strip()}
+        for chunk in chunks
+        if chunk and chunk.strip()
+    ]
+    if not payloads:
+        return
+    await db_ai.execute(insert(Message), payloads)
+    await db_ai.commit()
+
+
+async def _send_reply_chunks(ws: WebSocket, chat_id: str, chunks: List[str]) -> None:
+    total = len(chunks)
+    for idx, chunk in enumerate(chunks, start=1):
+        if not chunk:
+            continue
+        payload = {"reply": chunk}
+        if total > 1:
+            payload["part"] = idx
+            payload["parts"] = total
+        await ws.send_json(payload)
+        log.info("[BUF %s] sent chunk %d/%d (len=%d)", chat_id, idx, total, len(chunk))
+        if idx < total:
+            await asyncio.sleep(random.uniform(*_DOUBLE_TEXT_DELAY_RANGE))
 
 # ---------- Heuristic: did the message end a thought? ----------
 def _ends_thought(msg: str) -> bool:
@@ -171,14 +244,17 @@ async def _flush_buffer_without_ws(chat_id: str, influencer_id: str, user_id: in
         log.exception("[BUF %s] handle_turn error (no-WS)", chat_id)
         return
 
+    chunks = _split_into_double_text_chunks(reply)
+
     # 3) Persist AI reply to DB (client will get it on reconnect via chat history)
     async with SessionLocal() as db_ai:
         try:
-            await db_ai.execute(
-                insert(Message).values(chat_id=chat_id, sender="ai", content=reply)
+            await _save_ai_messages(db_ai, chat_id, chunks)
+            log.info(
+                "[BUF %s] Saved %d AI chunk(s) to DB (no-WS)",
+                chat_id,
+                len(chunks),
             )
-            await db_ai.commit()
-            log.info("[BUF %s] Saved AI reply to DB (no-WS, len=%d)", chat_id, len(reply))
         except Exception:
             await db_ai.rollback()
             log.exception("[WS %s] Failed to save AI message (no-WS)", chat_id)
@@ -311,21 +387,19 @@ async def _flush_buffer(chat_id: str, ws: WebSocket, influencer_id: str, user_id
             pass
         return
 
+    chunks = _split_into_double_text_chunks(reply)
+
     # 3) Persist AI reply – fresh session
     async with SessionLocal() as db_ai:
         try:
-            await db_ai.execute(
-                insert(Message).values(chat_id=chat_id, sender="ai", content=reply)
-            )
-            await db_ai.commit()
+            await _save_ai_messages(db_ai, chat_id, chunks)
         except Exception:
             await db_ai.rollback()
             log.exception("[WS %s] Failed to save AI message", chat_id)
 
     # 4) Send to client
     try:
-        await ws.send_json({"reply": reply})
-        log.info("[BUF %s] ws.send_json done", chat_id)
+        await _send_reply_chunks(ws, chat_id, chunks)
     except Exception:
         log.exception("[WS %s] Failed to send reply", chat_id)
 
