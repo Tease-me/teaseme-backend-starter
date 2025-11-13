@@ -15,7 +15,7 @@ from app.core.config import settings
 log = logging.getLogger("openai.assistants")
 
 _client = OpenAI(api_key=settings.OPENAI_API_KEY)
-DEFAULT_AGENT_MODEL = "gpt-4o-mini"
+DEFAULT_AGENT_MODEL = "gpt-4.1"
 
 
 async def _run_sync(func, *args, **kwargs):
