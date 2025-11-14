@@ -41,6 +41,14 @@ curl -k https://localhost:8080/mcp/tools | jq
 - `update_influencer` - Update a specific influencer
 - `update_all_influencers` - Bulk update all influencers
 
+### 5. Knowledge Base Tools
+
+- `list_knowledge_files` - List all knowledge files (PDF, Word, TXT) for an influencer
+- `get_knowledge_file` - Get details of a specific knowledge file including chunk count
+- `delete_knowledge_file` - Delete a knowledge file and all its embedded chunks
+- `search_knowledge_base` - Search an influencer's knowledge base using semantic similarity
+- `upload_knowledge_file` - Upload a knowledge file (base64-encoded) for an influencer
+
 ---
 
 ## Usage Examples
@@ -173,6 +181,143 @@ curl -k -X POST https://localhost:8080/mcp/tools/call \
 
 ---
 
+### List Knowledge Files
+
+```bash
+curl -k -X POST https://localhost:8080/mcp/tools/call \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "list_knowledge_files",
+    "arguments": {
+      "influencer_id": "loli"
+    }
+  }' | jq
+```
+
+**Response:**
+
+```json
+{
+  "content": {
+    "influencer_id": "loli",
+    "files": [
+      {
+        "id": 6,
+        "filename": "Glauco Martins Pereira_CV.docx",
+        "file_type": "docx",
+        "file_size_bytes": 23076,
+        "status": "completed",
+        "error_message": null,
+        "created_at": "2025-11-14T02:36:48.070514+00:00",
+        "updated_at": "2025-11-14T02:36:49.682810+00:00"
+      }
+    ],
+    "count": 1
+  },
+  "isError": false
+}
+```
+
+---
+
+### Get Knowledge File Details
+
+```bash
+curl -k -X POST https://localhost:8080/mcp/tools/call \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "get_knowledge_file",
+    "arguments": {
+      "influencer_id": "loli",
+      "file_id": 6
+    }
+  }' | jq
+```
+
+**Response includes:**
+
+- File metadata (filename, type, size, status)
+- Chunk count (number of embedded chunks)
+- Processing status and error messages
+
+---
+
+### Search Knowledge Base
+
+```bash
+curl -k -X POST https://localhost:8080/mcp/tools/call \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "search_knowledge_base",
+    "arguments": {
+      "influencer_id": "loli",
+      "query": "Glauco",
+      "top_k": 5
+    }
+  }' | jq
+```
+
+**Use cases:**
+
+- Test what information is available in the knowledge base
+- Debug why certain information isn't being retrieved
+- Verify file processing completed successfully
+
+---
+
+### Upload Knowledge File
+
+```bash
+# First, encode your file to base64
+FILE_BASE64=$(base64 -i cv.pdf)
+
+curl -k -X POST https://localhost:8080/mcp/tools/call \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"name\": \"upload_knowledge_file\",
+    \"arguments\": {
+      \"influencer_id\": \"loli\",
+      \"filename\": \"cv.pdf\",
+      \"file_content_base64\": \"$FILE_BASE64\",
+      \"file_type\": \"pdf\"
+    }
+  }" | jq
+```
+
+**Supported file types:**
+
+- `pdf` - PDF documents
+- `docx` / `doc` - Microsoft Word documents
+- `txt` - Plain text files
+
+**File processing:**
+
+- Files are uploaded to S3
+- Text is extracted and chunked (300 words per chunk, 50 word overlap)
+- Chunks are embedded using OpenAI embeddings
+- Processing happens asynchronously in the background
+- Status changes from `processing` → `completed` or `failed`
+
+---
+
+### Delete Knowledge File
+
+```bash
+curl -k -X POST https://localhost:8080/mcp/tools/call \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "delete_knowledge_file",
+    "arguments": {
+      "influencer_id": "loli",
+      "file_id": 6
+    }
+  }' | jq
+```
+
+**Note:** This deletes the file from S3 and all associated chunks from the database.
+
+---
+
 ## Python Example
 
 ```python
@@ -221,6 +366,35 @@ asyncio.run(update_influencer_prompt())
 ---
 
 ## Common Use Cases
+
+### Upload CV/Resume for Knowledge Base
+
+```bash
+# Upload a CV so the AI can answer questions about the user
+FILE_BASE64=$(base64 -i my_cv.pdf)
+curl -k -X POST https://localhost:8080/mcp/tools/call \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"name\": \"upload_knowledge_file\",
+    \"arguments\": {
+      \"influencer_id\": \"loli\",
+      \"filename\": \"my_cv.pdf\",
+      \"file_content_base64\": \"$FILE_BASE64\"
+    }
+  }"
+
+# Wait for processing, then test search
+curl -k -X POST https://localhost:8080/mcp/tools/call \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "search_knowledge_base",
+    "arguments": {
+      "influencer_id": "loli",
+      "query": "What is my work experience?",
+      "top_k": 5
+    }
+  }'
+```
 
 ### Update AI Personality
 
@@ -333,12 +507,14 @@ curl -k https://localhost:8080/mcp/tools | jq '.tools[].name'
 
 ## Quick Reference
 
-| Task              | Command                                                                                                                                                                                          |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| List tools        | `curl -k https://localhost:8080/mcp/tools \| jq`                                                                                                                                                 |
-| List influencers  | `curl -k -X POST https://localhost:8080/mcp/tools/call -H "Content-Type: application/json" -d '{"name":"list_influencers"}' \| jq`                                                               |
-| Update influencer | `curl -k -X POST https://localhost:8080/mcp/tools/call -H "Content-Type: application/json" -d '{"name":"update_influencer","arguments":{"influencer_id":"anna","prompt_template":"..."}}' \| jq` |
-| Bulk update       | `curl -k -X POST https://localhost:8080/mcp/tools/call -H "Content-Type: application/json" -d '{"name":"update_all_influencers","arguments":{"voice_id":"..."}}' \| jq`                          |
+| Task                  | Command                                                                                                                                                                                          |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| List tools            | `curl -k https://localhost:8080/mcp/tools \| jq`                                                                                                                                                 |
+| List influencers      | `curl -k -X POST https://localhost:8080/mcp/tools/call -H "Content-Type: application/json" -d '{"name":"list_influencers"}' \| jq`                                                               |
+| Update influencer     | `curl -k -X POST https://localhost:8080/mcp/tools/call -H "Content-Type: application/json" -d '{"name":"update_influencer","arguments":{"influencer_id":"anna","prompt_template":"..."}}' \| jq` |
+| Bulk update           | `curl -k -X POST https://localhost:8080/mcp/tools/call -H "Content-Type: application/json" -d '{"name":"update_all_influencers","arguments":{"voice_id":"..."}}' \| jq`                          |
+| List knowledge files  | `curl -k -X POST https://localhost:8080/mcp/tools/call -H "Content-Type: application/json" -d '{"name":"list_knowledge_files","arguments":{"influencer_id":"loli"}}' \| jq`                      |
+| Search knowledge base | `curl -k -X POST https://localhost:8080/mcp/tools/call -H "Content-Type: application/json" -d '{"name":"search_knowledge_base","arguments":{"influencer_id":"loli","query":"Glauco"}}' \| jq`    |
 
 ---
 
