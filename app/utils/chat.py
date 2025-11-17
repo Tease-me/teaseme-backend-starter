@@ -93,7 +93,7 @@ async def synthesize_audio_with_elevenlabs(text: str, db, influencer_id: str = N
     }
     data = {
         "text": text,  # aqui envie o output do LLM (já com audio tags / SSML)
-        "model_id": "eleven_multilingual_v3",  # ou "eleven_v3"
+        "model_id": "eleven_multilingual_v2",  # ou "eleven_v3"
         "voice_settings": {
             "stability": 0.35,
             "similarity_boost": 0.8,
