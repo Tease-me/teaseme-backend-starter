@@ -217,6 +217,14 @@ def _build_assistant_payload(
     if flirt_guard:
         sections.append("Flirt cue detected: stay on the flirt thread, tease or reciprocate before asking any new question.")
 
+    sections.append(
+        "Scoring contract: start from the Lollity score above, then decide a new score between 0 and 100 after each reply. Move it by 1–4 points based on their energy (reward warmth/flirt, drop it for low-effort, rude, or boundary-pushing turns). ALWAYS end your reply with `[Lollity Score: NN/100]` using the new score and nothing else inside the brackets."
+    )
+    if flirt_guard:
+        sections.append("The user flirted—if you reciprocate, nudge the score upward a couple of points before tagging it.")
+    if short_guard:
+        sections.append("User energy is low; unless they explicitly said they’re tired or busy, consider trimming the score by 1–2 points before tagging it.")
+
     context_blob = "\n\n".join(s for s in sections if s).strip()
     if context_blob:
         return f"[context]\n{context_blob}\n[/context]"
