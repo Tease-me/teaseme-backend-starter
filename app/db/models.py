@@ -23,8 +23,8 @@ class Influencer(Base):
     prompt_template:Mapped[str]          = mapped_column(Text, nullable=False)
     voice_prompt:   Mapped[str | None] = mapped_column(String, nullable=True)
     daily_scripts:  Mapped[List[str] | None] = mapped_column(JSON, nullable=True)
-    influencer_agent_id_third_part: Mapped[str | None] = mapped_column(String, nullable=True)  
-    created_at:     Mapped[datetime]     = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    influencer_agent_id_third_part: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at:     Mapped[datetime]     = mapped_column(DateTime, default=datetime.utcnow)
     chats:          Mapped[List["Chat"]] = relationship(back_populates="influencer")
 
 class User(Base):

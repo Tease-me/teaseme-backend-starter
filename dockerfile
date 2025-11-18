@@ -6,6 +6,7 @@ RUN apt-get update \
     && curl -sSL https://install.python-poetry.org | python3 - \
     && mv /root/.local/bin/poetry /usr/local/bin/poetry \
     && apt-get purge -y curl build-essential \
+    && apt-get install -y ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/
