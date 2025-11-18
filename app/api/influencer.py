@@ -20,7 +20,7 @@ async def get_influencer(id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(404, "Influencer not found")
     return influencer
 
-@router.post("/", response_model=InfluencerOut, status_code=201)
+@router.post("", response_model=InfluencerOut, status_code=201)
 async def create_influencer(data: InfluencerCreate, db: AsyncSession = Depends(get_db)):
     if await db.get(Influencer, data.id):
         raise HTTPException(400, "Influencer with this id already exists")
