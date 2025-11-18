@@ -92,7 +92,7 @@ async def synthesize_audio_with_elevenlabs(text: str, db, influencer_id: str = N
         "Content-Type": "application/json",
     }
     data = {
-        "text": text,  # aqui envie o output do LLM (já com audio tags / SSML)
+        "text": text, 
         "model_id": "eleven_multilingual_v2",  # ou "eleven_v3"
         "voice_settings": {
             "stability": 0.35,
@@ -108,7 +108,58 @@ async def synthesize_audio_with_elevenlabs(text: str, db, influencer_id: str = N
             logger.error(f"ElevenLabs error: {resp.status_code} - {resp.text}")
             return None, None
         return resp.content, "audio/mpeg"
+
+async def synthesize_audio_with_elevenlabs_V3(text: str, db, influencer_id: str = None):
+    """
+    Synthesize audio using ElevenLabs V3 API with support for expression tags.
     
+    The text parameter supports ElevenLabs V3 expression tags directly:
+    - Emotions: [sad], [angry], [happily], [sorrowful]
+    - Delivery styles: [whispers], [shouts], [slowly], [quickly]
+    - Non-verbal sounds: [laughs], [chuckles], [sighs], [coughs], [gulps]
+    
+    Example:
+        text = "[slowly] Back then... [chuckles] we had no phones. [whispers] Just dirt roads and [coughs] big dreams. [sad] Then it happened"
+    
+    Args:
+        text: Text to synthesize. Can include expression tags like [slowly], [chuckles], [whispers], etc.
+        db: Database session
+        influencer_id: ID of the influencer whose voice to use
+    
+    Returns:
+        Tuple of (audio_bytes, mime_type) or (None, None) on error
+    """
+    influencer = await db.get(Influencer, influencer_id)
+    if not influencer:
+        raise HTTPException(404, "Influencer not found")
+    if not influencer.voice_id:
+        raise HTTPException(500, f"Voice ID not set for influencer '{influencer_id}'")
+
+    voice_id = influencer.voice_id
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+    headers = {
+        "xi-api-key": ELEVENLABS_API_KEY,
+        "Accept": "audio/mpeg",
+        "Content-Type": "application/json",
+    }
+    data = {
+        "text": text,  # Expression tags like [slowly], [chuckles], [whispers] are supported natively by V3
+        "model_id": "eleven_v3",
+        "voice_settings": {
+            "stability": 0.5,  # V3 requires: 0.0 (Creative), 0.5 (Natural), or 1.0 (Robust)
+            "similarity_boost": 0.8,
+            "style": 0.5,
+            "use_speaker_boost": True
+        },
+        "output_format": "mp3_44100_128"
+    }
+    async with httpx.AsyncClient(timeout=120) as client:
+        resp = await client.post(url, headers=headers, json=data)
+        if resp.status_code != 200:
+            logger.error(f"ElevenLabs error: {resp.status_code} - {resp.text}")
+            return None, None
+        return resp.content, "audio/mpeg"
+
 async def synthesize_audio_with_bland_ai(text: str):
     url = "https://api.bland.ai/v1/speak"
     headers = {

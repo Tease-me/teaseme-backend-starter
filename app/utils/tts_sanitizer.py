@@ -1,12 +1,32 @@
 import re
 from html import unescape
 
-_ALLOWED_AUDIO_TAGS = {"whispers","softly","sighs","giggles","laughs","gasp"}
+# ElevenLabs V3 expression tags that should be preserved
+_ALLOWED_AUDIO_TAGS = {
+    # Emotions
+    "sad", "angry", "happily", "sorrowful",
+    # Delivery styles
+    "whispers", "shouts", "slowly", "quickly", "softly",
+    # Non-verbal sounds
+    "laughs", "chuckles", "sighs", "coughs", "gulps", "giggles", "gasp"
+}
 _BREAK_RE = re.compile(r'<\s*break\s+time\s*=\s*"([0-2](?:\.\d)?s)"\s*/\s*>', re.IGNORECASE)
+# Regex to match ElevenLabs V3 expression tags: [tag]
+_V3_TAG_RE = re.compile(r'\[(' + '|'.join(re.escape(tag) for tag in _ALLOWED_AUDIO_TAGS) + r')\]', re.IGNORECASE)
 
 def sanitize_tts_text(text: str) -> str:
     if not text:
         return ""
+    
+    # Preserve ElevenLabs V3 tags by temporarily replacing them
+    tag_placeholders = {}
+    def _store_tag(m):
+        tag_key = f"__V3_TAG_{len(tag_placeholders)}__"
+        tag_placeholders[tag_key] = m.group(0)  # Store the full tag like [chuckles]
+        return tag_key
+    
+    text = _V3_TAG_RE.sub(_store_tag, text)
+    
     text = unescape(text)
     text = re.sub(r'[ \t]+', ' ', text).strip()
     text = re.sub(r'[\U0001F300-\U0001FAFF\U00002700-\U000027BF]+', '', text)
@@ -28,6 +48,10 @@ def sanitize_tts_text(text: str) -> str:
         return ''
     text = _BREAK_RE.sub(_break_filter, text)
     text = re.sub(r'</?[^>]+>', '', text)
+
+    # Restore ElevenLabs V3 tags
+    for placeholder, original_tag in tag_placeholders.items():
+        text = text.replace(placeholder, original_tag)
 
     text = text.strip()
     return text if text else "…"
