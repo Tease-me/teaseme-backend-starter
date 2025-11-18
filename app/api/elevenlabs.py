@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 from app.core.config import settings
 from app.db.models import Influencer, Chat, Message, CallRecord
 from app.db.session import get_db
-from app.schemas.elevenlabs import FinalizeConversationBody, RegisterConversationBody
+from app.schemas.elevenlabs import FinalizeConversationBody, RegisterConversationBody, UpdatePromptBody
 from app.services.billing import charge_feature
 from sqlalchemy import insert, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -259,10 +259,23 @@ async def _patch_agent_config(
 
     if resp.status_code >= 400:
         # Consider truncating resp.text to avoid logging PII.
-        log.error("ElevenLabs PATCH failed: %s %s", resp.status_code, resp.text[:500])
+        error_text = resp.text[:500] if resp.text else "No error details"
+        log.error("ElevenLabs PATCH failed: %s %s", resp.status_code, error_text)
+        
+        # Try to parse error response for more details
+        error_detail = f"Failed to update ElevenLabs agent: {resp.status_code}"
+        try:
+            error_json = resp.json()
+            if isinstance(error_json, dict) and "detail" in error_json:
+                error_detail = f"ElevenLabs API error: {error_json['detail']}"
+            elif isinstance(error_json, dict) and "message" in error_json:
+                error_detail = f"ElevenLabs API error: {error_json['message']}"
+        except Exception:
+            pass
+        
         raise HTTPException(
             status_code=424,
-            detail=f"Failed to update ElevenLabs agent: {resp.status_code}",
+            detail=error_detail,
         )
 
 
@@ -609,5 +622,78 @@ async def finalize_conversation(
         "charged": False,
         "total_seconds": total_seconds,
         "meta": meta,
+    }
+
+
+@router.post("/update-prompt")
+async def update_elevenlabs_prompt(
+    body: UpdatePromptBody,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Update the ElevenLabs agent prompt.
+    This endpoint updates the voice prompt (and optionally first_message) for an ElevenLabs agent.
+    
+    You can provide either:
+    - agent_id: The ElevenLabs agent ID directly
+    - influencer_id: The influencer ID (will look up the agent_id from the database)
+    
+    At least one of agent_id or influencer_id must be provided.
+    """
+    # Resolve agent_id and update database if influencer_id is provided
+    agent_id = body.agent_id
+    influencer = None
+    
+    if body.influencer_id:
+        influencer = await db.get(Influencer, body.influencer_id)
+        if influencer is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Influencer with id '{body.influencer_id}' not found",
+            )
+        
+        # Get agent_id from influencer if not provided directly
+        if not agent_id:
+            agent_id = getattr(influencer, "influencer_agent_id_third_part", None)
+            if not agent_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Could not resolve agent_id. Please check that the influencer has an agent_id configured.",
+                )
+        
+        # Update database
+        influencer.voice_prompt = body.voice_prompt
+    
+    if not agent_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not resolve agent_id. Please provide either agent_id or influencer_id with a configured agent_id.",
+        )
+    
+    # Update ElevenLabs
+    try:
+        await _push_prompt_to_elevenlabs(
+            agent_id=agent_id,
+            prompt_text=body.voice_prompt,
+            first_message=body.first_message,
+        )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        log.exception("Failed to update ElevenLabs prompt: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update prompt: {str(e)}",
+        )
+    
+    # Commit database changes if influencer was updated (only if ElevenLabs update succeeded)
+    if influencer:
+        await db.commit()
+    
+    return {
+        "ok": True,
+        "agent_id": agent_id,
+        "influencer_id": body.influencer_id,
+        "message": "Prompt updated successfully in database and ElevenLabs",
     }
 
