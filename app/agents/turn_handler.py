@@ -8,7 +8,11 @@ from redis import Redis
 
 from app.agents.memory import find_similar_memories, store_fact
 from app.agents.prompts import FACT_EXTRACTOR, FACT_PROMPT
-from app.agents.prompt_utils import get_today_script
+from app.agents.prompt_utils import (
+    GLOBAL_AUDIO_PROMPT,
+    GLOBAL_PROMPT,
+    get_today_script,
+)
 from app.agents.scoring import extract_score, get_score, update_score
 from app.core.config import settings
 from app.db.models import Influencer
