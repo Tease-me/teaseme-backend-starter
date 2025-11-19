@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.chat_service import get_or_create_chat
 from app.schemas.chat import ChatCreateRequest,PaginatedMessages
 from app.core.config import settings
-from app.utils.chat import transcribe_audio, synthesize_audio_with_elevenlabs, synthesize_audio_with_bland_ai, get_ai_reply_via_websocket
+from app.utils.chat import transcribe_audio, synthesize_audio_with_elevenlabs_V3, synthesize_audio_with_bland_ai, get_ai_reply_via_websocket
 from app.utils.s3 import save_audio_to_s3, save_ia_audio_to_s3, generate_presigned_url, message_to_schema_with_presigned
 from app.services.billing import charge_feature, get_duration_seconds, can_afford
 
@@ -527,24 +527,42 @@ async def chat_audio(
     ai_reply = await get_ai_reply_via_websocket(chat_id, transcript["text"], influencer_id, user_id, db)
 
     # 5. Synthesize reply as audio (try ElevenLabs first, then Bland as fallback)
-    audio_bytes, audio_mime = await synthesize_audio_with_elevenlabs(ai_reply,db,influencer_id)
+    audio_bytes, audio_mime = await synthesize_audio_with_elevenlabs_V3(ai_reply,db,influencer_id)
     if not audio_bytes:
-        audio_bytes, audio_mime = await synthesize_audio_with_bland_ai(ai_reply)
-        if not audio_bytes:
-            raise HTTPException(status_code=500, detail="No audio returned from any TTS provider.")
+        # audio_bytes, audio_mime = await synthesize_audio_with_bland_ai(ai_reply)
+        # if not audio_bytes:
+        raise HTTPException(status_code=500, detail="No audio returned from any TTS provider.")
         
     # 6. Save AI audio to S3
     ai_audio_url = await save_ia_audio_to_s3(audio_bytes, user_id)
 
     # 7. Save AI message with audio URL
-    msg_ai = Message(
-        chat_id=chat_id,
-        sender="ai",
-        content=ai_reply,
-        audio_url=ai_audio_url
-    )
-    db.add(msg_ai)
-    await db.commit()
+    # Use try/except to handle transaction errors (e.g., from failed memory operations)
+    try:
+        msg_ai = Message(
+            chat_id=chat_id,
+            sender="ai",
+            content=ai_reply,
+            audio_url=ai_audio_url
+        )
+        db.add(msg_ai)
+        await db.commit()
+    except Exception as e:
+        # Rollback and retry with a fresh transaction
+        await db.rollback()
+        try:
+            msg_ai = Message(
+                chat_id=chat_id,
+                sender="ai",
+                content=ai_reply,
+                audio_url=ai_audio_url
+            )
+            db.add(msg_ai)
+            await db.commit()
+        except Exception as retry_error:
+            await db.rollback()
+            log.error(f"Failed to save AI message after retry: {retry_error}", exc_info=True)
+            # Continue anyway - the audio was generated and saved to S3
     
     return {
         "ai_text": ai_reply,

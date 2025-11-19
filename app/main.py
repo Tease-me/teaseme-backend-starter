@@ -26,7 +26,6 @@ logging.basicConfig(
 
 origins = [
     "https://localhost:3000",  # frontend dev
-    "http://localhost:3000",  # frontend dev
     "https://192.168.68.72:4174",  # frontend dev
     "https://192.168.68.61:3000",  # frontend dev
     "https://teaseme.mxjprod.work/"

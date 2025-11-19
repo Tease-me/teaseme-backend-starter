@@ -31,7 +31,7 @@ async def search_similar_memories(db, chat_id, embedding, top_k=5):
     return [row[0] for row in result.fetchall()]
 
 
-from sqlalchemy import text
+from sqlalchemy import text, func
 from datetime import datetime, timezone
 
 async def upsert_memory(
@@ -52,60 +52,66 @@ async def upsert_memory(
     :param embedding: Embedding vector of the memory
     :param sender: Who is sending the memory (default is "fact")
     :param similarity_threshold: Threshold for similarity (default is 0.1)
-    :return: "update" if updated, "insert" if a new memory was added
+    :return: "update" if updated, "insert" if a new memory was added, None on error
     """
-    embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
+    try:
+        embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
 
-    # 1. Search for similar memory
-    sql_find = text("""
-        SELECT id, embedding <-> :embedding AS similarity
-        FROM memories
-        WHERE chat_id = :chat_id
-          AND embedding IS NOT NULL
-        ORDER BY similarity ASC
-        LIMIT 1
-    """)
-    params_find = {
-        "chat_id": chat_id,
-        "embedding": embedding_str,
-    }
-    result = await db.execute(sql_find, params_find)
-    similar = result.fetchone()
-
-    if similar and similar[1] <= similarity_threshold:
-        # 2. Update if similar memory found
-        sql_update = text("""
-            UPDATE memories
-            SET content = :content, embedding = :embedding, sender = :sender, created_at = :created_at
-            WHERE id = :id
+        # 1. Search for similar memory
+        sql_find = text("""
+            SELECT id, embedding <-> :embedding AS similarity
+            FROM memories
+            WHERE chat_id = :chat_id
+              AND embedding IS NOT NULL
+            ORDER BY similarity ASC
+            LIMIT 1
         """)
-        params_update = {
-            "id": similar[0],
-            "content": content,
-            "embedding": embedding_str,
-            "sender": sender,
-            "created_at": datetime.now(timezone.utc),
-        }
-        await db.execute(sql_update, params_update)
-        result_action = "update"
-    else:
-        # 3. Insert as a new memory
-        sql_insert = text("""
-            INSERT INTO memories (chat_id, content, embedding, sender, created_at)
-            VALUES (:chat_id, :content, :embedding, :sender, :created_at)
-        """)
-        params_insert = {
+        params_find = {
             "chat_id": chat_id,
-            "content": content,
             "embedding": embedding_str,
-            "sender": sender,
-            "created_at": datetime.now(timezone.utc),
         }
-        await db.execute(sql_insert, params_insert)
-        result_action = "insert"
+        result = await db.execute(sql_find, params_find)
+        similar = result.fetchone()
 
-    await db.commit()
-    return result_action
+        if similar and similar[1] <= similarity_threshold:
+            # 2. Update if similar memory found - use PostgreSQL's NOW() to avoid timezone issues
+            sql_update = text("""
+                UPDATE memories
+                SET content = :content, embedding = :embedding, sender = :sender, created_at = NOW()
+                WHERE id = :id
+            """)
+            params_update = {
+                "id": similar[0],
+                "content": content,
+                "embedding": embedding_str,
+                "sender": sender,
+            }
+            await db.execute(sql_update, params_update)
+            result_action = "update"
+        else:
+            # 3. Insert as a new memory - use PostgreSQL's NOW() to avoid timezone issues
+            sql_insert = text("""
+                INSERT INTO memories (chat_id, content, embedding, sender, created_at)
+                VALUES (:chat_id, :content, :embedding, :sender, NOW())
+            """)
+            params_insert = {
+                "chat_id": chat_id,
+                "content": content,
+                "embedding": embedding_str,
+                "sender": sender,
+            }
+            await db.execute(sql_insert, params_insert)
+            result_action = "insert"
+
+        await db.commit()
+        return result_action
+    except Exception as e:
+        # Rollback on error to prevent transaction from being in failed state
+        await db.rollback()
+        import logging
+        log = logging.getLogger(__name__)
+        log.error(f"Failed to upsert memory for chat_id={chat_id}: {e}", exc_info=True)
+        return None
 
 
 async def search_influencer_knowledge(db, influencer_id: str, embedding: list[float], top_k: int = 5):
