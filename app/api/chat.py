@@ -40,11 +40,14 @@ async def start_chat(
 
 # ---------- Buffer state ----------
 class _Buf:
-    __slots__ = ("messages", "timer", "lock")
+    __slots__ = ("messages", "timer", "lock", "flush_task", "active_messages")
+
     def __init__(self) -> None:
         self.messages: List[str] = []
         self.timer: Optional[asyncio.Task] = None
         self.lock = asyncio.Lock()
+        self.flush_task: Optional[asyncio.Task] = None
+        self.active_messages: Optional[List[str]] = None
 
 _buffers: Dict[str, _Buf] = {}  # chat_id -> _Buf
 MAX_BUFFERS = 1000  # Maximum number of active buffers to prevent memory issues
@@ -54,6 +57,24 @@ _DOUBLE_TEXT_MIN_SENTENCES = 3
 _DOUBLE_TEXT_MIN_LENGTH = 220
 _DOUBLE_TEXT_MIN_SEGMENT_LEN = 25
 _DOUBLE_TEXT_DELAY_RANGE = (0.55, 1.1)
+
+
+def _launch_flush(chat_id: str, ws: WebSocket, influencer_id: str, user_id: int, db: AsyncSession) -> Optional[asyncio.Task]:
+    buf = _buffers.get(chat_id)
+    if not buf:
+        return None
+
+    async def _runner() -> None:
+        try:
+            await _flush_buffer(chat_id, ws, influencer_id, user_id, db)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("[BUF %s] flush task crashed", chat_id)
+
+    task = asyncio.create_task(_runner())
+    buf.flush_task = task
+    return task
 
 
 def _split_into_double_text_chunks(text: str) -> List[str]:
@@ -140,19 +161,30 @@ async def _queue_message(
     timeout_sec: float = 2.5,
 ) -> None:
     # Prevent memory issues by limiting buffer count
+    pending_old_cancel: Optional[asyncio.Task] = None
     if len(_buffers) >= MAX_BUFFERS and chat_id not in _buffers:
-        # Remove oldest buffer (simple FIFO)
         oldest_key = next(iter(_buffers))
         old_buf = _buffers[oldest_key]
         if old_buf.timer and not old_buf.timer.done():
             old_buf.timer.cancel()
+            old_buf.timer = None
+        if old_buf.flush_task and not old_buf.flush_task.done():
+            pending_old_cancel = old_buf.flush_task
+            old_buf.flush_task.cancel()
         del _buffers[oldest_key]
         log.warning("[BUF] Removed oldest buffer %s (limit reached)", oldest_key)
-    
+
+    if pending_old_cancel:
+        try:
+            await pending_old_cancel
+        except asyncio.CancelledError:
+            pass
+
     buf = _buffers.setdefault(chat_id, _Buf())
 
     # ---- mutate buffer under lock
     flush_now = False
+    pending_cancel: Optional[asyncio.Task] = None
     async with buf.lock:
         buf.messages.append(msg)
         log.info("[BUF %s] queued: %r (len=%d)", chat_id, msg, len(buf.messages))
@@ -163,6 +195,12 @@ async def _queue_message(
             buf.timer.cancel()
             buf.timer = None
 
+        if buf.flush_task and not buf.flush_task.done():
+            log.info("[BUF %s] cancel inflight flush", chat_id)
+            pending_cancel = buf.flush_task
+            buf.flush_task = None
+            pending_cancel.cancel()
+
         # decide behavior
         if _ends_thought(msg):
             flush_now = True
@@ -172,21 +210,28 @@ async def _queue_message(
             async def _wait_and_flush():
                 try:
                     await asyncio.sleep(timeout_sec)
-                    await _flush_buffer(chat_id, ws, influencer_id, user_id, db)
+                    _launch_flush(chat_id, ws, influencer_id, user_id, db)
                 except asyncio.CancelledError:
                     return
                 except Exception:
                     log.exception("[BUF %s] scheduled-flush failed", chat_id)
+                finally:
+                    async with buf.lock:
+                        if buf.timer is asyncio.current_task():
+                            buf.timer = None
 
             buf.timer = asyncio.create_task(_wait_and_flush())
 
     # ---- outside the lock: perform the flush now if needed
+    if pending_cancel:
+        try:
+            await pending_cancel
+        except asyncio.CancelledError:
+            pass
+
     if flush_now:
         log.info("[BUF %s] ends_thought=True -> flush now", chat_id)
-        try:
-            await _flush_buffer(chat_id, ws, influencer_id, user_id, db)
-        except Exception:
-            log.exception("[BUF %s] flush-now failed", chat_id)
+        _launch_flush(chat_id, ws, influencer_id, user_id, db)
 
 # ---------- Do the flush: concat, charge, call LLM, persist, reply ----------
 async def _flush_buffer_without_ws(chat_id: str, influencer_id: str, user_id: int) -> None:
@@ -199,11 +244,14 @@ async def _flush_buffer_without_ws(chat_id: str, influencer_id: str, user_id: in
         return
 
     async with buf.lock:
-        if not buf.messages:
-            return
-        user_text = " ".join(m.strip() for m in buf.messages if m and m.strip())
+        payload = []
+        if buf.active_messages:
+            payload.extend(buf.active_messages)
+            buf.active_messages = None
+        payload.extend(m.strip() for m in buf.messages if m and m.strip())
         buf.messages.clear()
         buf.timer = None
+        user_text = " ".join(payload).strip()
 
     if not user_text:
         return
@@ -264,144 +312,150 @@ async def _flush_buffer(chat_id: str, ws: WebSocket, influencer_id: str, user_id
     if not buf:
         return
 
-    async with buf.lock:
-        if not buf.messages:
+    payload: Optional[List[str]] = None
+    try:
+        async with buf.lock:
+            cleaned = [m.strip() for m in buf.messages if m and m.strip()]
+            if not cleaned:
+                return
+            payload = cleaned
+            buf.messages.clear()
+            buf.timer = None
+            buf.active_messages = cleaned.copy()
+
+        user_text = " ".join(payload).strip() if payload else ""
+        if not user_text:
             return
-        user_text = " ".join(m.strip() for m in buf.messages if m and m.strip())
-        buf.messages.clear()
-        buf.timer = None
 
-    if not user_text:
-        return
+        log.info("[BUF %s] FLUSH start; user_text=%r", chat_id, user_text)
 
-    log.info("[BUF %s] FLUSH start; user_text=%r", chat_id, user_text)
-
-    # 1) Billing – fresh session
-    async with SessionLocal() as db_bill:
-        try:
-            # charge_feature commits internally, no need to commit again
-            await charge_feature(
-                db_bill, user_id=user_id, feature="text", units=1,
-                meta={"chat_id": chat_id, "burst": True},
-            )
-        except HTTPException as e:
-            await db_bill.rollback()
-            # Handle specific billing errors
-            if e.status_code == 402:
-                # Insufficient credits - should have been caught earlier, but handle gracefully
-                log.warning("[WS %s] Insufficient credits during flush (race condition?)", chat_id)
-                try:
-                    await ws.send_json({
-                        "ok": False,
-                        "type": "billing_error",
-                        "error": "INSUFFICIENT_CREDITS",
-                        "message": "You don't have enough credits. Please top up to continue.",
-                        "needed_cents": None,  # Can't determine without re-checking
-                        "free_left": None,
-                    })
-                except Exception:
-                    pass
-            elif e.status_code == 500:
-                # Pricing not configured - system error
-                log.error("[WS %s] Pricing not configured: %s", chat_id, e.detail)
-                try:
-                    await ws.send_json({
-                        "ok": False,
-                        "type": "billing_error",
-                        "error": "SYSTEM_ERROR",
-                        "message": "Payment system error. Please contact support.",
-                    })
-                except Exception:
-                    pass
-            else:
-                # Other HTTP exceptions
-                log.error("[WS %s] Billing HTTP error (%d): %s", chat_id, e.status_code, e.detail)
-                try:
-                    await ws.send_json({
-                        "ok": False,
-                        "type": "billing_error",
-                        "error": "CHARGE_FAILED",
-                        "message": "Failed to process payment. Please try again.",
-                    })
-                except Exception:
-                    pass
-            return  # ⚠️ Exit early if billing fails
-        except Exception as e:
-            # Unexpected errors (database issues, etc.)
-            await db_bill.rollback()
-            # Log full exception details for debugging
-            log.exception(
-                "[WS %s] Unexpected billing error (type=%s, msg=%s): %s",
-                chat_id, type(e).__name__, str(e), e,
-                exc_info=True
-            )
-            
-            # Check for specific database errors
-            error_msg = "Payment system temporarily unavailable. Please try again."
-            error_type = "CHARGE_FAILED"
-            
-            # Check if it's a database connection/transaction error
-            error_str = str(e).lower()
-            if "connection" in error_str or "timeout" in error_str:
-                error_msg = "Database connection error. Please try again."
-                error_type = "DATABASE_ERROR"
-            elif "deadlock" in error_str or "lock" in error_str:
-                error_msg = "Transaction conflict. Please try again in a moment."
-                error_type = "TRANSACTION_ERROR"
-            
+        # 1) Billing – fresh session
+        async with SessionLocal() as db_bill:
             try:
-                await ws.send_json({
-                    "ok": False,
-                    "type": "billing_error",
-                    "error": error_type,
-                    "message": error_msg,
-                })
+                await charge_feature(
+                    db_bill, user_id=user_id, feature="text", units=1,
+                    meta={"chat_id": chat_id, "burst": True},
+                )
+            except HTTPException as e:
+                await db_bill.rollback()
+                if e.status_code == 402:
+                    log.warning("[WS %s] Insufficient credits during flush (race condition?)", chat_id)
+                    try:
+                        await ws.send_json({
+                            "ok": False,
+                            "type": "billing_error",
+                            "error": "INSUFFICIENT_CREDITS",
+                            "message": "You don't have enough credits. Please top up to continue.",
+                            "needed_cents": None,
+                            "free_left": None,
+                        })
+                    except Exception:
+                        pass
+                elif e.status_code == 500:
+                    log.error("[WS %s] Pricing not configured: %s", chat_id, e.detail)
+                    try:
+                        await ws.send_json({
+                            "ok": False,
+                            "type": "billing_error",
+                            "error": "SYSTEM_ERROR",
+                            "message": "Payment system error. Please contact support.",
+                        })
+                    except Exception:
+                        pass
+                else:
+                    log.error("[WS %s] Billing HTTP error (%d): %s", chat_id, e.status_code, e.detail)
+                    try:
+                        await ws.send_json({
+                            "ok": False,
+                            "type": "billing_error",
+                            "error": "CHARGE_FAILED",
+                            "message": "Failed to process payment. Please try again.",
+                        })
+                    except Exception:
+                        pass
+                return
+            except Exception as e:
+                await db_bill.rollback()
+                log.exception(
+                    "[WS %s] Unexpected billing error (type=%s, msg=%s): %s",
+                    chat_id, type(e).__name__, str(e), e,
+                    exc_info=True
+                )
+                error_msg = "Payment system temporarily unavailable. Please try again."
+                error_type = "CHARGE_FAILED"
+                error_str = str(e).lower()
+                if "connection" in error_str or "timeout" in error_str:
+                    error_msg = "Database connection error. Please try again."
+                    error_type = "DATABASE_ERROR"
+                elif "deadlock" in error_str or "lock" in error_str:
+                    error_msg = "Transaction conflict. Please try again in a moment."
+                    error_type = "TRANSACTION_ERROR"
+
+                try:
+                    await ws.send_json({
+                        "ok": False,
+                        "type": "billing_error",
+                        "error": error_type,
+                        "message": error_msg,
+                    })
+                except Exception:
+                    pass
+                return
+
+        # 2) Get LLM reply – fresh session for handle_turn
+        reply = None
+        try:
+            log.info("[BUF %s] calling handle_turn()", chat_id)
+            async with SessionLocal() as db_ht:
+                reply = await handle_turn(
+                    message=user_text,
+                    chat_id=chat_id,
+                    influencer_id=influencer_id,
+                    user_id=user_id,
+                    db=db_ht,
+                    is_audio=False,
+                )
+
+            if not reply:
+                log.warning("[BUF %s] handle_turn returned empty reply", chat_id)
+                reply = "Sorry, something went wrong. 😔"
+
+            log.info("[BUF %s] handle_turn ok (reply_len=%d)", chat_id, len(reply or ""))
+        except Exception:
+            log.exception("[BUF %s] handle_turn error", chat_id)
+            try:
+                await ws.send_json({"reply": "Sorry, something went wrong. 😔"})
             except Exception:
                 pass
-            return  # ⚠️ Exit early if billing fails
+            return
 
-    # 2) Get LLM reply – fresh session for handle_turn
-    reply = None
-    try:
-        log.info("[BUF %s] calling handle_turn()", chat_id)
-        async with SessionLocal() as db_ht:
-            reply = await handle_turn(
-                message=user_text,
-                chat_id=chat_id,
-                influencer_id=influencer_id,
-                user_id=user_id,
-                db=db_ht,
-                is_audio=False,
-            )
-        
-        if not reply:
-            log.warning("[BUF %s] handle_turn returned empty reply", chat_id)
-            reply = "Sorry, something went wrong. 😔"
-        
-        log.info("[BUF %s] handle_turn ok (reply_len=%d)", chat_id, len(reply or ""))
-    except Exception:
-        log.exception("[BUF %s] handle_turn error", chat_id)
+        chunks = _split_into_double_text_chunks(reply)
+
+        # 3) Persist AI reply – fresh session
+        async with SessionLocal() as db_ai:
+            try:
+                await _save_ai_messages(db_ai, chat_id, chunks)
+            except Exception:
+                await db_ai.rollback()
+                log.exception("[WS %s] Failed to save AI message", chat_id)
+
+        # 4) Send to client
         try:
-            await ws.send_json({"reply": "Sorry, something went wrong. 😔"})
+            await _send_reply_chunks(ws, chat_id, chunks)
         except Exception:
-            pass
-        return
-
-    chunks = _split_into_double_text_chunks(reply)
-
-    # 3) Persist AI reply – fresh session
-    async with SessionLocal() as db_ai:
-        try:
-            await _save_ai_messages(db_ai, chat_id, chunks)
-        except Exception:
-            await db_ai.rollback()
-            log.exception("[WS %s] Failed to save AI message", chat_id)
-
-    # 4) Send to client
-    try:
-        await _send_reply_chunks(ws, chat_id, chunks)
-    except Exception:
-        log.exception("[WS %s] Failed to send reply", chat_id)
+            log.exception("[WS %s] Failed to send reply", chat_id)
+    except asyncio.CancelledError:
+        log.info("[BUF %s] flush cancelled before completion", chat_id)
+        async with buf.lock:
+            if buf.active_messages:
+                buf.messages = buf.active_messages + buf.messages
+                buf.active_messages = None
+        raise
+    finally:
+        if buf:
+            buf.active_messages = None
+            if buf.flush_task is asyncio.current_task():
+                buf.flush_task = None
 
 
 # ---------- WebSocket entrypoint ----------
@@ -470,7 +524,22 @@ async def websocket_chat(
             # optional: client can force immediate flush by sending {"final": true}
             if raw.get("final") is True:
                 log.info("[BUF %s] client requested final flush", chat_id)
-                await _flush_buffer(chat_id, ws, influencer_id, user_id, db)
+                buf = _buffers.get(chat_id)
+                task_to_await: Optional[asyncio.Task] = None
+                if buf:
+                    async with buf.lock:
+                        if buf.timer and not buf.timer.done():
+                            buf.timer.cancel()
+                            buf.timer = None
+                        if buf.flush_task and not buf.flush_task.done():
+                            task_to_await = buf.flush_task
+                    if task_to_await is None:
+                        task_to_await = _launch_flush(chat_id, ws, influencer_id, user_id, db)
+                if task_to_await:
+                    try:
+                        await task_to_await
+                    except asyncio.CancelledError:
+                        pass
 
     except WebSocketDisconnect:
         log.info("[WS] Client %s disconnected from %s", user_id, influencer_id)
@@ -481,11 +550,22 @@ async def websocket_chat(
             # Cancel any pending timer
             if buf.timer and not buf.timer.done():
                 buf.timer.cancel()
+                buf.timer = None
+
+            # Cancel any inflight flush task so we can persist unsent content
+            if buf.flush_task and not buf.flush_task.done():
+                buf.flush_task.cancel()
+                try:
+                    await buf.flush_task
+                except asyncio.CancelledError:
+                    pass
+                finally:
+                    buf.flush_task = None
             
             # Try a last flush so we don't leave unsent content
             # Note: This will fail to send via WebSocket (already disconnected),
             # but it will still save the AI reply to DB if it succeeds
-            if buf.messages:
+            if buf.messages or buf.active_messages:
                 try:
                     log.info("[WS] Attempting final flush for disconnected client %s (messages=%d)", chat_id, len(buf.messages))
                     # Create a dummy WebSocket object to avoid errors, but flush will handle send failures gracefully
