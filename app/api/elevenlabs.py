@@ -487,7 +487,10 @@ async def save_pending_conversation(
     Idempotent on the primary key (conversation_id).
     """
     result = await db.execute(
-        select(Chat).where(Chat.user_id == user_id, Chat.influencer_id == influencer_id)
+        select(Chat)
+        .where(Chat.user_id == user_id, Chat.influencer_id == influencer_id)
+        .order_by(Chat.created_at.desc())
+        .limit(1)
     )
     chat = result.scalar_one_or_none()
     if not chat:
@@ -696,4 +699,3 @@ async def update_elevenlabs_prompt(
         "influencer_id": body.influencer_id,
         "message": "Prompt updated successfully in database and ElevenLabs",
     }
-
