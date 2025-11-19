@@ -19,9 +19,13 @@ def sanitize_tts_text(text: str) -> str:
         return ""
     
     # Preserve ElevenLabs V3 tags by temporarily replacing them
+    # Use a unique placeholder that won't be modified by sanitization
+    # Format: V3TAGXXX where XXX is a unique number
     tag_placeholders = {}
     def _store_tag(m):
-        tag_key = f"__V3_TAG_{len(tag_placeholders)}__"
+        idx = len(tag_placeholders)
+        # Use a format that's very unlikely to appear in normal text
+        tag_key = f"V3TAG{idx:03d}V3"
         tag_placeholders[tag_key] = m.group(0)  # Store the full tag like [chuckles]
         return tag_key
     
@@ -30,7 +34,11 @@ def sanitize_tts_text(text: str) -> str:
     text = unescape(text)
     text = re.sub(r'[ \t]+', ' ', text).strip()
     text = re.sub(r'[\U0001F300-\U0001FAFF\U00002700-\U000027BF]+', '', text)
-    text = re.sub(r'[*_`~#>$begin:math:display$$end:math:display$$begin:math:text$$end:math:text$]', '', text)
+    # Remove markdown formatting characters only (not as a character class that would remove letters)
+    # Note: Don't remove characters that are part of our placeholder
+    text = re.sub(r'[*_`~#>]', '', text)
+    # Remove math display markers if present
+    text = re.sub(r'\$begin:math:display\$\$end:math:display\$\$begin:math:text\$\$end:math:text\$', '', text)
 
     def _audio_tag_filter(m):
         tag = m.group(1).lower().strip()
@@ -50,8 +58,22 @@ def sanitize_tts_text(text: str) -> str:
     text = re.sub(r'</?[^>]+>', '', text)
 
     # Restore ElevenLabs V3 tags
-    for placeholder, original_tag in tag_placeholders.items():
-        text = text.replace(placeholder, original_tag)
+    # Restore in reverse order to avoid conflicts if placeholders overlap
+    for placeholder, original_tag in sorted(tag_placeholders.items(), reverse=True):
+        if placeholder in text:
+            text = text.replace(placeholder, original_tag)
+        else:
+            # If placeholder was modified, try to find and restore it
+            # This handles cases where the placeholder might have been partially modified
+            import logging
+            log = logging.getLogger(__name__)
+            log.warning(f"Placeholder {placeholder} not found in text, tag {original_tag} may be lost")
+
+    # Clean up any leftover placeholders (from old format or failed restorations)
+    # Remove patterns like V3TAG0, V3TAG000V3, etc.
+    text = re.sub(r'V3TAG\d+V3?', '', text)
+    # Also clean up old format placeholders if any
+    text = re.sub(r'__V3_TAG_\d+__', '', text)
 
     text = text.strip()
     return text if text else "…"
