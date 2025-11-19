@@ -23,9 +23,12 @@ class Influencer(Base):
     prompt_template:Mapped[str]          = mapped_column(Text, nullable=False)
     voice_prompt:   Mapped[str | None] = mapped_column(String, nullable=True)
     daily_scripts:  Mapped[List[str] | None] = mapped_column(JSON, nullable=True)
+    influencer_agent_id_third_part: Mapped[str | None] = mapped_column(String, nullable=True)  
+    created_at:     Mapped[datetime]     = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     influencer_agent_id_third_part: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at:     Mapped[datetime]     = mapped_column(DateTime, default=datetime.utcnow)
     chats:          Mapped[List["Chat"]] = relationship(back_populates="influencer")
+    influencer_gpt_agent_id: Mapped[str | None] = mapped_column(String, nullable=True)  
 
 class User(Base):
     __tablename__ = "users"
@@ -41,7 +44,6 @@ class User(Base):
     password_reset_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     password_reset_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-
     chats = relationship("Chat", back_populates="user")
 
 class Chat(Base):
@@ -140,6 +142,7 @@ class CallRecord(Base):
     __table_args__ = (
         Index("idx_calls_user_created", "user_id", "created_at"),
     )
+    
 
 class InfluencerKnowledgeFile(Base):
     """Metadata for uploaded knowledge files (PDF, Word, etc.)"""

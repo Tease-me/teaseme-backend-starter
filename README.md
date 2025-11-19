@@ -28,6 +28,11 @@ TeaseMe is a multi-persona conversational AI platform with audio, long-term memo
 
 4. **Talk to the API**
 
+- app/main.py # FastAPI entrypoint
+- app/api/router.py # WebSocket chat endpoint
+- app/db/models.py # SQLAlchemy+pgvector models
+c
+# TeaseMe Backend
    - REST: `https://localhost:8000`
    - WebSocket chat: `wss://localhost:8000/ws/chat/<persona>`
 
