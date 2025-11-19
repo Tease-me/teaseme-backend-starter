@@ -27,6 +27,14 @@ _VIRTUAL_META_RE = re.compile(r"\b(virtual|digital|ai)\s+(friend|girlfriend|budd
 _COMPANION_ROLE_RE = re.compile(r"\b(friendly\s+)?(companion|assistant|chat\s*buddy)\b", re.IGNORECASE)
 _SHORT_REPLY_SET = {"ok", "k", "cool", "nothing", "no", "nah", "fine", "yup", "y", "sure", "idk", "nope"}
 _FLIRT_RE = re.compile(r"\b(kiss|love|miss|beautiful|gorgeous|pretty|sexy|hot|cute|face|hug|want you)\b", re.IGNORECASE)
+_RUDE_RE = re.compile(
+    r"\b("
+    r"hate you|shut up|fuck(?:ing)?|bitch|loser|stupid|idiot|dumb|trash|"
+    r"ugly|psycho|annoying|screw you|go away"
+    r")\b",
+    re.IGNORECASE,
+)
+_RUDE_SCORE_PENALTY = 5
 
 THREAD_KEY = "assistant_thread:{chat}:{persona}"
 _thread_store = Redis.from_url(settings.REDIS_URL, decode_responses=True)
@@ -94,12 +102,12 @@ def _remove_virtual_meta(text: str) -> str:
     return cleaned
 
 
-def _analyze_user_message(text: str) -> tuple[str, bool, bool]:
+def _analyze_user_message(text: str) -> tuple[str, bool, bool, bool]:
     if not text:
-        return "no signal", True, False
+        return "no signal", True, False, False
     stripped = text.strip()
     if not stripped:
-        return "no signal", True, False
+        return "no signal", True, False, False
     lower = stripped.lower()
     words = stripped.split()
     word_count = len(words)
@@ -108,6 +116,7 @@ def _analyze_user_message(text: str) -> tuple[str, bool, bool]:
     has_question = stripped.endswith("?")
     short_guard = word_count <= 2 or len(stripped) <= 6 or lower in _SHORT_REPLY_SET
     flirt_guard = bool(_FLIRT_RE.search(stripped))
+    rude_guard = bool(_RUDE_RE.search(stripped))
     if has_exclaim and has_caps:
         mood = "urgent or heightened"
     elif has_question and not short_guard:
@@ -118,7 +127,9 @@ def _analyze_user_message(text: str) -> tuple[str, bool, bool]:
         mood = "ease / neutral"
     if flirt_guard:
         mood += " with flirt cues"
-    return mood, short_guard, flirt_guard
+    if rude_guard:
+        mood += " plus a rude or hostile tone"
+    return mood, short_guard, flirt_guard, rude_guard
 
 
 def _recent_ai_messages(history: RedisChatMessageHistory, limit: int = 2) -> list[str]:
@@ -206,6 +217,7 @@ def _build_assistant_payload(
     mood_desc: str,
     short_guard: bool,
     flirt_guard: bool,
+    rude_guard: bool,
 ) -> str:
     sections: list[str] = [
         f"Lollity score: {score}",
@@ -220,6 +232,8 @@ def _build_assistant_payload(
         sections.append("Short reply detected: respond with statements (no questions) until the user shares more than a couple of words.")
     if flirt_guard:
         sections.append("Flirt cue detected: stay on the flirt thread, tease or reciprocate before asking any new question.")
+    if rude_guard:
+        sections.append("Rude or disrespectful tone detected: hold firm boundaries, do not reward them with compliments, and treat this as a warning moment.")
 
     sections.append(
         "Scoring contract: start from the Lollity score above, then decide a new score between 0 and 100 after each reply. Move it by 1–4 points based on their energy (reward warmth/flirt, drop it for low-effort, rude, or boundary-pushing turns). ALWAYS end your reply with `[Lollity Score: NN/100]` using the new score and nothing else inside the brackets."
@@ -228,6 +242,8 @@ def _build_assistant_payload(
         sections.append("The user flirted—if you reciprocate, nudge the score upward a couple of points before tagging it.")
     if short_guard:
         sections.append("User energy is low; unless they explicitly said they’re tired or busy, consider trimming the score by 1–2 points before tagging it.")
+    if rude_guard:
+        sections.append("Because the user was rude, drop the Lollity score sharply (4–6 points) this turn and keep responses clipped until they soften or apologize.")
 
     context_blob = "\n\n".join(s for s in sections if s).strip()
     if context_blob:
@@ -296,7 +312,12 @@ async def handle_turn(
         log.error("[%s] No assistant configured for influencer %s", cid, influencer_id)
         return "Sorry, this persona is not ready yet. 😔"
 
-    mood_desc, short_guard, flirt_guard = _analyze_user_message(message)
+    mood_desc, short_guard, flirt_guard, rude_guard = _analyze_user_message(message)
+    if rude_guard:
+        adjusted_score = max(0, score - _RUDE_SCORE_PENALTY)
+        if adjusted_score != score:
+            log.info("[%s] Rude tone detected; lowering score from %d to %d before prompting", cid, score, adjusted_score)
+            score = adjusted_score
     try:
         assistant_context = _build_assistant_payload(
             user_message=message,
@@ -306,6 +327,7 @@ async def handle_turn(
             mood_desc=mood_desc,
             short_guard=short_guard,
             flirt_guard=flirt_guard,
+            rude_guard=rude_guard,
         )
         history_context = _history_context(history)
         context_sections: list[str] = []
