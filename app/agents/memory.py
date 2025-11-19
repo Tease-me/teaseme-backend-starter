@@ -1,12 +1,43 @@
-from app.api.utils import get_embedding, search_similar_memories, upsert_memory
+from app.api.utils import get_embedding, search_similar_memories, search_influencer_knowledge, upsert_memory
 from sqlalchemy import select
 from sqlalchemy.sql import func
 from app.db.models import Memory
 
-async def find_similar_memories(db, chat_id: str, message: str, top_k: int = 7):
+async def find_similar_memories(db, chat_id: str, message: str, influencer_id: str = None, top_k: int = 7):
+    """
+    Find similar memories from both chat-specific and influencer knowledge base.
+    
+    Args:
+        db: Database session
+        chat_id: ID of the chat
+        message: User message to find similar memories for
+        influencer_id: ID of the influencer (optional, for knowledge base search)
+        top_k: Number of memories to return
+    
+    Returns:
+        Tuple of (chat_memories, knowledge_base_content) - both are lists of strings
+    """
     emb = await get_embedding(message)
-    memories = await search_similar_memories(db, chat_id, emb, top_k=top_k)
-    return list(dict.fromkeys([m for m in memories if m]))
+    
+    # Get chat-specific memories (existing behavior)
+    chat_memories = await search_similar_memories(db, chat_id, emb, top_k=top_k)
+    
+    # Get influencer knowledge base chunks (NEW)
+    knowledge_chunks = []
+    if influencer_id:
+        try:
+            knowledge_results = await search_influencer_knowledge(db, influencer_id, emb, top_k=5)
+            knowledge_chunks = [r["content"] for r in knowledge_results if r.get("content")]
+            import logging
+            log = logging.getLogger("memory")
+            log.info(f"Knowledge search for {influencer_id}: found {len(knowledge_chunks)} chunks")
+        except Exception as e:
+            # Log error but don't fail if knowledge search fails
+            import logging
+            log = logging.getLogger("memory")
+            log.error(f"Failed to search influencer knowledge for {influencer_id}: {e}", exc_info=True)
+    
+    return chat_memories, knowledge_chunks
 
 def _norm(s: str) -> str:
     return " ".join(s.lower().split())
