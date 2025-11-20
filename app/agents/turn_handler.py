@@ -1,5 +1,6 @@
 import logging
 import re
+from dataclasses import dataclass
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -29,15 +30,57 @@ _SHORT_REPLY_SET = {"ok", "k", "cool", "nothing", "no", "nah", "fine", "yup", "y
 _FLIRT_RE = re.compile(r"\b(kiss|love|miss|beautiful|gorgeous|pretty|sexy|hot|cute|face|hug|want you)\b", re.IGNORECASE)
 _RUDE_RE = re.compile(
     r"\b("
-    r"hate you|shut up|fuck(?:ing)?|bitch|loser|stupid|idiot|dumb|trash|"
-    r"ugly|psycho|annoying|screw you|go away"
+    r"hate you|shut up|bitch|loser|stupid|idiot|dumb|trash|psycho|annoying|screw you|go away|you suck|worthless|pathetic|creep|pervert"
     r")\b",
     re.IGNORECASE,
 )
+_TARGETED_INSULT_RE = re.compile(
+    r"\b(?:you|you're|youre|ur|u)\s+(?:so\s+)?(ugly|gross|stupid|dumb|trash|worthless|annoying|psycho|crazy|boring|lame|pathetic|awful)\b",
+    re.IGNORECASE,
+)
+_DIRECT_F_RE = re.compile(r"\bfuck(?:ing)?\s+(?:you|u|off)\b", re.IGNORECASE)
+_SEXUAL_REQUEST_RE = re.compile(
+    r"\b("
+    r"fuck|sex|sexual|horny|hook\s*up|hookup|sleep with|screw|nude|naked|nudes|bj|blowjob|ride me|spank|eat you out|eat me|make out|cuddle me"
+    r")\b",
+    re.IGNORECASE,
+)
+_NEGGING_POSITIVE_RE = re.compile(r"\b(love|like|adore|enjoy|appreciate|cute|sweet|pretty|gorgeous|hot|sexy|handsome|beautiful)\b", re.IGNORECASE)
+_NEGGING_NEGATIVE_RE = re.compile(
+    r"\b(ugly|gross|disgusting|stupid|idiot|dumb|trash|worthless|pathetic|annoying|psycho|crazy|mean|horrible|awful)\b",
+    re.IGNORECASE,
+)
+_SECOND_PERSON_RE = re.compile(r"\b(u|you|ya|ur|you're|youre)\b", re.IGNORECASE)
 _RUDE_SCORE_PENALTY = 5
 
 THREAD_KEY = "assistant_thread:{chat}:{persona}"
 _thread_store = Redis.from_url(settings.REDIS_URL, decode_responses=True)
+
+
+@dataclass
+class MessageSignals:
+    mood: str
+    short_guard: bool
+    flirt_guard: bool
+    rude_guard: bool
+    sexual_guard: bool
+    negging_guard: bool
+
+
+def _has_second_person_reference(text: str) -> bool:
+    if not text:
+        return False
+    return bool(_SECOND_PERSON_RE.search(text))
+
+
+def _detect_negging(text: str) -> bool:
+    if not text:
+        return False
+    if not _NEGGING_POSITIVE_RE.search(text):
+        return False
+    if not _NEGGING_NEGATIVE_RE.search(text):
+        return False
+    return _has_second_person_reference(text)
 
 
 def _flatten_message_content(content) -> str:
@@ -102,12 +145,12 @@ def _remove_virtual_meta(text: str) -> str:
     return cleaned
 
 
-def _analyze_user_message(text: str) -> tuple[str, bool, bool, bool]:
+def _analyze_user_message(text: str) -> MessageSignals:
     if not text:
-        return "no signal", True, False, False
+        return MessageSignals("no signal", True, False, False, False, False)
     stripped = text.strip()
     if not stripped:
-        return "no signal", True, False, False
+        return MessageSignals("no signal", True, False, False, False, False)
     lower = stripped.lower()
     words = stripped.split()
     word_count = len(words)
@@ -116,7 +159,12 @@ def _analyze_user_message(text: str) -> tuple[str, bool, bool, bool]:
     has_question = stripped.endswith("?")
     short_guard = word_count <= 2 or len(stripped) <= 6 or lower in _SHORT_REPLY_SET
     flirt_guard = bool(_FLIRT_RE.search(stripped))
-    rude_guard = bool(_RUDE_RE.search(stripped))
+    sexual_guard = bool(_SEXUAL_REQUEST_RE.search(stripped))
+    direct_rude = bool(_RUDE_RE.search(stripped) or _TARGETED_INSULT_RE.search(stripped) or _DIRECT_F_RE.search(stripped))
+    negging_guard = _detect_negging(stripped)
+    if direct_rude:
+        sexual_guard = False
+    rude_guard = direct_rude or negging_guard
     if has_exclaim and has_caps:
         mood = "urgent or heightened"
     elif has_question and not short_guard:
@@ -127,9 +175,11 @@ def _analyze_user_message(text: str) -> tuple[str, bool, bool, bool]:
         mood = "ease / neutral"
     if flirt_guard:
         mood += " with flirt cues"
+    if sexual_guard and not flirt_guard:
+        mood += " with sexual boundary testing"
     if rude_guard:
         mood += " plus a rude or hostile tone"
-    return mood, short_guard, flirt_guard, rude_guard
+    return MessageSignals(mood, short_guard, flirt_guard, rude_guard, sexual_guard, negging_guard)
 
 
 def _recent_ai_messages(history: RedisChatMessageHistory, limit: int = 2) -> list[str]:
@@ -218,6 +268,8 @@ def _build_assistant_payload(
     short_guard: bool,
     flirt_guard: bool,
     rude_guard: bool,
+    sexual_guard: bool,
+    negging_guard: bool,
 ) -> str:
     sections: list[str] = [
         f"Lollity score: {score}",
@@ -233,7 +285,11 @@ def _build_assistant_payload(
     if flirt_guard:
         sections.append("Flirt cue detected: stay on the flirt thread, tease or reciprocate before asking any new question.")
     if rude_guard:
-        sections.append("Rude or disrespectful tone detected: hold firm boundaries, do not reward them with compliments, and treat this as a warning moment.")
+        sections.append("Rude or disrespectful tone detected: reference their wording, set a confident boundary in-character, and only soften once they shift tone.")
+    if sexual_guard:
+        sections.append("Sexual or explicit invite detected: treat it as a PG boundary push, answer with playful firmness, and only trim the score if they keep pushing after the reminder.")
+    if negging_guard:
+        sections.append("Negging/backhanded compliment detected: point it out directly, keep your reply clipped, and make them earn warmth back.")
 
     sections.append(
         "Scoring contract: start from the Lollity score above, then decide a new score between 0 and 100 after each reply. Move it by 1–4 points based on their energy (reward warmth/flirt, drop it for low-effort, rude, or boundary-pushing turns). ALWAYS end your reply with `[Lollity Score: NN/100]` using the new score and nothing else inside the brackets."
@@ -242,8 +298,12 @@ def _build_assistant_payload(
         sections.append("The user flirted—if you reciprocate, nudge the score upward a couple of points before tagging it.")
     if short_guard:
         sections.append("User energy is low; unless they explicitly said they’re tired or busy, consider trimming the score by 1–2 points before tagging it.")
-    if rude_guard:
+    if rude_guard and not negging_guard:
         sections.append("Because the user was rude, drop the Lollity score sharply (4–6 points) this turn and keep responses clipped until they soften or apologize.")
+    if negging_guard:
+        sections.append("Backhanded compliment detected: adjust the score down 2–4 points and keep the tone cool until they clarify or apologize.")
+    if sexual_guard and not rude_guard:
+        sections.append("Boundary flirt detected without insults: remind them of the PG lane, keep confidence high, and only drop 1 point if needed.")
 
     context_blob = "\n\n".join(s for s in sections if s).strip()
     if context_blob:
@@ -312,9 +372,10 @@ async def handle_turn(
         log.error("[%s] No assistant configured for influencer %s", cid, influencer_id)
         return "Sorry, this persona is not ready yet. 😔"
 
-    mood_desc, short_guard, flirt_guard, rude_guard = _analyze_user_message(message)
-    if rude_guard:
-        adjusted_score = max(0, score - _RUDE_SCORE_PENALTY)
+    signals = _analyze_user_message(message)
+    if signals.rude_guard:
+        penalty = _RUDE_SCORE_PENALTY if not signals.negging_guard else max(2, _RUDE_SCORE_PENALTY - 1)
+        adjusted_score = max(0, score - penalty)
         if adjusted_score != score:
             log.info("[%s] Rude tone detected; lowering score from %d to %d before prompting", cid, score, adjusted_score)
             score = adjusted_score
@@ -324,10 +385,12 @@ async def handle_turn(
             score=score,
             mem_block=mem_block,
             daily_context=daily_context,
-            mood_desc=mood_desc,
-            short_guard=short_guard,
-            flirt_guard=flirt_guard,
-            rude_guard=rude_guard,
+            mood_desc=signals.mood,
+            short_guard=signals.short_guard,
+            flirt_guard=signals.flirt_guard,
+            rude_guard=signals.rude_guard,
+            sexual_guard=signals.sexual_guard,
+            negging_guard=signals.negging_guard,
         )
         history_context = _history_context(history)
         context_sections: list[str] = []
@@ -345,7 +408,7 @@ async def handle_turn(
         )
         if new_thread_id:
             _store_thread_id(chat_id, influencer_id, new_thread_id)
-        reply = _polish_reply(reply, history, short_guard or flirt_guard)
+        reply = _polish_reply(reply, history, signals.short_guard or signals.flirt_guard)
 
         history.add_user_message(message)
         history.add_ai_message(reply)
