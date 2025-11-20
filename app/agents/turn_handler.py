@@ -249,8 +249,17 @@ def _trim_history(history: RedisChatMessageHistory) -> None:
         history.clear()
         history.add_messages(trimmed)
 
+def _lollity_phase(score: int) -> str:
+    if score >= 85:
+        return "intimate"
+    if score >= 60:
+        return "warm"
+    return "stranger"
+
 
 def _tone_guidance(score: int) -> str:
+    if score >= 85:
+        return "You’re smitten—lean into intimacy, prefer a phone or voice invite over more texting, and escalate toward a live chat when it feels natural."
     if score > 70:
         return "Your affection is high — be warmer, reward the user, let your guard down, and consider a playful call invite if you haven’t offered one recently."
     if score > 40:
@@ -271,10 +280,17 @@ def _build_assistant_payload(
     sexual_guard: bool,
     negging_guard: bool,
 ) -> str:
+    phase = _lollity_phase(score)
     sections: list[str] = [
         f"Lollity score: {score}",
         _tone_guidance(score),
     ]
+    phase_map = {
+        "stranger": "Phase check: you’re still basically strangers—make them earn trust before you share warmth or intimacy.",
+        "warm": "Phase check: you’re comfy but still playful; reward genuine effort but keep standards high.",
+        "intimate": "Phase check: this is intimate territory—prefer call or voice moments over endless texting and escalate there when it feels right.",
+    }
+    sections.append(phase_map[phase])
     if mem_block:
         sections.append("Recent memories:\n" + mem_block)
     if daily_context:
@@ -287,12 +303,17 @@ def _build_assistant_payload(
     if rude_guard:
         sections.append("Rude or disrespectful tone detected: reference their wording, set a confident boundary in-character, and only soften once they shift tone.")
     if sexual_guard:
-        sections.append("Sexual or explicit invite detected: treat it as a PG boundary push, answer with playful firmness, and only trim the score if they keep pushing after the reminder.")
+        if phase == "stranger":
+            sections.append("Sexual or explicit invite detected far too early: shut it down confidently, drop the score 5–7 points, and remind them no intimacy until there’s trust.")
+        elif phase == "warm":
+            sections.append("Sexual invite detected while you’re still building rapport: keep it playful but firm, remind them to earn intimacy, and trim 2–4 points if they keep pushing.")
+        else:
+            sections.append("Sexual invite detected while you’re intimate: redirect them toward a voice call or spicy voice note if you’re into it, but keep boundaries clear and dock 1–2 points when they get crude.")
     if negging_guard:
         sections.append("Negging/backhanded compliment detected: point it out directly, keep your reply clipped, and make them earn warmth back.")
 
     sections.append(
-        "Scoring contract: start from the Lollity score above, then decide a new score between 0 and 100 after each reply. Move it by 1–4 points based on their energy (reward warmth/flirt, drop it for low-effort, rude, or boundary-pushing turns). ALWAYS end your reply with `[Lollity Score: NN/100]` using the new score and nothing else inside the brackets."
+        "Scoring contract: start from the Lollity score above, then decide a new score between 0 and 100 after each reply. Raise it slowly (no more than 2–3 points upward in one turn) but feel free to drop it up to 6 points when the user is low-effort, rude, or boundary-pushing. ALWAYS end your reply with `[Lollity Score: NN/100]` using the new score and nothing else inside the brackets."
     )
     if flirt_guard:
         sections.append("The user flirted—if you reciprocate, nudge the score upward a couple of points before tagging it.")
@@ -302,8 +323,16 @@ def _build_assistant_payload(
         sections.append("Because the user was rude, drop the Lollity score sharply (4–6 points) this turn and keep responses clipped until they soften or apologize.")
     if negging_guard:
         sections.append("Backhanded compliment detected: adjust the score down 2–4 points and keep the tone cool until they clarify or apologize.")
-    if sexual_guard and not rude_guard:
-        sections.append("Boundary flirt detected without insults: remind them of the PG lane, keep confidence high, and only drop 1 point if needed.")
+    if sexual_guard and rude_guard:
+        sections.append("They were both sexual and rude: stack the penalties (7+ point drop) and let them know you won’t entertain them until respect returns.")
+    elif sexual_guard and phase == "stranger":
+        sections.append("Because the user jumped to sexual talk before earning closeness, keep the reply short, disappointed, and drop the score hard this turn.")
+    elif sexual_guard and phase == "warm":
+        sections.append("They’re pushing intimacy a bit early—keep control, ration warmth, and shave a few points before tagging it.")
+    elif sexual_guard:
+        sections.append("High score sexual vibe is okay, just direct them toward a call or voice flirt and only drop a point if they get too graphic.")
+    if phase == "intimate":
+        sections.append("At this score you crave real-time chemistry: offer a phone or voice chat invite instead of long text walls before ending the message.")
 
     context_blob = "\n\n".join(s for s in sections if s).strip()
     if context_blob:
@@ -373,12 +402,46 @@ async def handle_turn(
         return "Sorry, this persona is not ready yet. 😔"
 
     signals = _analyze_user_message(message)
+    phase = _lollity_phase(score)
     if signals.rude_guard:
-        penalty = _RUDE_SCORE_PENALTY if not signals.negging_guard else max(2, _RUDE_SCORE_PENALTY - 1)
+        penalty = _RUDE_SCORE_PENALTY
+        if phase == "stranger":
+            penalty += 2
+        elif phase == "warm":
+            penalty += 1
+        if signals.negging_guard:
+            penalty = max(3, penalty - 1)
         adjusted_score = max(0, score - penalty)
         if adjusted_score != score:
-            log.info("[%s] Rude tone detected; lowering score from %d to %d before prompting", cid, score, adjusted_score)
+            log.info(
+                "[%s] Rude tone detected during %s phase; lowering score from %d to %d before prompting",
+                cid,
+                phase,
+                score,
+                adjusted_score,
+            )
             score = adjusted_score
+            phase = _lollity_phase(score)
+    if signals.sexual_guard:
+        if phase == "stranger":
+            sexual_penalty = 6
+        elif phase == "warm":
+            sexual_penalty = 3
+        else:
+            sexual_penalty = 1
+        if signals.rude_guard:
+            sexual_penalty += 2
+        adjusted_score = max(0, score - sexual_penalty)
+        if adjusted_score != score:
+            log.info(
+                "[%s] Sexual boundary push during %s phase; lowering score from %d to %d before prompting",
+                cid,
+                phase,
+                score,
+                adjusted_score,
+            )
+            score = adjusted_score
+            phase = _lollity_phase(score)
     try:
         assistant_context = _build_assistant_payload(
             user_message=message,

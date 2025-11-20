@@ -12,7 +12,12 @@ def get_score(user: str, persona: str) -> int:
 
 def update_score(user: str, persona: str, new_score: int):
     key = SCORE_KEY.format(user=user, persona=persona)
-    redis_client.set(key, new_score, ex=settings.SCORE_TTL)
+    current_raw = redis_client.get(key)
+    current_score = int(current_raw) if current_raw is not None else 50
+    bounded = max(0, min(100, new_score))
+    if bounded > current_score:
+        bounded = min(current_score + 3, bounded)
+    redis_client.set(key, bounded, ex=settings.SCORE_TTL)
 
 def extract_score(text: str, default: int) -> int:
     m = SCORE_RE.search(text)
