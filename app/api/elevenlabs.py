@@ -628,7 +628,7 @@ async def finalize_conversation(
     }
 
 
-@router.post("/update-prompt")
+@router.post("/update-prompt-elevenlabs")
 async def update_elevenlabs_prompt(
     body: UpdatePromptBody,
     db: AsyncSession = Depends(get_db),
@@ -643,7 +643,6 @@ async def update_elevenlabs_prompt(
     
     At least one of agent_id or influencer_id must be provided.
     """
-    # Resolve agent_id and update database if influencer_id is provided
     agent_id = body.agent_id
     influencer = None
     
