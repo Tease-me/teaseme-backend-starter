@@ -628,7 +628,7 @@ async def finalize_conversation(
     }
 
 
-@router.post("/update-prompt-elevenlabs")
+@router.post("/update-prompt")
 async def update_elevenlabs_prompt(
     body: UpdatePromptBody,
     db: AsyncSession = Depends(get_db),
