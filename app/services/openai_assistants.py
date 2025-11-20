@@ -74,6 +74,7 @@ async def send_agent_message(
     message: str,
     context: str | None = None,
     thread_id: str | None = None,
+    max_attempts: int = 2,
 ) -> Tuple[str, str]:
     if not assistant_id:
         raise HTTPException(500, "Assistant ID missing for influencer.")
@@ -86,43 +87,77 @@ async def send_agent_message(
             content=[{"type": "text", "text": message}],
         )
 
-    thread_id = thread_id or await _create_thread()
+    attempt = 0
+    last_exc: HTTPException | None = None
+    working_thread_id = thread_id
 
-    try:
-        await _append_message(thread_id)
-    except NotFoundError:
-        thread_id = await _create_thread()
-        await _append_message(thread_id)
+    while attempt < max_attempts:
+        attempt += 1
+        tid = working_thread_id or await _create_thread()
 
-    run_kwargs = {
-        "thread_id": thread_id,
-        "assistant_id": assistant_id,
-    }
-    if context:
-        run_kwargs["additional_instructions"] = context
+        try:
+            await _append_message(tid)
+        except NotFoundError:
+            tid = await _create_thread()
+            await _append_message(tid)
 
-    try:
-        run = await _run_sync(_client.beta.threads.runs.create, **run_kwargs)
-    except NotFoundError:
-        thread_id = await _create_thread()
-        await _append_message(thread_id)
-        run_kwargs["thread_id"] = thread_id
-        run = await _run_sync(_client.beta.threads.runs.create, **run_kwargs)
+        run_kwargs = {
+            "thread_id": tid,
+            "assistant_id": assistant_id,
+        }
+        if context:
+            run_kwargs["additional_instructions"] = context
 
-    run = await _wait_for_run(thread_id, run.id)
+        try:
+            run = await _run_sync(_client.beta.threads.runs.create, **run_kwargs)
+        except NotFoundError:
+            tid = await _create_thread()
+            await _append_message(tid)
+            run_kwargs["thread_id"] = tid
+            run = await _run_sync(_client.beta.threads.runs.create, **run_kwargs)
 
-    messages = await _run_sync(_client.beta.threads.messages.list, thread_id=thread_id, order="desc", limit=10)
-    reply_text = ""
-    for msg in getattr(messages, "data", []):
-        if getattr(msg, "role", None) == "assistant" and getattr(msg, "run_id", None) == run.id:
-            reply_text = _extract_text(msg)
-            if reply_text:
-                break
+        try:
+            run = await _wait_for_run(tid, run.id)
+        except HTTPException as exc:
+            last_exc = exc
+            log.warning(
+                "Assistant run failed (attempt %d/%d) for thread %s: %s",
+                attempt,
+                max_attempts,
+                tid,
+                exc.detail,
+            )
+            working_thread_id = None  # force a new thread next attempt
+            if attempt >= max_attempts:
+                raise
+            continue
 
-    if not reply_text:
-        raise HTTPException(502, "Assistant responded without text.")
+        messages = await _run_sync(_client.beta.threads.messages.list, thread_id=tid, order="desc", limit=10)
+        reply_text = ""
+        for msg in getattr(messages, "data", []):
+            if getattr(msg, "role", None) == "assistant" and getattr(msg, "run_id", None) == run.id:
+                reply_text = _extract_text(msg)
+                if reply_text:
+                    break
 
-    return reply_text, thread_id
+        if not reply_text:
+            last_exc = HTTPException(502, "Assistant responded without text.")
+            log.error(
+                "Assistant returned no text (attempt %d/%d) for thread %s.",
+                attempt,
+                max_attempts,
+                tid,
+            )
+            working_thread_id = None
+            if attempt >= max_attempts:
+                raise last_exc
+            continue
+
+        return reply_text, tid
+
+    if last_exc:
+        raise last_exc
+    raise HTTPException(502, "Assistant failed without raising an error.")
 
 
 async def _wait_for_run(thread_id: str, run_id: str, timeout: float = 60.0, poll: float = 0.5):
@@ -133,7 +168,20 @@ async def _wait_for_run(thread_id: str, run_id: str, timeout: float = 60.0, poll
         if status == "completed":
             return run
         if status in {"failed", "cancelled", "expired"}:
-            raise HTTPException(502, f"Assistant run {status}.")
+            last_error = getattr(run, "last_error", None)
+            error_code = getattr(last_error, "code", None)
+            error_message = getattr(last_error, "message", None)
+            detail_msg = f"Assistant run {status}."
+            if error_code or error_message:
+                detail_msg += f" last_error={error_code or 'unknown'}: {error_message or 'no details'}"
+            log.error(
+                "Assistant run %s for thread %s (run %s). %s",
+                status,
+                thread_id,
+                run_id,
+                detail_msg,
+            )
+            raise HTTPException(502, detail_msg)
         await asyncio.sleep(poll)
     raise HTTPException(504, "Assistant response timed out.")
 
