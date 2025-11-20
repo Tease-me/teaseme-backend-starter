@@ -14,7 +14,7 @@ from app.agents.prompt_utils import (
     GLOBAL_PROMPT,
     get_today_script,
 )
-from app.agents.scoring import extract_score, get_score, update_score
+from app.agents.scoring import extract_score, get_score, update_score, format_score_value
 from app.core.config import settings
 from app.db.models import Influencer
 from app.services.openai_assistants import send_agent_message
@@ -52,6 +52,7 @@ _NEGGING_NEGATIVE_RE = re.compile(
 )
 _SECOND_PERSON_RE = re.compile(r"\b(u|you|ya|ur|you're|youre)\b", re.IGNORECASE)
 _RUDE_SCORE_PENALTY = 5
+_SCORE_TAG_RE = re.compile(r"\[Lollity Score:[^\]]+\]", re.IGNORECASE)
 
 THREAD_KEY = "assistant_thread:{chat}:{persona}"
 _thread_store = Redis.from_url(settings.REDIS_URL, decode_responses=True)
@@ -313,7 +314,7 @@ def _build_assistant_payload(
         sections.append("Negging/backhanded compliment detected: point it out directly, keep your reply clipped, and make them earn warmth back.")
 
     sections.append(
-        "Scoring contract: start from the Lollity score above, then decide a new score between 0 and 100 after each reply. Raise it slowly (no more than 2–3 points upward in one turn) but feel free to drop it up to 6 points when the user is low-effort, rude, or boundary-pushing. ALWAYS end your reply with `[Lollity Score: NN/100]` using the new score and nothing else inside the brackets."
+        "Scoring contract: start from the Lollity score above, then decide a new score between 0 and 100 after each reply. Raise it slowly (no more than 2–3 points upward in one turn) but feel free to drop it up to 6 points when the user is low-effort, rude, or boundary-pushing. ALWAYS end your reply with `[Lollity Score: NN/100]` using the new score (include decimals when needed, e.g., 62.5 or 71.25) and nothing else inside the brackets."
     )
     if flirt_guard:
         sections.append("The user flirted—if you reciprocate, nudge the score upward a couple of points before tagging it.")
@@ -472,15 +473,16 @@ async def handle_turn(
         if new_thread_id:
             _store_thread_id(chat_id, influencer_id, new_thread_id)
         reply = _polish_reply(reply, history, signals.short_guard or signals.flirt_guard)
-
         history.add_user_message(message)
-        history.add_ai_message(reply)
-        _trim_history(history)
     except Exception as exc:
         log.error("[%s] Assistant invocation failed: %s", cid, exc, exc_info=True)
         return "Sorry, something went wrong. 😔"
 
-    update_score(user_id or chat_id, influencer_id, extract_score(reply, score))
+    requested_score = extract_score(reply, score)
+    stored_score = update_score(user_id or chat_id, influencer_id, requested_score)
+    reply = _normalize_lollity_tag(reply, stored_score)
+    history.add_ai_message(reply)
+    _trim_history(history)
 
     recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
     try:
@@ -497,3 +499,11 @@ async def handle_turn(
     if is_audio:
         return sanitize_tts_text(reply)
     return reply
+
+
+def _normalize_lollity_tag(text: str, score: float) -> str:
+    formatted = format_score_value(score)
+    tag = f"[Lollity Score: {formatted}/100]"
+    if _SCORE_TAG_RE.search(text):
+        return _SCORE_TAG_RE.sub(tag, text, count=1)
+    return text + (" " if text and not text.endswith(" ") else "") + tag

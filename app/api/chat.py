@@ -54,6 +54,7 @@ _buffers: Dict[str, _Buf] = {}  # chat_id -> _Buf
 MAX_BUFFERS = 1000  # Maximum number of active buffers to prevent memory issues
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?…])\s+")
+_LOLLITY_TAG_ONLY_RE = re.compile(r"^\[Lollity Score:[^\]]+\]$", re.IGNORECASE)
 _DOUBLE_TEXT_MIN_SENTENCES = 3
 _DOUBLE_TEXT_MIN_LENGTH = 220
 _DOUBLE_TEXT_MIN_SEGMENT_LEN = 25
@@ -78,6 +79,18 @@ def _launch_flush(chat_id: str, ws: WebSocket, influencer_id: str, user_id: int,
     return task
 
 
+def _merge_trailing_lollity(chunks: List[str]) -> List[str]:
+    if not chunks:
+        return chunks
+    if len(chunks) < 2:
+        return chunks
+    tail = chunks[-1].strip()
+    if _LOLLITY_TAG_ONLY_RE.match(tail):
+        chunks[-2] = f"{chunks[-2].rstrip()} {tail}"
+        chunks.pop()
+    return chunks
+
+
 def _split_into_double_text_chunks(text: str, allow_split: bool = True) -> List[str]:
     """
     Break a single assistant reply into at most two conversational bubbles.
@@ -97,7 +110,7 @@ def _split_into_double_text_chunks(text: str, allow_split: bool = True) -> List[
         first = " ".join(sentences[:boundary]).strip()
         second = " ".join(sentences[boundary:]).strip()
         if len(first) >= _DOUBLE_TEXT_MIN_SEGMENT_LEN and len(second) >= _DOUBLE_TEXT_MIN_SEGMENT_LEN:
-            return [first, second]
+            return _merge_trailing_lollity([first, second])
 
     if len(stripped) >= _DOUBLE_TEXT_MIN_LENGTH:
         midpoint = len(stripped) // 2
@@ -113,9 +126,9 @@ def _split_into_double_text_chunks(text: str, allow_split: bool = True) -> List[
                 first = stripped[:pos].strip()
                 second = stripped[pos:].strip()
                 if len(first) >= _DOUBLE_TEXT_MIN_SEGMENT_LEN and len(second) >= _DOUBLE_TEXT_MIN_SEGMENT_LEN:
-                    return [first, second]
+                    return _merge_trailing_lollity([first, second])
 
-    return [stripped]
+    return _merge_trailing_lollity([stripped])
 
 
 async def _save_ai_messages(db_ai: AsyncSession, chat_id: str, chunks: List[str]) -> None:
