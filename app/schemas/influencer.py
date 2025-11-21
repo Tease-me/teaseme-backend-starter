@@ -8,6 +8,7 @@ class InfluencerBase(BaseModel):
     daily_scripts: Optional[List[str]] = None
     voice_prompt: Optional[str] = None
     influencer_agent_id_third_part: Optional[str] = None
+    influencer_gpt_agent_id: Optional[str] = None
     created_at: Optional[datetime] = None
 
     @field_validator("created_at")
