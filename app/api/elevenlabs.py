@@ -24,6 +24,7 @@ log = logging.getLogger(__name__)
 
 ELEVENLABS_API_KEY = settings.ELEVENLABS_API_KEY
 ELEVEN_BASE_URL = "https://api.elevenlabs.io/v1"
+DEFAULT_ELEVENLABS_VOICE_ID = settings.ELEVENLABS_VOICE_ID or None
 
 # Temporary in-memory greetings (no DB). Keep the content SFW and generic.
 _GREETINGS: Dict[str, List[str]] = {
@@ -188,7 +189,6 @@ async def get_agent_id_from_influencer(db: AsyncSession, influencer_id: str) -> 
 
 
 def _build_agent_patch_payload(
-    agent_id: str,
     *,
     first_message: Optional[str] = None,
     prompt_text: Optional[str] = None,
@@ -217,9 +217,49 @@ def _build_agent_patch_payload(
             prompt_block["max_tokens"] = max_tokens
         agent_cfg["prompt"] = prompt_block
 
+    return {"conversation_config": {"agent": agent_cfg}}
+
+
+def _build_agent_create_payload(
+    *,
+    name: Optional[str],
+    voice_id: str,
+    prompt_text: str,
+    first_message: Optional[str] = None,
+    language: str = "en",
+    llm: Optional[str] = None,
+    temperature: Optional[float] = None,
+    max_tokens: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Build the minimum viable request body for POST /v1/convai/agents/create.
+    ElevenLabs requires the full conversational config, so we include the agent + tts blocks.
+    """
+    if not voice_id:
+        raise HTTPException(400, "voice_id is required to create an ElevenLabs agent.")
+
+    agent_cfg: Dict[str, Any] = {
+        "first_message": first_message or "",
+        "language": language,
+        "prompt": {
+            "prompt": prompt_text or "",
+        },
+    }
+    if llm is not None:
+        agent_cfg["prompt"]["llm"] = llm
+    if temperature is not None:
+        agent_cfg["prompt"]["temperature"] = temperature
+    if max_tokens is not None:
+        agent_cfg["prompt"]["max_tokens"] = max_tokens
+
     return {
-        "agent_id": agent_id,
-        "conversation_config": {"agent": agent_cfg},
+        "name": name,
+        "conversation_config": {
+            "agent": agent_cfg,
+            "tts": {
+                "voice_id": voice_id,
+            },
+        },
     }
 
 
@@ -235,7 +275,6 @@ async def _patch_agent_config(
 ) -> None:
     """PATCH /convai/agents/{agent_id} with the minimal update payload."""
     payload = _build_agent_patch_payload(
-        agent_id,
         first_message=first_message,
         prompt_text=prompt_text,
         llm=llm,
@@ -273,35 +312,146 @@ async def _patch_agent_config(
         except Exception:
             pass
         
-        raise HTTPException(
-            status_code=424,
-            detail=error_detail,
+        raise HTTPException(status_code=resp.status_code, detail=error_detail)
+
+
+async def _create_agent(
+    client: httpx.AsyncClient,
+    *,
+    name: Optional[str],
+    voice_id: str,
+    prompt_text: str,
+    first_message: Optional[str] = None,
+    language: str = "en",
+    llm: Optional[str] = None,
+    temperature: Optional[float] = None,
+    max_tokens: Optional[int] = None,
+) -> str:
+    """
+    POST /convai/agents/create and return the new agent id.
+    """
+    payload = _build_agent_create_payload(
+        name=name,
+        voice_id=voice_id,
+        prompt_text=prompt_text,
+        first_message=first_message,
+        language=language,
+        llm=llm,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+
+    try:
+        resp = await client.post(
+            "/convai/agents/create",
+            headers=_headers(),
+            json=payload,
+            timeout=20.0,
         )
+    except httpx.RequestError as e:
+        log.exception("Network error creating ElevenLabs agent: %s", e)
+        raise HTTPException(status_code=502, detail="Upstream unavailable")
+
+    if resp.status_code >= 400:
+        error_text = resp.text[:500] if resp.text else "No error details"
+        log.error("ElevenLabs agent creation failed: %s %s", resp.status_code, error_text)
+        error_detail = f"Failed to create ElevenLabs agent: {resp.status_code}"
+        try:
+            error_json = resp.json()
+            if isinstance(error_json, dict) and "detail" in error_json:
+                error_detail = f"ElevenLabs API error: {error_json['detail']}"
+            elif isinstance(error_json, dict) and "message" in error_json:
+                error_detail = f"ElevenLabs API error: {error_json['message']}"
+        except Exception:
+            pass
+        raise HTTPException(status_code=resp.status_code, detail=error_detail)
+
+    data = resp.json()
+    new_agent_id = data.get("agent_id")
+    if not new_agent_id:
+        log.error("ElevenLabs agent creation response missing agent_id: %s", data)
+        raise HTTPException(
+            status_code=502,
+            detail="ElevenLabs agent creation succeeded but returned no agent_id.",
+        )
+    return new_agent_id
 
 
 # === DO NOT RENAME: you said you call this elsewhere ===
 async def _push_prompt_to_elevenlabs(
-    agent_id: str,
+    agent_id: Optional[str],
     prompt_text: str,
     first_message: Optional[str] = None,
     *,
+    voice_id: Optional[str] = None,
+    agent_name: Optional[str] = None,
+    language: str = "en",
     llm: Optional[str] = None,
     temperature: Optional[float] = None,
     max_tokens: Optional[int] = None,
-) -> None:
+) -> str:
     """
     Update the agent's prompt (and optionally first_message) on ElevenLabs.
+    When no agent_id exists (or PATCH returns 404), a new agent will be created and the agent_id returned.
     """
+    resolved_voice_id = voice_id or DEFAULT_ELEVENLABS_VOICE_ID
+
+    log.debug(
+        "ElevenLabs sync start agent=%s influencer=%s voice=%s has_prompt=%s",
+        agent_id,
+        agent_name,
+        resolved_voice_id,
+        bool(prompt_text),
+    )
+
     async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
-        await _patch_agent_config(
+        if agent_id:
+            try:
+                log.info("Patching existing ElevenLabs agent %s", agent_id)
+                await _patch_agent_config(
+                    client,
+                    agent_id=agent_id,
+                    first_message=first_message,
+                    prompt_text=prompt_text,
+                    llm=llm,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                return agent_id
+            except HTTPException as exc:
+                if exc.status_code != 404:
+                    raise
+                log.warning(
+                    "ElevenLabs agent %s not found; creating a new one (influencer=%s).",
+                    agent_id,
+                    agent_name or "unknown",
+                )
+
+        if not resolved_voice_id:
+            log.error("Cannot create ElevenLabs agent; missing voice_id (influencer=%s).", agent_name)
+            raise HTTPException(
+                status_code=400,
+                detail="voice_id is required to create a new ElevenLabs agent.",
+            )
+
+        new_agent_id = await _create_agent(
             client,
-            agent_id,
-            first_message=first_message,
+            name=agent_name,
+            voice_id=resolved_voice_id,
             prompt_text=prompt_text,
+            first_message=first_message,
+            language=language,
             llm=llm,
             temperature=temperature,
             max_tokens=max_tokens,
         )
+        log.info(
+            "Created new ElevenLabs agent %s for influencer=%s voice=%s",
+            new_agent_id,
+            agent_name or "unknown",
+            resolved_voice_id,
+        )
+        return new_agent_id
 
 
 async def _get_conversation_signed_url(client: httpx.AsyncClient, agent_id: str) -> str:
@@ -651,7 +801,15 @@ async def update_elevenlabs_prompt(
     """
     agent_id = body.agent_id
     influencer = None
+    agent_name: Optional[str] = None
+    voice_id: Optional[str] = None
     
+    log.info(
+        "update_elevenlabs_prompt called agent=%s influencer=%s",
+        agent_id,
+        body.influencer_id,
+    )
+
     if body.influencer_id:
         influencer = await db.get(Influencer, body.influencer_id)
         if influencer is None:
@@ -660,30 +818,34 @@ async def update_elevenlabs_prompt(
                 detail=f"Influencer with id '{body.influencer_id}' not found",
             )
         
-        # Get agent_id from influencer if not provided directly
+        # Get agent metadata
+        agent_name = getattr(influencer, "display_name", None) or influencer.id
+        voice_id = getattr(influencer, "voice_id", None)
+        if not voice_id and DEFAULT_ELEVENLABS_VOICE_ID:
+            voice_id = DEFAULT_ELEVENLABS_VOICE_ID
+            influencer.voice_id = voice_id
         if not agent_id:
             agent_id = getattr(influencer, "influencer_agent_id_third_part", None)
-            if not agent_id:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Could not resolve agent_id. Please check that the influencer has an agent_id configured.",
-                )
         
         # Update database
         influencer.voice_prompt = body.voice_prompt
     
-    if not agent_id:
+    resolved_voice_id = voice_id or DEFAULT_ELEVENLABS_VOICE_ID
+
+    if not agent_id and not resolved_voice_id:
         raise HTTPException(
             status_code=400,
-            detail="Could not resolve agent_id. Please provide either agent_id or influencer_id with a configured agent_id.",
+            detail="Could not resolve agent_id. Provide either agent_id or configure a voice_id (global default also missing).",
         )
     
     # Update ElevenLabs
     try:
-        await _push_prompt_to_elevenlabs(
+        agent_id = await _push_prompt_to_elevenlabs(
             agent_id=agent_id,
             prompt_text=body.voice_prompt,
             first_message=body.first_message,
+            voice_id=resolved_voice_id,
+            agent_name=agent_name,
         )
     except HTTPException as e:
         raise e
@@ -693,6 +855,9 @@ async def update_elevenlabs_prompt(
             status_code=500,
             detail=f"Failed to update prompt: {str(e)}",
         )
+    
+    if influencer:
+        influencer.influencer_agent_id_third_part = agent_id
     
     # Commit database changes if influencer was updated (only if ElevenLabs update succeeded)
     if influencer and auto_commit:
