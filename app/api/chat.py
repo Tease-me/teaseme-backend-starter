@@ -615,7 +615,7 @@ async def get_chat_history(
         messages=messages_schema
     )
 
-@router.post("/chat_audio/")
+@router.post("/chat_audio")
 async def chat_audio(
     file: UploadFile = File(...),
     chat_id: str = Form(...),
