@@ -40,7 +40,7 @@ async def start_chat(
 
 # ---------- Buffer state ----------
 class _Buf:
-    __slots__ = ("messages", "timer", "lock", "flush_task", "active_messages")
+    __slots__ = ("messages", "timer", "lock", "flush_task", "active_messages", "prefer_single_chunk")
 
     def __init__(self) -> None:
         self.messages: List[str] = []
@@ -48,11 +48,13 @@ class _Buf:
         self.lock = asyncio.Lock()
         self.flush_task: Optional[asyncio.Task] = None
         self.active_messages: Optional[List[str]] = None
+        self.prefer_single_chunk: bool = False
 
 _buffers: Dict[str, _Buf] = {}  # chat_id -> _Buf
 MAX_BUFFERS = 1000  # Maximum number of active buffers to prevent memory issues
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?…])\s+")
+_LOLLITY_TAG_ONLY_RE = re.compile(r"^\[Lollity Score:[^\]]+\]$", re.IGNORECASE)
 _DOUBLE_TEXT_MIN_SENTENCES = 3
 _DOUBLE_TEXT_MIN_LENGTH = 220
 _DOUBLE_TEXT_MIN_SEGMENT_LEN = 25
@@ -77,7 +79,19 @@ def _launch_flush(chat_id: str, ws: WebSocket, influencer_id: str, user_id: int,
     return task
 
 
-def _split_into_double_text_chunks(text: str) -> List[str]:
+def _merge_trailing_lollity(chunks: List[str]) -> List[str]:
+    if not chunks:
+        return chunks
+    if len(chunks) < 2:
+        return chunks
+    tail = chunks[-1].strip()
+    if _LOLLITY_TAG_ONLY_RE.match(tail):
+        chunks[-2] = f"{chunks[-2].rstrip()} {tail}"
+        chunks.pop()
+    return chunks
+
+
+def _split_into_double_text_chunks(text: str, allow_split: bool = True) -> List[str]:
     """
     Break a single assistant reply into at most two conversational bubbles.
     Long or multi-sentence replies sound more natural when delivered as staggered texts.
@@ -87,6 +101,8 @@ def _split_into_double_text_chunks(text: str) -> List[str]:
     stripped = text.strip()
     if not stripped:
         return [text]
+    if not allow_split:
+        return [stripped]
 
     sentences = [s.strip() for s in _SENTENCE_SPLIT_RE.split(stripped) if s.strip()]
     if len(sentences) >= _DOUBLE_TEXT_MIN_SENTENCES:
@@ -94,7 +110,7 @@ def _split_into_double_text_chunks(text: str) -> List[str]:
         first = " ".join(sentences[:boundary]).strip()
         second = " ".join(sentences[boundary:]).strip()
         if len(first) >= _DOUBLE_TEXT_MIN_SEGMENT_LEN and len(second) >= _DOUBLE_TEXT_MIN_SEGMENT_LEN:
-            return [first, second]
+            return _merge_trailing_lollity([first, second])
 
     if len(stripped) >= _DOUBLE_TEXT_MIN_LENGTH:
         midpoint = len(stripped) // 2
@@ -110,9 +126,9 @@ def _split_into_double_text_chunks(text: str) -> List[str]:
                 first = stripped[:pos].strip()
                 second = stripped[pos:].strip()
                 if len(first) >= _DOUBLE_TEXT_MIN_SEGMENT_LEN and len(second) >= _DOUBLE_TEXT_MIN_SEGMENT_LEN:
-                    return [first, second]
+                    return _merge_trailing_lollity([first, second])
 
-    return [stripped]
+    return _merge_trailing_lollity([stripped])
 
 
 async def _save_ai_messages(db_ai: AsyncSession, chat_id: str, chunks: List[str]) -> None:
@@ -159,6 +175,7 @@ async def _queue_message(
     user_id: int,
     db: AsyncSession,
     timeout_sec: float = 2.5,
+    prefer_single_chunk: bool = False,
 ) -> None:
     # Prevent memory issues by limiting buffer count
     pending_old_cancel: Optional[asyncio.Task] = None
@@ -186,6 +203,7 @@ async def _queue_message(
     flush_now = False
     pending_cancel: Optional[asyncio.Task] = None
     async with buf.lock:
+        buf.prefer_single_chunk = prefer_single_chunk
         buf.messages.append(msg)
         log.info("[BUF %s] queued: %r (len=%d)", chat_id, msg, len(buf.messages))
 
@@ -243,6 +261,7 @@ async def _flush_buffer_without_ws(chat_id: str, influencer_id: str, user_id: in
     if not buf:
         return
 
+    prefer_single_chunk = False
     async with buf.lock:
         payload = []
         if buf.active_messages:
@@ -251,6 +270,8 @@ async def _flush_buffer_without_ws(chat_id: str, influencer_id: str, user_id: in
         payload.extend(m.strip() for m in buf.messages if m and m.strip())
         buf.messages.clear()
         buf.timer = None
+        prefer_single_chunk = buf.prefer_single_chunk
+        buf.prefer_single_chunk = False
         user_text = " ".join(payload).strip()
 
     if not user_text:
@@ -292,7 +313,7 @@ async def _flush_buffer_without_ws(chat_id: str, influencer_id: str, user_id: in
         log.exception("[BUF %s] handle_turn error (no-WS)", chat_id)
         return
 
-    chunks = _split_into_double_text_chunks(reply)
+    chunks = _split_into_double_text_chunks(reply, allow_split=not prefer_single_chunk)
 
     # 3) Persist AI reply to DB (client will get it on reconnect via chat history)
     async with SessionLocal() as db_ai:
@@ -313,6 +334,7 @@ async def _flush_buffer(chat_id: str, ws: WebSocket, influencer_id: str, user_id
         return
 
     payload: Optional[List[str]] = None
+    prefer_single_chunk = False
     try:
         async with buf.lock:
             cleaned = [m.strip() for m in buf.messages if m and m.strip()]
@@ -322,6 +344,8 @@ async def _flush_buffer(chat_id: str, ws: WebSocket, influencer_id: str, user_id
             buf.messages.clear()
             buf.timer = None
             buf.active_messages = cleaned.copy()
+            prefer_single_chunk = buf.prefer_single_chunk
+            buf.prefer_single_chunk = False
 
         user_text = " ".join(payload).strip() if payload else ""
         if not user_text:
@@ -429,7 +453,7 @@ async def _flush_buffer(chat_id: str, ws: WebSocket, influencer_id: str, user_id
                 pass
             return
 
-        chunks = _split_into_double_text_chunks(reply)
+        chunks = _split_into_double_text_chunks(reply, allow_split=not prefer_single_chunk)
 
         # 3) Persist AI reply – fresh session
         async with SessionLocal() as db_ai:
@@ -490,6 +514,17 @@ async def websocket_chat(
             text = (raw.get("message") or "").strip()
             if not text:
                 continue
+            reply_mode = (raw.get("reply_mode") or raw.get("response_mode") or raw.get("mode") or "").lower()
+            wants_audio = bool(
+                raw.get("audio_reply")
+                or raw.get("voice_reply")
+                or raw.get("audio_response")
+                or raw.get("voice_response")
+                or raw.get("as_audio")
+                or raw.get("speak")
+                or raw.get("tts")
+                or reply_mode in {"audio", "voice", "tts", "speech"}
+            )
 
             chat_id = raw.get("chat_id") or f"{user_id}_{influencer_id}"
 
@@ -519,7 +554,15 @@ async def websocket_chat(
                 log.exception("[WS %s] Failed to save user message", chat_id)
 
             # enqueue; buffer decides when to respond
-            await _queue_message(chat_id, text, ws, influencer_id, user_id, db)
+            await _queue_message(
+                chat_id,
+                text,
+                ws,
+                influencer_id,
+                user_id,
+                db,
+                prefer_single_chunk=wants_audio,
+            )
 
             # optional: client can force immediate flush by sending {"final": true}
             if raw.get("final") is True:
