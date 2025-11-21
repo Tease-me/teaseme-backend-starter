@@ -14,6 +14,7 @@ from app.api.elevenlabs import _push_prompt_to_elevenlabs
 from app.db.models import Influencer
 from app.db.session import get_db
 from app.services.openai_assistants import upsert_influencer_agent
+from app.core.config import settings
 
 log = logging.getLogger("persona-import")
 
@@ -1483,6 +1484,9 @@ async def import_persona_csv(
                 influencer.prompt_template = instructions
                 influencer.voice_prompt = voice_prompt
 
+            if not getattr(influencer, "voice_id", None) and settings.ELEVENLABS_VOICE_ID:
+                influencer.voice_id = settings.ELEVENLABS_VOICE_ID
+
             try:
                 assistant_id = await upsert_influencer_agent(
                     name=display_name,
@@ -1494,9 +1498,18 @@ async def import_persona_csv(
                 log.error("Failed to sync OpenAI assistant for %s: %s", influencer_id, exc)
 
             agent_id = getattr(influencer, "influencer_agent_id_third_part", None)
-            if agent_id:
+            resolved_voice_id = getattr(influencer, "voice_id", None) or settings.ELEVENLABS_VOICE_ID
+            should_sync_voice = voice_prompt and (agent_id or resolved_voice_id)
+            if should_sync_voice:
                 try:
-                    await _push_prompt_to_elevenlabs(agent_id, voice_prompt)
+                    new_agent_id = await _push_prompt_to_elevenlabs(
+                        agent_id,
+                        voice_prompt,
+                        voice_id=resolved_voice_id,
+                        agent_name=getattr(influencer, "display_name", None),
+                    )
+                    if new_agent_id and new_agent_id != agent_id:
+                        influencer.influencer_agent_id_third_part = new_agent_id
                 except HTTPException as e:
                     log.error("ElevenLabs sync failed for %s: %s", influencer.id, e.detail)
 
