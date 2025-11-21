@@ -639,7 +639,7 @@ async def save_pending_conversation(
     result = await db.execute(
         select(Chat)
         .where(Chat.user_id == user_id, Chat.influencer_id == influencer_id)
-        .order_by(Chat.created_at.desc())
+        .order_by(Chat.started_at.desc())
         .limit(1)
     )
     chat = result.scalar_one_or_none()
