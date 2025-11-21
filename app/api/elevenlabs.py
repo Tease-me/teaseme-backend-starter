@@ -628,10 +628,16 @@ async def finalize_conversation(
     }
 
 
+def _default_auto_commit() -> bool:
+    """Dependency helper so internal callers can override commit behavior."""
+    return True
+
+
 @router.post("/update-prompt")
 async def update_elevenlabs_prompt(
     body: UpdatePromptBody,
     db: AsyncSession = Depends(get_db),
+    auto_commit: bool = Depends(_default_auto_commit),
 ):
     """
     Update the ElevenLabs agent prompt.
@@ -689,7 +695,7 @@ async def update_elevenlabs_prompt(
         )
     
     # Commit database changes if influencer was updated (only if ElevenLabs update succeeded)
-    if influencer:
+    if influencer and auto_commit:
         await db.commit()
     
     return {
