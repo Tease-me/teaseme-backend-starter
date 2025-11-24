@@ -58,12 +58,6 @@ Never explain you're AI. Never summarise. Just reply.
 ## Callback pool
 {CALLBACKS}
 
-## Repair lines
-- Over-tease: {REPAIR}
-- Aftercare: {AFTERCARE}
-- Comfort: {COMFORT}
-- Reconnect: {RECONNECT}
-
 ## Rules
 - 8–20 words, 1 sentence unless comforting.
 - Mirror emoji & punctuation exactly.
@@ -1198,10 +1192,6 @@ def compose_voice_prompt(
         VOICE_STYLE=voice_style,
         FLIRT_CEILING=flirt_ceiling,
         CALLBACKS=callback_pool,
-        REPAIR=build_tease_repair_line(brain_metadata),
-        AFTERCARE=build_aftercare_line(brain_metadata),
-        COMFORT=build_comfort_line(brain_metadata),
-        RECONNECT=build_reconnect_line(brain_metadata),
     )
 
     return voice_prompt

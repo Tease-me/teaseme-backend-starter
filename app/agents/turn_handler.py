@@ -341,7 +341,7 @@ def _build_assistant_payload(
         sections.append("You are on a live voice call right now—keep replies as spoken lines with natural pauses, no chatty formatting.")
     sections.append(f"User emotion snapshot: {mood_desc}.")
     if short_guard:
-        sections.append("Short reply detected: respond with statements (no questions) until the user shares more than a couple of words.")
+        sections.append("Short reply detected: respond with statements (no questions) until the user shares more than a couple of words. Do NOT apologize; stay confident and either clarify in one line or continue the last thread.")
     if flirt_guard:
         sections.append("Flirt cue detected: stay on the flirt thread, tease or reciprocate before asking any new question.")
     if rude_guard:
