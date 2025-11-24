@@ -6,6 +6,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 from langchain_community.chat_message_histories import RedisChatMessageHistory
 from redis import Redis
+from sqlalchemy import select
 
 from app.agents.memory import find_similar_memories, store_fact
 from app.agents.prompts import FACT_EXTRACTOR, FACT_PROMPT
@@ -16,7 +17,7 @@ from app.agents.prompt_utils import (
 )
 from app.agents.scoring import extract_score, get_score, update_score, format_score_value
 from app.core.config import settings
-from app.db.models import Influencer
+from app.db.models import Influencer, Message
 from app.services.openai_assistants import send_agent_message
 from app.utils.tts_sanitizer import sanitize_tts_text
 
@@ -262,6 +263,33 @@ def _trim_history(history: RedisChatMessageHistory) -> None:
         history.clear()
         history.add_messages(trimmed)
 
+
+async def _hydrate_history_from_db(history: RedisChatMessageHistory, chat_id: str, db, limit: int = 30) -> None:
+    """
+    Seed Redis history from DB if empty (helps when switching between calls/text after TTL).
+    """
+    if history.messages or not db:
+        return
+    try:
+        result = await db.execute(
+            select(Message)
+            .where(Message.chat_id == chat_id)
+            .order_by(Message.created_at.asc())
+            .limit(limit)
+        )
+        rows = list(result.scalars().all())
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("history.hydrate_failed chat=%s err=%s", chat_id, exc)
+        return
+    for row in rows:
+        content = (row.content or "").strip()
+        if not content:
+            continue
+        if row.sender == "user":
+            history.add_user_message(content)
+        else:
+            history.add_ai_message(content)
+
 def _lollity_phase(score: int) -> str:
     if score >= 85:
         return "intimate"
@@ -408,6 +436,7 @@ async def handle_turn(
 
     daily_context = await get_today_script(db, influencer_id)
     history = redis_history(chat_id)
+    await _hydrate_history_from_db(history, chat_id, db)
     _trim_history(history)
     cached_thread_id = _get_thread_id(chat_id, influencer_id)
 

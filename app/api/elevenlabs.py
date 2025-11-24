@@ -20,6 +20,8 @@ from app.services.chat_service import get_or_create_chat
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from app.db.session import SessionLocal
+from app.utils.deps import get_current_user
+from app.api.utils import get_embedding
 
 router = APIRouter(prefix="/elevenlabs", tags=["elevenlabs"])
 log = logging.getLogger(__name__)
@@ -802,6 +804,12 @@ async def _persist_transcript_to_chat(
             else datetime.utcnow()
         )
 
+        embedding = None
+        try:
+            embedding = await get_embedding(text)
+        except Exception as exc:  # pragma: no cover - defensive
+            log.warning("persist_transcript.embed_failed chat=%s err=%s", chat_id, exc)
+
         seen.add((sender, text))
         new_messages.append(
             Message(
@@ -809,6 +817,7 @@ async def _persist_transcript_to_chat(
                 sender=sender,
                 content=text,
                 created_at=created_at,
+                embedding=embedding,
             )
         )
 
