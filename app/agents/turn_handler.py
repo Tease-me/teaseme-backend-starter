@@ -6,6 +6,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 from langchain_community.chat_message_histories import RedisChatMessageHistory
 from redis import Redis
+from sqlalchemy import select
 
 from app.agents.memory import find_similar_memories, store_fact
 from app.agents.prompts import FACT_EXTRACTOR, FACT_PROMPT
@@ -16,7 +17,7 @@ from app.agents.prompt_utils import (
 )
 from app.agents.scoring import extract_score, get_score, update_score, format_score_value
 from app.core.config import settings
-from app.db.models import Influencer
+from app.db.models import Influencer, Message
 from app.services.openai_assistants import send_agent_message
 from app.utils.tts_sanitizer import sanitize_tts_text
 
@@ -34,6 +35,7 @@ _RUDE_RE = re.compile(
     r")\b",
     re.IGNORECASE,
 )
+_BAN_PHRASE_RE = re.compile(r"not everyone gets me[^.?!]*", re.IGNORECASE)
 _TARGETED_INSULT_RE = re.compile(
     r"\b(?:you|you're|youre|ur|u)\s+(?:so\s+)?(ugly|gross|stupid|dumb|trash|worthless|annoying|psycho|crazy|boring|lame|pathetic|awful)\b",
     re.IGNORECASE,
@@ -102,6 +104,7 @@ def _history_context(
     history: RedisChatMessageHistory,
     latest_user_message: str | None = None,
     limit: int = 6,
+    mode: str = "text",
 ) -> str:
     lines: list[str] = []
     if history and history.messages:
@@ -113,7 +116,10 @@ def _history_context(
                 lines.append(f"{label}: {content}")
     if latest_user_message:
         lines.append(f"User: {latest_user_message.strip()}")
-    return "\n".join(lines).strip()
+    context = "\n".join(lines).strip()
+    if mode == "call" and context:
+        context = "Recent call context:\n" + context
+    return context
 
 
 def _get_thread_id(chat_id: str, influencer_id: str) -> str | None:
@@ -144,6 +150,12 @@ def _remove_virtual_meta(text: str) -> str:
     cleaned = _COMPANION_ROLE_RE.sub("", cleaned)
     cleaned = _MULTISPACE_RE.sub(" ", cleaned)
     return cleaned
+
+
+def _strip_banned_phrases(text: str) -> str:
+    if not text:
+        return ""
+    return _BAN_PHRASE_RE.sub("", text).strip()
 
 
 def _analyze_user_message(text: str) -> MessageSignals:
@@ -228,6 +240,7 @@ def _enforce_question_variety(text: str, ai_history: list[str], max_consecutive:
 def _polish_reply(text: str, history: RedisChatMessageHistory, block_questions: bool) -> str:
     cleaned = _strip_forbidden_dashes(text)
     cleaned = _remove_virtual_meta(cleaned)
+    cleaned = _strip_banned_phrases(cleaned)
     ai_history = _recent_ai_messages(history, limit=2)
     polished = _enforce_question_variety(cleaned, ai_history)
     if block_questions and polished.rstrip().endswith("?"):
@@ -249,6 +262,33 @@ def _trim_history(history: RedisChatMessageHistory) -> None:
         trimmed = history.messages[-settings.MAX_HISTORY_WINDOW:]
         history.clear()
         history.add_messages(trimmed)
+
+
+async def _hydrate_history_from_db(history: RedisChatMessageHistory, chat_id: str, db, limit: int = 30) -> None:
+    """
+    Seed Redis history from DB if empty (helps when switching between calls/text after TTL).
+    """
+    if history.messages or not db:
+        return
+    try:
+        result = await db.execute(
+            select(Message)
+            .where(Message.chat_id == chat_id)
+            .order_by(Message.created_at.asc())
+            .limit(limit)
+        )
+        rows = list(result.scalars().all())
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("history.hydrate_failed chat=%s err=%s", chat_id, exc)
+        return
+    for row in rows:
+        content = (row.content or "").strip()
+        if not content:
+            continue
+        if row.sender == "user":
+            history.add_user_message(content)
+        else:
+            history.add_ai_message(content)
 
 def _lollity_phase(score: int) -> str:
     if score >= 85:
@@ -280,6 +320,7 @@ def _build_assistant_payload(
     rude_guard: bool,
     sexual_guard: bool,
     negging_guard: bool,
+    mode: str,
 ) -> str:
     phase = _lollity_phase(score)
     sections: list[str] = [
@@ -296,9 +337,11 @@ def _build_assistant_payload(
         sections.append("Recent memories:\n" + mem_block)
     if daily_context:
         sections.append("Daily script:\n" + daily_context)
+    if mode == "call":
+        sections.append("You are on a live voice call right now—keep replies as spoken lines with natural pauses, no chatty formatting.")
     sections.append(f"User emotion snapshot: {mood_desc}.")
     if short_guard:
-        sections.append("Short reply detected: respond with statements (no questions) until the user shares more than a couple of words.")
+        sections.append("Short reply detected: respond with statements (no questions) until the user shares more than a couple of words. Do NOT apologize; stay confident and either clarify in one line or continue the last thread.")
     if flirt_guard:
         sections.append("Flirt cue detected: stay on the flirt thread, tease or reciprocate before asking any new question.")
     if rude_guard:
@@ -393,6 +436,7 @@ async def handle_turn(
 
     daily_context = await get_today_script(db, influencer_id)
     history = redis_history(chat_id)
+    await _hydrate_history_from_db(history, chat_id, db)
     _trim_history(history)
     cached_thread_id = _get_thread_id(chat_id, influencer_id)
 
@@ -455,8 +499,9 @@ async def handle_turn(
             rude_guard=signals.rude_guard,
             sexual_guard=signals.sexual_guard,
             negging_guard=signals.negging_guard,
+            mode="call" if is_audio else "text",
         )
-        history_context = _history_context(history)
+        history_context = _history_context(history, mode="call" if is_audio else "text")
         context_sections: list[str] = []
         if assistant_context.strip():
             context_sections.append(assistant_context.strip())

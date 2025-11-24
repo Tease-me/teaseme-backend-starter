@@ -64,6 +64,7 @@ class Message(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     chat_id: Mapped[str] = mapped_column(ForeignKey("chats.id"), index=True)
     sender: Mapped[str] = mapped_column(String)  # 'user' ou 'ai'
+    channel: Mapped[str] = mapped_column(String, default="text")  # 'text' or 'call'
     content: Mapped[str] = mapped_column(Text)
     audio_url: Mapped[str] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -137,6 +138,8 @@ class CallRecord(Base):
     )
     sid: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="pending")
+    call_duration_secs: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    transcript: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (

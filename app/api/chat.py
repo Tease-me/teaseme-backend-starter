@@ -28,6 +28,14 @@ ALGORITHM = settings.ALGORITHM
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
+
+async def _safe_embedding(text: str) -> Optional[list[float]]:
+    try:
+        return await get_embedding(text)
+    except Exception as exc:  # pragma: no cover - defensive
+        logging.getLogger(__name__).warning("embedding.failed err=%s", exc)
+        return None
+
 log = logging.getLogger("chat")
 
 @router.post("")
@@ -547,7 +555,15 @@ async def websocket_chat(
             # save user message (with embedding)
             try:
                 emb = await get_embedding(text)
-                db.add(Message(chat_id=chat_id, sender="user", content=text, embedding=emb))
+                db.add(
+                    Message(
+                        chat_id=chat_id,
+                        sender="user",
+                        channel="text",
+                        content=text,
+                        embedding=emb,
+                    )
+                )
                 await db.commit()
             except Exception:
                 await db.rollback()
@@ -712,11 +728,12 @@ async def chat_audio(
     embedding = await get_embedding(transcript_text)
     msg_user = Message(
         chat_id=chat_id,
-            sender="user",
-            content=transcript_text,
-            audio_url=user_audio_url,
-            embedding=embedding
-        )
+        sender="user",
+        channel="call",
+        content=transcript_text,
+        audio_url=user_audio_url,
+        embedding=embedding
+    )
     db.add(msg_user)
     await db.commit()
 
@@ -736,11 +753,14 @@ async def chat_audio(
     # 7. Save AI message with audio URL
     # Use try/except to handle transaction errors (e.g., from failed memory operations)
     try:
+        ai_embedding = await _safe_embedding(ai_reply)
         msg_ai = Message(
             chat_id=chat_id,
             sender="ai",
+            channel="call",
             content=ai_reply,
-            audio_url=ai_audio_url
+            audio_url=ai_audio_url,
+            embedding=ai_embedding,
         )
         db.add(msg_ai)
         await db.commit()
@@ -748,11 +768,14 @@ async def chat_audio(
         # Rollback and retry with a fresh transaction
         await db.rollback()
         try:
+            ai_embedding = ai_embedding if 'ai_embedding' in locals() else await _safe_embedding(ai_reply)
             msg_ai = Message(
                 chat_id=chat_id,
                 sender="ai",
+                channel="call",
                 content=ai_reply,
-                audio_url=ai_audio_url
+                audio_url=ai_audio_url,
+                embedding=ai_embedding,
             )
             db.add(msg_ai)
             await db.commit()

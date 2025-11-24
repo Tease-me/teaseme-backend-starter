@@ -1,4 +1,5 @@
 import asyncio, time, logging, json, hmac
+import httpx
 
 from hashlib import sha256
 from typing import Optional, Any
@@ -7,7 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.session import get_db
 from app.services.billing import charge_feature
-from app.api.elevenlabs import _extract_total_seconds
+from app.api.elevenlabs import (
+    _extract_total_seconds,
+    _get_conversation_snapshot,
+    _persist_transcript_to_chat,
+    _normalize_transcript,
+)
 from sqlalchemy import select
 from app.db.models import CallRecord
 from app.agents.turn_handler import handle_turn
@@ -77,16 +83,21 @@ def _verify_hmac(raw_body: bytes, signature_header: Optional[str]) -> None:
 
 async def _resolve_user_for_conversation(db, conversation_id: str):
     log.info("resolver.called conversation_id=%s", conversation_id)
-    q = select(CallRecord.user_id, CallRecord.influencer_id, CallRecord.sid)\
+    q = select(CallRecord.user_id, CallRecord.influencer_id, CallRecord.sid, CallRecord.chat_id)\
         .where(CallRecord.conversation_id == conversation_id)
     res = await db.execute(q)
     row = res.first()
     if not row:
         log.info("resolver.miss conversation_id=%s", conversation_id)
-        return {"user_id": None, "influencer_id": None, "sid": conversation_id}
-    user_id, influencer_id, sid = row
+        return {"user_id": None, "influencer_id": None, "sid": conversation_id, "chat_id": None}
+    user_id, influencer_id, sid, chat_id = row
     log.info("resolver.hit conversation_id=%s user_id=%s", conversation_id, user_id)
-    return {"user_id": user_id, "influencer_id": influencer_id, "sid": sid or conversation_id}
+    return {
+        "user_id": user_id,
+        "influencer_id": influencer_id,
+        "sid": sid or conversation_id,
+        "chat_id": chat_id,
+    }
 
 def _verify_token(shared: str, token: str | None) -> None:
     """Simple shared-secret check (constant time if you prefer)."""
@@ -252,6 +263,21 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
     meta_map = await _resolve_user_for_conversation(db, conversation_id)
     user_id = meta_map.get("user_id") or data.get("user_id")  # last-resort fallback
     sid = meta_map.get("sid") or conversation_id
+    chat_id = meta_map.get("chat_id")
+
+    snapshot_for_history = data
+    if not snapshot_for_history.get("transcript"):
+        try:
+            async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
+                snapshot_for_history = await _get_conversation_snapshot(client, conversation_id)
+        except Exception as exc:
+            log.warning(
+                "webhook.snapshot_fetch_failed conv=%s err=%s",
+                _redact(conversation_id),
+                exc,
+            )
+            snapshot_for_history = data
+    normalized_transcript = _normalize_transcript(snapshot_for_history)
 
     # Only bill when the conversation is fully done (avoid processing/in-progress).
     if status == "done" and user_id:
@@ -271,6 +297,39 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
             "webhook.billing.start user=%s conv_id=%s seconds=%s",
             _redact(user_id), _redact(conversation_id), total_seconds
         )
+        if chat_id:
+            try:
+                await _persist_transcript_to_chat(
+                    db,
+                    conversation_json=snapshot_for_history,
+                    chat_id=chat_id,
+                    conversation_id=conversation_id,
+                )
+            except Exception as exc:
+                log.warning(
+                    "webhook.persist_transcript_failed conv=%s chat=%s err=%s",
+                    _redact(conversation_id),
+                    chat_id,
+                    exc,
+                )
+        try:
+            call_record = await db.get(CallRecord, conversation_id)
+            if call_record:
+                call_record.status = status
+                call_record.call_duration_secs = total_seconds
+                call_record.transcript = normalized_transcript or call_record.transcript
+                if chat_id:
+                    call_record.chat_id = chat_id
+                if meta_map.get("influencer_id"):
+                    call_record.influencer_id = meta_map.get("influencer_id")
+                db.add(call_record)
+                await db.commit()
+        except Exception as exc:
+            log.warning(
+                "webhook.update_call_record_failed conv=%s err=%s",
+                _redact(conversation_id),
+                exc,
+            )
         try:
             # Important: charge_feature must be idempotent by conversation_id
             await charge_feature(

@@ -33,6 +33,16 @@ if config.config_file_name is not None:
 # my_important_option = config.get_main_option("my_important_option")
 # ... etc.
 
+def _get_sqlalchemy_url() -> str:
+    """
+    Prefer env override (DATABASE_URL or SYNC_DATABASE_URL) so host vs container can differ.
+    Fallback to alembic.ini sqlalchemy.url.
+    """
+    env_url = os.getenv("DATABASE_URL") or os.getenv("SYNC_DATABASE_URL")
+    if env_url:
+        return env_url
+    return config.get_main_option("sqlalchemy.url")
+
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
@@ -46,10 +56,7 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = config.set_main_option(
-        "sqlalchemy.url",
-        "postgresql+psycopg2://postgres:postgres@localhost:5432/teaseme"
-    )
+    url = _get_sqlalchemy_url()
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -68,6 +75,9 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
+    url = _get_sqlalchemy_url()
+    # ensure config carries the override
+    config.set_main_option("sqlalchemy.url", url)
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
