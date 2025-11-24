@@ -137,6 +137,8 @@ class CallRecord(Base):
     )
     sid: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="pending")
+    call_duration_secs: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    transcript: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (

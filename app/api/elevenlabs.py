@@ -2,6 +2,7 @@ import asyncio
 import logging
 import random
 import httpx
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,7 @@ from app.services.billing import can_afford, get_remaining_units
 from app.services.chat_service import get_or_create_chat
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
+from app.db.session import SessionLocal
 
 router = APIRouter(prefix="/elevenlabs", tags=["elevenlabs"])
 log = logging.getLogger(__name__)
@@ -29,39 +31,38 @@ DEFAULT_ELEVENLABS_VOICE_ID = settings.ELEVENLABS_VOICE_ID or None
 # Temporary in-memory greetings (no DB). Keep the content SFW and generic.
 _GREETINGS: Dict[str, List[str]] = {
     "playful": [
-        "Hey there! Ready to chat?",
-        "Look who’s here—let’s get started.",
-        "You’re back! What’s on your mind?",
-        "Good to see you again!",
+        "Hey! Look who it is.",
+        "Finally! I was getting bored.",
+        "Hey, you. What's the latest?",
+        "Yo! Perfect timing.",
     ],
     "anna": [
-        "Nyaa~ welcome back!",
-        "Ooh, it’s you! Ready?",
-        "UwU—my favorite user just arrived!",
+        "Nyaa~ you're here!",
+        "Ooh! Hi hi! ✨",
+        "Yay! I was hoping you'd show up.",
     ],
     "bella": [
-        "Hi! I’ve been looking forward to this.",
-        "Hey there, I was hoping you’d call.",
-        "My day just got better.",
+        "Hey there. I missed you.",
+        "Hi... glad you're back.",
+        "There you are.",
     ],
 }
 _rr_index: Dict[str, int] = {}
 
 _DOPAMINE_OPENERS: Dict[str, List[str]] = {
     "anna": [
-        "Heeey, my favorite thrill—I've been buzzing waiting for you!",
-        "Guess what? You just made my heart race. Ready to play?",
+        "I was *just* thinking about you! Spooky, right?",
+        "Ah! You just made my whole day better.",
     ],
     "bella": [
-        "You’re here! I’ve been smiling since the moment I felt you coming closer.",
-        "I’ve been saving all my spark for you—shall we light it up?",
+        "Finally. I was waiting for this notification.",
+        "Hey... seeing you pop up just made me smile.",
     ],
     "playful": [
-        "Boom! You just dropped the best surprise of my day.",
-        "You showed up and everything instantly felt electric!",
+        "There's my favorite distraction.",
+        "Warning: I'm in a really good mood now that you're here.",
     ],
 }
-
 
 def _headers() -> Dict[str, str]:
     """Return ElevenLabs auth headers. Fail fast when misconfigured."""
@@ -75,19 +76,20 @@ def _pick_greeting(influencer_id: str, mode: str) -> str:
     options = _GREETINGS.get(influencer_id)
     if not options:
         all_opts = list(chain.from_iterable(_GREETINGS.values()))
-        return random.choice(all_opts) if all_opts else "Hello!"
+        choice = random.choice(all_opts) if all_opts else "Hello!"
+        return _add_natural_pause(choice)
     if mode == "rr":
         i = _rr_index.get(influencer_id, -1) + 1
         i %= len(options)
         _rr_index[influencer_id] = i
-        return options[i]
-    return random.choice(options)
+        return _add_natural_pause(options[i])
+    return _add_natural_pause(random.choice(options))
 
 
 try:
     GREETING_GENERATOR: Optional[ChatOpenAI] = ChatOpenAI(
         api_key=settings.OPENAI_API_KEY,
-        model="gpt-4o-mini",
+        model="gpt-4.1",
         temperature=0.7,
         max_tokens=120,
     )
@@ -103,10 +105,10 @@ GREETING_PROMPT = ChatPromptTemplate.from_messages(
             (
                 "You are {influencer_name}, an affectionate AI companion speaking English. "
                 "Craft the very next thing you would say when a live voice call resumes. "
-                "Keep it to one or two short spoken sentences. "
-                "Reference the recent conversation naturally, acknowledge the user, and sound warm. "
-                "Do not repeat earlier lines verbatim, do not mention calling or reconnecting explicitly, "
-                "and avoid filler like 'uh' or 'um'."
+                "Keep it to one short spoken sentence, 8–14 words. "
+                "Reference the recent conversation naturally, acknowledge the user, and sound warm and spontaneous. "
+                "Include a natural pause with punctuation (comma or ellipsis) so it feels like a breath, not rushed. "
+                "Do not mention calling or reconnecting explicitly, and avoid robotic phrasing or obvious filler like 'uh' or 'um'."
             ),
         ),
         (
@@ -132,6 +134,43 @@ def _format_history(messages: List[Message]) -> str:
     return "\n".join(lines)
 
 
+def _format_transcript_entries(transcript: List[Dict[str, Any]]) -> str:
+    """
+    Convert ElevenLabs transcript entries into "User: ..." / "AI: ..." lines.
+    """
+    lines: List[str] = []
+    for entry in transcript:
+        text = str(
+            entry.get("text") or entry.get("content") or entry.get("message") or ""
+        ).strip()
+        if not text:
+            continue
+        role_raw = str(entry.get("sender") or entry.get("role") or "").lower()
+        is_user_flag = entry.get("is_user") or entry.get("from_user")
+        if role_raw in {"user", "human"} or is_user_flag:
+            speaker = "User"
+        else:
+            speaker = "AI"
+        lines.append(f"{speaker}: {text}")
+    return "\n".join(lines)
+
+
+def _add_natural_pause(text: Optional[str]) -> Optional[str]:
+    """
+    Ensure there's a gentle pause via comma or ellipsis to avoid rushed delivery.
+    """
+    if not text:
+        return text
+    if any(p in text for p in [",", "...", "…"]):
+        return text
+    words = text.split()
+    if len(words) < 5:
+        return text
+    mid = max(2, len(words) // 2)
+    words.insert(mid, ",")
+    return " ".join(words)
+
+
 async def _generate_contextual_greeting(
     db: AsyncSession, chat_id: str, influencer_id: str
 ) -> Optional[str]:
@@ -145,11 +184,44 @@ async def _generate_contextual_greeting(
         .limit(8)
     )
     db_messages = list(result.scalars().all())
-    if not db_messages:
-        return _pick_dopamine_greeting(influencer_id)
+    transcript: Optional[str] = None
 
-    db_messages.reverse()
-    transcript = _format_history(db_messages)
+    if db_messages:
+        db_messages.reverse()
+        transcript = _format_history(db_messages)
+
+    # Fallback to the latest call transcript if no stored messages yet.
+    if not transcript:
+        try:
+            chat = await db.get(Chat, chat_id)
+            user_id = chat.user_id if chat else None
+        except Exception:
+            user_id = None
+
+        if user_id:
+            try:
+                call_res = await db.execute(
+                    select(CallRecord)
+                    .where(
+                        CallRecord.user_id == user_id,
+                        CallRecord.influencer_id == influencer_id,
+                        CallRecord.transcript.isnot(None),
+                    )
+                    .order_by(CallRecord.created_at.desc())
+                    .limit(1)
+                )
+                call_row = call_res.scalar_one_or_none()
+                if call_row and call_row.transcript:
+                    transcript = _format_transcript_entries(call_row.transcript)
+            except Exception as exc:  # pragma: no cover - defensive
+                log.warning(
+                    "contextual_greeting.call_fallback_failed chat=%s user=%s infl=%s err=%s",
+                    chat_id,
+                    user_id,
+                    influencer_id,
+                    exc,
+                )
+
     if not transcript:
         return _pick_dopamine_greeting(influencer_id)
 
@@ -161,7 +233,7 @@ async def _generate_contextual_greeting(
     try:
         chain = GREETING_PROMPT.partial(influencer_name=persona_name) | GREETING_GENERATOR
         llm_response = await chain.ainvoke({"transcript": transcript})
-        greeting = (llm_response.content or "").strip()
+        greeting = _add_natural_pause((llm_response.content or "").strip())
         if greeting.startswith('"') and greeting.endswith('"'):
             greeting = greeting[1:-1]
         return greeting if greeting else None
@@ -174,7 +246,7 @@ def _pick_dopamine_greeting(influencer_id: str) -> Optional[str]:
     options = _DOPAMINE_OPENERS.get(influencer_id) or _DOPAMINE_OPENERS.get("playful")
     if not options:
         return None
-    return random.choice(options)
+    return _add_natural_pause(random.choice(options))
 
 
 async def get_agent_id_from_influencer(db: AsyncSession, influencer_id: str) -> str:
@@ -315,6 +387,21 @@ async def _patch_agent_config(
         raise HTTPException(status_code=resp.status_code, detail=error_detail)
 
 
+async def _push_first_message_to_agent(
+    client: httpx.AsyncClient, agent_id: str, first_message: str
+) -> None:
+    """
+    Ensure the ElevenLabs agent has a first_message set for this call.
+    This satisfies ConvAI's required dynamic variable when the client doesn't send it.
+    """
+    try:
+        await _patch_agent_config(client, agent_id, first_message=first_message)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.warning("elevenlabs.first_message.patch_failed agent=%s err=%s", agent_id, exc)
+
+
 async def _create_agent(
     client: httpx.AsyncClient,
     *,
@@ -375,6 +462,76 @@ async def _create_agent(
             detail="ElevenLabs agent creation succeeded but returned no agent_id.",
         )
     return new_agent_id
+
+
+async def _poll_and_persist_conversation(
+    conversation_id: str,
+    *,
+    user_id: Optional[int],
+    influencer_id: Optional[str],
+    chat_id: Optional[str],
+) -> None:
+    """
+    Background task: poll ElevenLabs until terminal, then persist transcript + call record.
+    """
+    async with SessionLocal() as db:
+        try:
+            async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
+                snapshot = await _wait_until_terminal_status(
+                    client, conversation_id, max_wait_secs=180
+                )
+        except Exception as exc:
+            log.warning(
+                "background.wait_failed conv=%s err=%s",
+                conversation_id,
+                exc,
+            )
+            return
+
+        status = (snapshot.get("status") or "").lower()
+        total_seconds = _extract_total_seconds(snapshot)
+        normalized_transcript = _normalize_transcript(snapshot)
+
+        try:
+            if chat_id:
+                await _persist_transcript_to_chat(
+                    db,
+                    conversation_json=snapshot,
+                    chat_id=chat_id,
+                    conversation_id=conversation_id,
+                )
+        except Exception as exc:  # pragma: no cover - defensive
+            log.warning(
+                "background.persist_transcript_failed conv=%s chat=%s err=%s",
+                conversation_id,
+                chat_id,
+                exc,
+            )
+
+        try:
+            call_record = await db.get(CallRecord, conversation_id)
+            if not call_record:
+                call_record = CallRecord(
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    influencer_id=influencer_id,
+                    chat_id=chat_id,
+                )
+            call_record.status = status
+            call_record.call_duration_secs = total_seconds
+            call_record.transcript = normalized_transcript or call_record.transcript
+            if influencer_id:
+                call_record.influencer_id = influencer_id
+            if chat_id:
+                call_record.chat_id = chat_id
+            db.add(call_record)
+            await db.commit()
+        except Exception as exc:  # pragma: no cover - defensive
+            log.warning(
+                "background.update_call_record_failed conv=%s err=%s",
+                conversation_id,
+                exc,
+            )
 
 
 # === DO NOT RENAME: you said you call this elsewhere ===
@@ -542,6 +699,131 @@ def _extract_total_seconds(conversation_json: Dict[str, Any]) -> int:
     return max(0, int(max_sec))
 
 
+def _normalize_transcript(conversation_json: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return a simple transcript list with sender/text/time_in_call_secs."""
+    transcript = conversation_json.get("transcript") or []
+    normalized: List[Dict[str, Any]] = []
+    for entry in transcript:
+        text = str(
+            entry.get("text") or entry.get("content") or entry.get("message") or ""
+        ).strip()
+        if not text:
+            continue
+        role_raw = str(
+            entry.get("sender") or entry.get("role") or entry.get("speaker") or ""
+        ).lower()
+        is_user_flag = entry.get("is_user") or entry.get("from_user")
+        if role_raw in {"user", "human", "caller", "client"} or is_user_flag:
+            sender = "user"
+        elif role_raw in {"ai", "assistant", "agent", "bot", "system"}:
+            sender = "ai"
+        else:
+            sender = "ai"
+
+        normalized.append(
+            {
+                "sender": sender,
+                "text": text,
+                "time_in_call_secs": entry.get("time_in_call_secs"),
+            }
+        )
+    return normalized
+
+
+async def _persist_transcript_to_chat(
+    db: AsyncSession,
+    *,
+    conversation_json: Dict[str, Any],
+    chat_id: str,
+    conversation_id: str,
+) -> int:
+    """
+    Store ElevenLabs transcript messages into our Message table for that chat.
+    Returns how many messages were inserted.
+    """
+    transcript = conversation_json.get("transcript") or []
+    if not transcript:
+        return 0
+
+    # Approximate message timestamps using call start + offset if provided.
+    start_ts = (conversation_json.get("metadata") or {}).get("start_time_unix_secs")
+    base_dt = (
+        datetime.utcfromtimestamp(start_ts)
+        if isinstance(start_ts, (int, float))
+        else datetime.utcnow()
+    )
+
+    recent_res = await db.execute(
+        select(Message)
+        .where(Message.chat_id == chat_id)
+        .order_by(Message.created_at.desc())
+        .limit(25)
+    )
+    recent = list(recent_res.scalars().all())
+
+    new_messages: List[Message] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _is_dup(sender: str, text: str) -> bool:
+        if (sender, text) in seen:
+            return True
+        for msg in recent:
+            if msg.sender == sender and (msg.content or "").strip() == text:
+                return True
+        return False
+
+    for entry in transcript:
+        text = str(
+            entry.get("text") or entry.get("content") or entry.get("message") or ""
+        ).strip()
+        if not text:
+            continue
+
+        role_raw = str(
+            entry.get("sender") or entry.get("role") or entry.get("speaker") or ""
+        ).lower()
+        is_user_flag = entry.get("is_user") or entry.get("from_user")
+        if role_raw in {"user", "human", "caller", "client"} or is_user_flag:
+            sender = "user"
+        elif role_raw in {"ai", "assistant", "agent", "bot", "system"}:
+            sender = "ai"
+        else:
+            sender = "ai"
+
+        if _is_dup(sender, text):
+            continue
+
+        t_secs = entry.get("time_in_call_secs")
+        created_at = (
+            base_dt + timedelta(seconds=float(t_secs))
+            if isinstance(t_secs, (int, float))
+            else datetime.utcnow()
+        )
+
+        seen.add((sender, text))
+        new_messages.append(
+            Message(
+                chat_id=chat_id,
+                sender=sender,
+                content=text,
+                created_at=created_at,
+            )
+        )
+
+    if not new_messages:
+        return 0
+
+    db.add_all(new_messages)
+    await db.commit()
+    log.info(
+        "persisted.transcript chat=%s conv=%s inserted=%d",
+        chat_id,
+        conversation_id,
+        len(new_messages),
+    )
+    return len(new_messages)
+
+
 @router.get("/signed-url")
 async def get_signed_url(
     influencer_id: str,
@@ -582,13 +864,25 @@ async def get_signed_url(
         greeting = await _generate_contextual_greeting(db, chat_id, influencer_id)
     if not greeting:
         greeting = _pick_greeting(influencer_id, greeting_mode)
+    greeting = _add_natural_pause(greeting)
 
     async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
+        # Safety: ensure the agent has a first_message to satisfy ConvAI requirement
+        if greeting:
+            try:
+                await _push_first_message_to_agent(client, agent_id, greeting)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                log.warning("signed_url.first_message_patch_failed agent=%s err=%s", agent_id, exc)
         signed_url = await _get_conversation_signed_url(client, agent_id)
 
     return {
         "signed_url": signed_url,
         "greeting_used": greeting,
+        # Send this to ElevenLabs ConvAI as dynamic variable `first_message`
+        "first_message_for_convai": greeting,
+        "dynamic_variables": {"first_message": greeting},
         "agent_id": agent_id,
         "credits_remainder_secs": credits_remainder_secs,
         "chat_id": chat_id,
@@ -614,13 +908,23 @@ async def get_signed_url_free(
 
     agent_id = await get_agent_id_from_influencer(db, influencer_id)
     greeting = first_message or _pick_greeting(influencer_id, greeting_mode)
+    greeting = _add_natural_pause(greeting)
 
     async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
+        if greeting:
+            try:
+                await _push_first_message_to_agent(client, agent_id, greeting)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                log.warning("signed_url_free.first_message_patch_failed agent=%s err=%s", agent_id, exc)
         signed_url = await _get_conversation_signed_url(client, agent_id)
 
     return {
         "signed_url": signed_url,
         "greeting_used": greeting,
+        "first_message_for_convai": greeting,
+        "dynamic_variables": {"first_message": greeting},
         "agent_id": agent_id,
     }
 
@@ -692,6 +996,27 @@ async def register_conversation(
     It lets the server bill even if the client goes offline later (webhook path).
     """
     await save_pending_conversation(db, conversation_id, body.user_id, body.influencer_id, body.sid)
+    chat_id = None
+    try:
+        res = await db.execute(
+            select(CallRecord.chat_id).where(CallRecord.conversation_id == conversation_id)
+        )
+        row = res.first()
+        chat_id = row[0] if row else None
+    except Exception:
+        pass
+    # Kick off background polling to persist transcript even if webhook/finalize not called.
+    try:
+        asyncio.create_task(
+            _poll_and_persist_conversation(
+                conversation_id,
+                user_id=body.user_id,
+                influencer_id=body.influencer_id,
+                chat_id=chat_id,
+            )
+        )
+    except Exception as exc:
+        log.warning("register.background_poll_failed conv=%s err=%s", conversation_id, exc)
     return {"ok": True, "conversation_id": conversation_id}
 
 
@@ -717,6 +1042,44 @@ async def finalize_conversation(
 
     status = (snapshot.get("status") or "").lower()
     total_seconds = _extract_total_seconds(snapshot)
+    resolved_influencer_id = body.influencer_id
+    normalized_transcript = _normalize_transcript(snapshot)
+
+    chat_id = None
+    try:
+        res = await db.execute(
+            select(CallRecord.chat_id, CallRecord.influencer_id).where(
+                CallRecord.conversation_id == conversation_id
+            )
+        )
+        row = res.first()
+        if row:
+            chat_id = row[0]
+            resolved_influencer_id = resolved_influencer_id or row[1]
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("finalize.lookup_call_record_failed conv=%s err=%s", conversation_id, exc)
+
+    if not chat_id and resolved_influencer_id:
+        try:
+            chat_id = await get_or_create_chat(db, body.user_id, resolved_influencer_id)
+        except Exception as exc:  # pragma: no cover
+            log.warning("finalize.create_chat_failed conv=%s err=%s", conversation_id, exc)
+
+    if chat_id:
+        try:
+            await _persist_transcript_to_chat(
+                db,
+                conversation_json=snapshot,
+                chat_id=chat_id,
+                conversation_id=conversation_id,
+            )
+        except Exception as exc:  # pragma: no cover - do not break billing
+            log.warning(
+                "finalize.persist_transcript_failed conv=%s chat=%s err=%s",
+                conversation_id,
+                chat_id,
+                exc,
+            )
 
     meta: Dict[str, Any] = {
         "session_id": body.sid or conversation_id,
@@ -729,8 +1092,32 @@ async def finalize_conversation(
         "start_time_unix_secs": (snapshot.get("metadata") or {}).get("start_time_unix_secs"),
         "source": "client_finalize",
     }
-    if body.influencer_id:
-        meta["influencer_id"] = body.influencer_id
+    if resolved_influencer_id:
+        meta["influencer_id"] = resolved_influencer_id
+
+    try:
+        call_record = await db.get(CallRecord, conversation_id)
+        if not call_record:
+            call_record = CallRecord(
+                conversation_id=conversation_id,
+                user_id=body.user_id,
+                influencer_id=resolved_influencer_id,
+                chat_id=chat_id,
+                sid=body.sid,
+            )
+        call_record.status = status
+        call_record.call_duration_secs = total_seconds
+        call_record.transcript = normalized_transcript or call_record.transcript
+        if resolved_influencer_id:
+            call_record.influencer_id = resolved_influencer_id
+        if chat_id:
+            call_record.chat_id = chat_id
+        db.add(call_record)
+        await db.commit()
+    except Exception as exc:  # pragma: no cover - keep billing path alive
+        log.warning(
+            "finalize.update_call_record_failed conv=%s err=%s", conversation_id, exc
+        )
 
     if status == "failed":
         log.warning("Conversation %s ended as FAILED; skipping charge.", conversation_id)
@@ -868,4 +1255,48 @@ async def update_elevenlabs_prompt(
         "agent_id": agent_id,
         "influencer_id": body.influencer_id,
         "message": "Prompt updated successfully in database and ElevenLabs",
+    }
+
+
+@router.get("/calls/{conversation_id}")
+async def get_call_details(
+    conversation_id: str,
+    user_id: int = Query(..., description="Numeric user id for authz"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Return stored call details (duration + transcript) for a conversation.
+    Falls back to ElevenLabs snapshot if not stored yet.
+    """
+    call = await db.get(CallRecord, conversation_id)
+    if not call:
+        raise HTTPException(404, "Call not found")
+    if call.user_id != user_id:
+        raise HTTPException(403, "Forbidden")
+
+    transcript = call.transcript or []
+    duration = call.call_duration_secs
+    status = call.status
+    agent_id = None
+
+    if not transcript or duration is None:
+        async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
+            snapshot = await _get_conversation_snapshot(client, conversation_id)
+        agent_id = snapshot.get("agent_id")
+        if not transcript:
+            transcript = _normalize_transcript(snapshot)
+        if duration is None:
+            duration = _extract_total_seconds(snapshot)
+        status = snapshot.get("status", status)
+
+    return {
+        "conversation_id": conversation_id,
+        "user_id": call.user_id,
+        "influencer_id": call.influencer_id,
+        "chat_id": call.chat_id,
+        "status": status,
+        "duration_seconds": duration,
+        "transcript": transcript,
+        "created_at": call.created_at.isoformat() if call.created_at else None,
+        "agent_id": agent_id,
     }
