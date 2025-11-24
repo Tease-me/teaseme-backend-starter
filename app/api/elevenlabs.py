@@ -107,6 +107,8 @@ GREETING_PROMPT = ChatPromptTemplate.from_messages(
                 "Craft the very next thing you would say when a live voice call resumes. "
                 "Keep it to one short spoken sentence, 8–14 words. "
                 "Reference the recent conversation naturally, acknowledge the user, and sound warm and spontaneous. "
+                "You are on a live phone call right now—sound like you’re speaking on the line, "
+                "but do not mention the phone or calling explicitly. "
                 "Include a natural pause with punctuation (comma or ellipsis) so it feels like a breath, not rushed. "
                 "Do not mention calling or reconnecting explicitly, and avoid robotic phrasing or obvious filler like 'uh' or 'um'."
             ),

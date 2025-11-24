@@ -34,6 +34,7 @@ _RUDE_RE = re.compile(
     r")\b",
     re.IGNORECASE,
 )
+_BAN_PHRASE_RE = re.compile(r"not everyone gets me[^.?!]*", re.IGNORECASE)
 _TARGETED_INSULT_RE = re.compile(
     r"\b(?:you|you're|youre|ur|u)\s+(?:so\s+)?(ugly|gross|stupid|dumb|trash|worthless|annoying|psycho|crazy|boring|lame|pathetic|awful)\b",
     re.IGNORECASE,
@@ -102,6 +103,7 @@ def _history_context(
     history: RedisChatMessageHistory,
     latest_user_message: str | None = None,
     limit: int = 6,
+    mode: str = "text",
 ) -> str:
     lines: list[str] = []
     if history and history.messages:
@@ -113,7 +115,10 @@ def _history_context(
                 lines.append(f"{label}: {content}")
     if latest_user_message:
         lines.append(f"User: {latest_user_message.strip()}")
-    return "\n".join(lines).strip()
+    context = "\n".join(lines).strip()
+    if mode == "call" and context:
+        context = "Recent call context:\n" + context
+    return context
 
 
 def _get_thread_id(chat_id: str, influencer_id: str) -> str | None:
@@ -144,6 +149,12 @@ def _remove_virtual_meta(text: str) -> str:
     cleaned = _COMPANION_ROLE_RE.sub("", cleaned)
     cleaned = _MULTISPACE_RE.sub(" ", cleaned)
     return cleaned
+
+
+def _strip_banned_phrases(text: str) -> str:
+    if not text:
+        return ""
+    return _BAN_PHRASE_RE.sub("", text).strip()
 
 
 def _analyze_user_message(text: str) -> MessageSignals:
@@ -228,6 +239,7 @@ def _enforce_question_variety(text: str, ai_history: list[str], max_consecutive:
 def _polish_reply(text: str, history: RedisChatMessageHistory, block_questions: bool) -> str:
     cleaned = _strip_forbidden_dashes(text)
     cleaned = _remove_virtual_meta(cleaned)
+    cleaned = _strip_banned_phrases(cleaned)
     ai_history = _recent_ai_messages(history, limit=2)
     polished = _enforce_question_variety(cleaned, ai_history)
     if block_questions and polished.rstrip().endswith("?"):
@@ -280,6 +292,7 @@ def _build_assistant_payload(
     rude_guard: bool,
     sexual_guard: bool,
     negging_guard: bool,
+    mode: str,
 ) -> str:
     phase = _lollity_phase(score)
     sections: list[str] = [
@@ -296,6 +309,8 @@ def _build_assistant_payload(
         sections.append("Recent memories:\n" + mem_block)
     if daily_context:
         sections.append("Daily script:\n" + daily_context)
+    if mode == "call":
+        sections.append("You are on a live voice call right now—keep replies as spoken lines with natural pauses, no chatty formatting.")
     sections.append(f"User emotion snapshot: {mood_desc}.")
     if short_guard:
         sections.append("Short reply detected: respond with statements (no questions) until the user shares more than a couple of words.")
@@ -455,8 +470,9 @@ async def handle_turn(
             rude_guard=signals.rude_guard,
             sexual_guard=signals.sexual_guard,
             negging_guard=signals.negging_guard,
+            mode="call" if is_audio else "text",
         )
-        history_context = _history_context(history)
+        history_context = _history_context(history, mode="call" if is_audio else "text")
         context_sections: list[str] = []
         if assistant_context.strip():
             context_sections.append(assistant_context.strip())
