@@ -815,6 +815,7 @@ async def _persist_transcript_to_chat(
             Message(
                 chat_id=chat_id,
                 sender=sender,
+                channel="call",
                 content=text,
                 created_at=created_at,
                 embedding=embedding,

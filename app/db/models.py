@@ -64,6 +64,7 @@ class Message(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     chat_id: Mapped[str] = mapped_column(ForeignKey("chats.id"), index=True)
     sender: Mapped[str] = mapped_column(String)  # 'user' ou 'ai'
+    channel: Mapped[str] = mapped_column(String, default="text")  # 'text' or 'call'
     content: Mapped[str] = mapped_column(Text)
     audio_url: Mapped[str] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -555,7 +555,15 @@ async def websocket_chat(
             # save user message (with embedding)
             try:
                 emb = await get_embedding(text)
-                db.add(Message(chat_id=chat_id, sender="user", content=text, embedding=emb))
+                db.add(
+                    Message(
+                        chat_id=chat_id,
+                        sender="user",
+                        channel="text",
+                        content=text,
+                        embedding=emb,
+                    )
+                )
                 await db.commit()
             except Exception:
                 await db.rollback()
@@ -720,11 +728,12 @@ async def chat_audio(
     embedding = await get_embedding(transcript_text)
     msg_user = Message(
         chat_id=chat_id,
-            sender="user",
-            content=transcript_text,
-            audio_url=user_audio_url,
-            embedding=embedding
-        )
+        sender="user",
+        channel="call",
+        content=transcript_text,
+        audio_url=user_audio_url,
+        embedding=embedding
+    )
     db.add(msg_user)
     await db.commit()
 
@@ -748,6 +757,7 @@ async def chat_audio(
         msg_ai = Message(
             chat_id=chat_id,
             sender="ai",
+            channel="call",
             content=ai_reply,
             audio_url=ai_audio_url,
             embedding=ai_embedding,
@@ -762,6 +772,7 @@ async def chat_audio(
             msg_ai = Message(
                 chat_id=chat_id,
                 sender="ai",
+                channel="call",
                 content=ai_reply,
                 audio_url=ai_audio_url,
                 embedding=ai_embedding,
