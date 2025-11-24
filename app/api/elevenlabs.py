@@ -17,6 +17,7 @@ from sqlalchemy import insert, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.services.billing import can_afford, get_remaining_units
 from app.services.chat_service import get_or_create_chat
+from app.agents.turn_handler import redis_history
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from app.db.session import SessionLocal
@@ -158,6 +159,37 @@ def _format_transcript_entries(transcript: List[Dict[str, Any]]) -> str:
         lines.append(f"{speaker}: {text}")
     return "\n".join(lines)
 
+def _format_redis_history(chat_id: str, limit: int = 12) -> Optional[str]:
+    """
+    Pull recent turns from Redis so a new call can reference the prior session
+    before the transcript finishes persisting to the DB.
+    """
+    try:
+        history = redis_history(chat_id)
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("redis_history.fetch_failed chat=%s err=%s", chat_id, exc)
+        return None
+    if not history or not history.messages:
+        return None
+
+    lines: List[str] = []
+    for msg in history.messages[-limit:]:
+        role = getattr(msg, "type", "") or getattr(msg, "role", "")
+        speaker = "User" if role in {"human", "user"} else "AI"
+        content = getattr(msg, "content", "")
+        if isinstance(content, list):
+            parts: List[str] = []
+            for part in content:
+                if isinstance(part, dict):
+                    parts.append(str(part.get("text", "")))
+                else:
+                    parts.append(str(part))
+            content = " ".join(parts)
+        content = str(content or "").strip()
+        if content:
+            lines.append(f"{speaker}: {content}")
+    return "\n".join(lines) if lines else None
+
 
 def _add_natural_pause(text: Optional[str]) -> Optional[str]:
     """
@@ -189,6 +221,14 @@ async def _generate_contextual_greeting(
     )
     db_messages = list(result.scalars().all())
     transcript: Optional[str] = None
+
+    if not db_messages:
+        try:
+            redis_ctx = _format_redis_history(chat_id)
+            if redis_ctx:
+                transcript = redis_ctx
+        except Exception as exc:  # pragma: no cover - defensive
+            log.warning("contextual_greeting.redis_fallback_failed chat=%s err=%s", chat_id, exc)
 
     if db_messages:
         db_messages.reverse()
