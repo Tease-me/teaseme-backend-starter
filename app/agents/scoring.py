@@ -6,6 +6,7 @@ redis_client = Redis.from_url(settings.REDIS_URL, decode_responses=True)
 SCORE_KEY = "lollity:{user}:{persona}"
 SCORE_RECOVERY_KEY = "lollity_cooldown:{user}:{persona}"
 SCORE_RE = re.compile(r"\[Lollity Score: (\d{1,3}(?:\.\d{1,2})?)/100]")
+_DEFAULT_SCORE = 3.0
 _MAX_UP_GAIN = 0.5
 _COOLDOWN_GAIN = 0.25
 _MAX_COOLDOWN = 4
@@ -13,13 +14,13 @@ _MAX_COOLDOWN = 4
 def get_score(user: str, persona: str) -> float:
     key = SCORE_KEY.format(user=user, persona=persona)
     stored = redis_client.get(key)
-    return float(stored) if stored is not None else 50.0
+    return float(stored) if stored is not None else _DEFAULT_SCORE
 
 def update_score(user: str, persona: str, new_score: float) -> float:
     key = SCORE_KEY.format(user=user, persona=persona)
     cooldown_key = SCORE_RECOVERY_KEY.format(user=user, persona=persona)
     current_raw = redis_client.get(key)
-    current_score = float(current_raw) if current_raw is not None else 50.0
+    current_score = float(current_raw) if current_raw is not None else _DEFAULT_SCORE
     cooldown_raw = redis_client.get(cooldown_key)
     cooldown = int(cooldown_raw) if cooldown_raw is not None else 0
     bounded = max(0.0, min(100.0, float(new_score)))

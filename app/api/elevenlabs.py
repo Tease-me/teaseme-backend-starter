@@ -524,6 +524,7 @@ async def _poll_and_persist_conversation(
                 snapshot = await _wait_until_terminal_status(
                     client, conversation_id, max_wait_secs=180
                 )
+                snapshot = await _ensure_transcript_snapshot(client, conversation_id, snapshot)
         except Exception as exc:
             log.warning(
                 "background.wait_failed conv=%s err=%s",
@@ -535,6 +536,18 @@ async def _poll_and_persist_conversation(
         status = (snapshot.get("status") or "").lower()
         total_seconds = _extract_total_seconds(snapshot)
         normalized_transcript = _normalize_transcript(snapshot)
+
+        if not chat_id and user_id and influencer_id:
+            try:
+                chat_id = await get_or_create_chat(db, user_id, influencer_id)
+            except Exception as exc:  # pragma: no cover - defensive
+                log.warning(
+                    "background.chat_id_fallback_failed conv=%s user=%s infl=%s err=%s",
+                    conversation_id,
+                    user_id,
+                    influencer_id,
+                    exc,
+                )
 
         try:
             if chat_id:
@@ -697,6 +710,27 @@ async def _get_conversation_snapshot(
         )
         raise HTTPException(424, f"Failed to fetch conversation: {resp.status_code}")
     return resp.json()
+
+
+async def _ensure_transcript_snapshot(
+    client: httpx.AsyncClient,
+    conversation_id: str,
+    snapshot: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Some snapshots omit transcript; try a follow-up fetch to populate it.
+    """
+    if snapshot.get("transcript"):
+        return snapshot
+    try:
+        refreshed = await _get_conversation_snapshot(client, conversation_id)
+        if refreshed.get("transcript"):
+            return refreshed
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning(
+            "ensure_transcript.refetch_failed conv=%s err=%s", conversation_id, exc
+        )
+    return snapshot
 
 
 async def _wait_until_terminal_status(
@@ -867,6 +901,26 @@ async def _persist_transcript_to_chat(
 
     db.add_all(new_messages)
     await db.commit()
+    # Push to Redis so turn_handler can see call history immediately.
+    try:
+        history = redis_history(chat_id)
+        for msg in new_messages:
+            if msg.sender == "user":
+                history.add_user_message(msg.content)
+            else:
+                history.add_ai_message(msg.content)
+        # Trim to configured window if present
+        try:
+            max_len = settings.MAX_HISTORY_WINDOW
+            if max_len and len(history.messages) > max_len:
+                trimmed = history.messages[-max_len:]
+                history.clear()
+                history.add_messages(trimmed)
+        except Exception:
+            pass
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("persist_transcript.redis_sync_failed chat=%s err=%s", chat_id, exc)
+
     log.info(
         "persisted.transcript chat=%s conv=%s inserted=%d",
         chat_id,
@@ -887,11 +941,7 @@ async def get_signed_url(
 ):
     """
     (1) Check user credits before starting a live chat call.
-    (2) Optionally update the agent's first_message (greeting).
-    (3) Return a signed_url for the client to open a conversation.
-    
-    NOTE: PATCHing the agent updates it globally.
-    If concurrent users need distinct greetings, prefer a per-conversation override.
+    (2) Return a signed_url for the client to open a conversation (no first_message override).
     """
     # --- Check credits before starting call ---
     ok, cost_cents, free_left = await can_afford(
@@ -911,22 +961,14 @@ async def get_signed_url(
     agent_id = await get_agent_id_from_influencer(db, influencer_id)
     chat_id = await get_or_create_chat(db, user_id, influencer_id)
 
+    # Do not send or patch a first_message; let ElevenLabs handle the default.
     greeting: Optional[str] = first_message
     if not greeting:
         greeting = await _generate_contextual_greeting(db, chat_id, influencer_id)
     if not greeting:
         greeting = _pick_greeting(influencer_id, greeting_mode)
-    greeting = _add_natural_pause(greeting)
 
     async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
-        # Safety: ensure the agent has a first_message to satisfy ConvAI requirement
-        if greeting:
-            try:
-                await _push_first_message_to_agent(client, agent_id, greeting)
-            except HTTPException:
-                raise
-            except Exception as exc:
-                log.warning("signed_url.first_message_patch_failed agent=%s err=%s", agent_id, exc)
         signed_url = await _get_conversation_signed_url(client, agent_id)
 
     return {
@@ -934,7 +976,7 @@ async def get_signed_url(
         "greeting_used": greeting,
         # Send this to ElevenLabs ConvAI as dynamic variable `first_message`
         "first_message_for_convai": greeting,
-        "dynamic_variables": {"first_message": greeting},
+        "dynamic_variables": {"first_message": greeting} if greeting else {},
         "agent_id": agent_id,
         "credits_remainder_secs": credits_remainder_secs,
         "chat_id": chat_id,
@@ -949,34 +991,22 @@ async def get_signed_url_free(
     greeting_mode: str = Query("random", pattern="^(random|rr)$"),
 ):
     """
-    (1) Check user credits before starting a live chat call.
-    (2) Optionally update the agent's first_message (greeting).
-    (3) Return a signed_url for the client to open a conversation.
-    
-    NOTE: PATCHing the agent updates it globally.
-    If concurrent users need distinct greetings, prefer a per-conversation override.
+    (1) Return a signed_url for the client to open a conversation (no first_message override).
     """
     # --- Check credits before starting call ---
 
     agent_id = await get_agent_id_from_influencer(db, influencer_id)
-    greeting = first_message or _pick_greeting(influencer_id, greeting_mode)
-    greeting = _add_natural_pause(greeting)
+    # Do not send or patch a first_message; let ElevenLabs handle the default.
+    greeting = None
 
     async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
-        if greeting:
-            try:
-                await _push_first_message_to_agent(client, agent_id, greeting)
-            except HTTPException:
-                raise
-            except Exception as exc:
-                log.warning("signed_url_free.first_message_patch_failed agent=%s err=%s", agent_id, exc)
         signed_url = await _get_conversation_signed_url(client, agent_id)
 
     return {
         "signed_url": signed_url,
         "greeting_used": greeting,
         "first_message_for_convai": greeting,
-        "dynamic_variables": {"first_message": greeting},
+        "dynamic_variables": {"first_message": greeting} if greeting else {},
         "agent_id": agent_id,
     }
 
@@ -987,22 +1017,23 @@ async def save_pending_conversation(
     user_id: int,
     influencer_id: Optional[str],
     sid: Optional[str],
-) -> None:
+) -> Optional[str]:
     """
-    Upsert a pending conversation mapping (PostgreSQL).
-    Idempotent on the primary key (conversation_id).
+    Upsert a pending conversation mapping (PostgreSQL) and ensure a stable chat_id
+    shared between text and calls.
     """
-    result = await db.execute(
-        select(Chat)
-        .where(Chat.user_id == user_id, Chat.influencer_id == influencer_id)
-        .order_by(Chat.started_at.desc())
-        .limit(1)
-    )
-    chat = result.scalar_one_or_none()
-    if not chat:
-        chat = Chat(user_id=user_id, influencer_id=influencer_id)
-        db.add(chat)
-        await db.flush()
+    chat_id: Optional[str] = None
+    if user_id and influencer_id:
+        try:
+            chat_id = await get_or_create_chat(db, user_id, influencer_id)
+        except Exception as exc:  # pragma: no cover - defensive
+            log.warning(
+                "save_pending_conversation.get_or_create_chat_failed user=%s infl=%s err=%s",
+                user_id,
+                influencer_id,
+                exc,
+            )
+            chat_id = f"{user_id}_{influencer_id}"
 
     stmt = (
         pg_insert(CallRecord)
@@ -1010,7 +1041,7 @@ async def save_pending_conversation(
             conversation_id=conversation_id,
             user_id=user_id,
             influencer_id=influencer_id,
-            chat_id=chat.id,
+            chat_id=chat_id,
             sid=sid,
             status="pending",
         )
@@ -1020,7 +1051,7 @@ async def save_pending_conversation(
             set_={
                 "user_id": user_id,
                 "influencer_id": influencer_id,
-                "chat_id": chat.id,
+                "chat_id": chat_id,
                 "sid": sid,
                 "status": "pending",
             },
@@ -1028,6 +1059,7 @@ async def save_pending_conversation(
     )
     await db.execute(stmt)
     await db.commit()
+    return chat_id
 
 
 async def was_already_billed(db: AsyncSession, conversation_id: str) -> bool:
@@ -1047,16 +1079,18 @@ async def register_conversation(
     Call this right after startSession resolves a conversationId.
     It lets the server bill even if the client goes offline later (webhook path).
     """
-    await save_pending_conversation(db, conversation_id, body.user_id, body.influencer_id, body.sid)
-    chat_id = None
-    try:
-        res = await db.execute(
-            select(CallRecord.chat_id).where(CallRecord.conversation_id == conversation_id)
-        )
-        row = res.first()
-        chat_id = row[0] if row else None
-    except Exception:
-        pass
+    chat_id = await save_pending_conversation(
+        db, conversation_id, body.user_id, body.influencer_id, body.sid
+    )
+    if not chat_id:
+        try:
+            res = await db.execute(
+                select(CallRecord.chat_id).where(CallRecord.conversation_id == conversation_id)
+            )
+            row = res.first()
+            chat_id = row[0] if row else None
+        except Exception:
+            pass
     # Kick off background polling to persist transcript even if webhook/finalize not called.
     try:
         asyncio.create_task(
@@ -1091,6 +1125,7 @@ async def finalize_conversation(
             conversation_id,
             max_wait_secs=max(10, int(body.timeout_secs or 180)),
         )
+        snapshot = await _ensure_transcript_snapshot(client, conversation_id, snapshot)
 
     status = (snapshot.get("status") or "").lower()
     total_seconds = _extract_total_seconds(snapshot)
@@ -1147,6 +1182,8 @@ async def finalize_conversation(
     if resolved_influencer_id:
         meta["influencer_id"] = resolved_influencer_id
 
+    transcript_synced = bool(normalized_transcript)
+
     try:
         call_record = await db.get(CallRecord, conversation_id)
         if not call_record:
@@ -1180,6 +1217,8 @@ async def finalize_conversation(
             "status": status,
             "total_seconds": total_seconds,
             "meta": meta,
+            "transcript_synced": transcript_synced,
+            "refresh_required": transcript_synced,
         }
 
     # If not yet done, return status only (no billing).
@@ -1192,6 +1231,8 @@ async def finalize_conversation(
             "total_seconds": total_seconds,
             "meta": meta,
             "note": "Conversation not done yet; waiting for webhook or try again later.",
+            "transcript_synced": transcript_synced,
+            "refresh_required": transcript_synced,
         }
 
     # Idempotency: bill only if not already billed AND caller explicitly asked to bill here.
@@ -1204,6 +1245,8 @@ async def finalize_conversation(
             "charged": True,
             "total_seconds": total_seconds,
             "meta": meta,
+            "transcript_synced": transcript_synced,
+            "refresh_required": transcript_synced,
         }
 
     # Default path (webhook will bill; this is UI-only)
@@ -1214,6 +1257,8 @@ async def finalize_conversation(
         "charged": False,
         "total_seconds": total_seconds,
         "meta": meta,
+        "transcript_synced": transcript_synced,
+        "refresh_required": transcript_synced,
     }
 
 

@@ -11,13 +11,12 @@ from sqlalchemy import select
 from app.agents.memory import find_similar_memories, store_fact
 from app.agents.prompts import FACT_EXTRACTOR, FACT_PROMPT
 from app.agents.prompt_utils import (
-    GLOBAL_AUDIO_PROMPT,
-    GLOBAL_PROMPT,
+    build_system_prompt,
     get_today_script,
 )
 from app.agents.scoring import extract_score, get_score, update_score, format_score_value
 from app.core.config import settings
-from app.db.models import Influencer, Message
+from app.db.models import CallRecord, Influencer, Message
 from app.services.openai_assistants import send_agent_message
 from app.utils.tts_sanitizer import sanitize_tts_text
 
@@ -103,7 +102,7 @@ def _flatten_message_content(content) -> str:
 def _history_context(
     history: RedisChatMessageHistory,
     latest_user_message: str | None = None,
-    limit: int = 6,
+    limit: int = 12,
     mode: str = "text",
 ) -> str:
     lines: list[str] = []
@@ -268,7 +267,7 @@ async def _hydrate_history_from_db(history: RedisChatMessageHistory, chat_id: st
     """
     Seed Redis history from DB if empty (helps when switching between calls/text after TTL).
     """
-    if history.messages or not db:
+    if not db:
         return
     try:
         result = await db.execute(
@@ -281,14 +280,185 @@ async def _hydrate_history_from_db(history: RedisChatMessageHistory, chat_id: st
     except Exception as exc:  # pragma: no cover - defensive
         log.warning("history.hydrate_failed chat=%s err=%s", chat_id, exc)
         return
+
+    if not rows:
+        return
+
+    try:
+        # If Redis has fallen behind DB, rebuild the window to guarantee continuity.
+        if not history.messages or len(history.messages) < len(rows):
+            history.clear()
+            existing_pairs: set[tuple[str, str]] = set()
+        else:
+            existing_pairs = set()
+            for msg in history.messages:
+                role = getattr(msg, "type", "") or getattr(msg, "role", "")
+                speaker = "user" if role in {"human", "user"} else "ai"
+                content = _flatten_message_content(getattr(msg, "content", ""))
+                existing_pairs.add((speaker, content))
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("history.prepare_merge_failed chat=%s err=%s", chat_id, exc)
+        return
+
     for row in rows:
         content = (row.content or "").strip()
         if not content:
             continue
-        if row.sender == "user":
+        sender = "user" if row.sender == "user" else "ai"
+        key = (sender, content)
+        if key in existing_pairs:
+            continue
+        if sender == "user":
             history.add_user_message(content)
         else:
             history.add_ai_message(content)
+
+
+async def _hydrate_history_from_call_record(
+    history: RedisChatMessageHistory,
+    db,
+    *,
+    chat_id: str | None,
+    influencer_id: str | None,
+    user_id: str | None,
+    limit: int = 30,
+) -> None:
+    """
+    If messages table missed the transcript, pull from latest CallRecord.transcript.
+    """
+    if not db:
+        return
+    try:
+        stmt = select(CallRecord).where(CallRecord.transcript.isnot(None))
+        if chat_id:
+            stmt = stmt.where(CallRecord.chat_id == chat_id)
+        elif user_id and influencer_id:
+            stmt = stmt.where(
+                CallRecord.user_id == user_id,
+                CallRecord.influencer_id == influencer_id,
+            )
+        stmt = stmt.order_by(CallRecord.created_at.desc()).limit(1)
+        res = await db.execute(stmt)
+        rec = res.scalar_one_or_none()
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("history.call_record_fetch_failed chat=%s err=%s", chat_id, exc)
+        return
+
+    if not rec or not rec.transcript:
+        return
+
+    try:
+        existing_pairs: set[tuple[str, str]] = set()
+        for msg in history.messages:
+            role = getattr(msg, "type", "") or getattr(msg, "role", "")
+            speaker = "user" if role in {"human", "user"} else "ai"
+            content = _flatten_message_content(getattr(msg, "content", ""))
+            existing_pairs.add((speaker, content))
+    except Exception:
+        existing_pairs = set()
+
+    entries = rec.transcript[-limit:] if isinstance(rec.transcript, list) else []
+    for entry in entries:
+        text = str(
+            entry.get("text")
+            or entry.get("content")
+            or entry.get("message")
+            or ""
+        ).strip()
+        if not text:
+            continue
+        role_raw = str(entry.get("sender") or entry.get("role") or "").lower()
+        is_user_flag = entry.get("is_user") or entry.get("from_user")
+        sender = "user" if role_raw in {"user", "human"} or is_user_flag else "ai"
+        key = (sender, text)
+        if key in existing_pairs:
+            continue
+        if sender == "user":
+            history.add_user_message(text)
+        else:
+            history.add_ai_message(text)
+
+
+async def _db_history_snapshot(db, chat_id: str, limit: int = 40) -> str:
+    """
+    Pull recent DB messages when Redis history is thin, for continuity across modes.
+    """
+    if not db:
+        return ""
+    try:
+        result = await db.execute(
+            select(Message)
+            .where(Message.chat_id == chat_id)
+            .order_by(Message.created_at.desc())
+            .limit(limit)
+        )
+        rows = list(result.scalars().all())
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("history.db_snapshot_failed chat=%s err=%s", chat_id, exc)
+        return ""
+
+    if not rows:
+        return ""
+    rows.reverse()  # chronological
+    lines: list[str] = []
+    for row in rows:
+        content = (row.content or "").strip()
+        if not content:
+            continue
+        speaker = "User" if row.sender == "user" else "AI"
+        chan = "call" if row.channel == "call" else "text"
+        lines.append(f"{speaker} ({chan}): {content}")
+    return "\n".join(lines)
+
+
+async def _recent_call_transcript_text(
+    db,
+    *,
+    chat_id: str | None,
+    influencer_id: str | None,
+    user_id: str | None,
+    limit: int = 30,
+) -> str:
+    """
+    Fetch the latest call transcript and format it as plain lines for context.
+    """
+    if not db:
+        return ""
+    try:
+        stmt = select(CallRecord).where(CallRecord.transcript.isnot(None))
+        if chat_id:
+            stmt = stmt.where(CallRecord.chat_id == chat_id)
+        elif user_id and influencer_id:
+            stmt = stmt.where(
+                CallRecord.user_id == user_id,
+                CallRecord.influencer_id == influencer_id,
+            )
+        stmt = stmt.order_by(CallRecord.created_at.desc()).limit(1)
+        res = await db.execute(stmt)
+        rec = res.scalar_one_or_none()
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("recent_call.fetch_failed chat=%s err=%s", chat_id, exc)
+        return ""
+
+    if not rec or not rec.transcript:
+        return ""
+
+    entries = rec.transcript[-limit:] if isinstance(rec.transcript, list) else []
+    lines: list[str] = []
+    for entry in entries:
+        text = str(
+            entry.get("text")
+            or entry.get("content")
+            or entry.get("message")
+            or ""
+        ).strip()
+        if not text:
+            continue
+        role_raw = str(entry.get("sender") or entry.get("role") or "").lower()
+        is_user_flag = entry.get("is_user") or entry.get("from_user")
+        speaker = "User" if role_raw in {"user", "human"} or is_user_flag else "AI"
+        lines.append(f"{speaker}: {text}")
+    return "\n".join(lines)
 
 def _lollity_phase(score: int) -> str:
     if score >= 85:
@@ -425,19 +595,32 @@ async def handle_turn(
     else:
         persona_rules += "\nYou're in full teasing mode! Challenge the user, play hard to get, and use the name TeaseMe as a game."
 
-    prompt_template = GLOBAL_AUDIO_PROMPT if is_audio else GLOBAL_PROMPT
-    prompt = prompt_template.partial(
-        persona_rules=persona_rules, 
-        memories=mem_block,
-        knowledge_base=knowledge_block,
-        daily_context= await get_today_script(db,influencer_id),
-        last_user_message=message
-    )
-
     daily_context = await get_today_script(db, influencer_id)
+    system_context = await build_system_prompt(
+        db=db,
+        influencer_id=influencer_id,
+        score=score,
+        memories=[m for m in mem_block.split("\n") if m],
+        is_audio=is_audio,
+        last_user_message=message,
+    )
     history = redis_history(chat_id)
     await _hydrate_history_from_db(history, chat_id, db)
+    await _hydrate_history_from_call_record(
+        history,
+        db,
+        chat_id=chat_id,
+        influencer_id=influencer_id,
+        user_id=user_id,
+    )
     _trim_history(history)
+    call_recency = await _recent_call_transcript_text(
+        db,
+        chat_id=chat_id,
+        influencer_id=influencer_id,
+        user_id=user_id,
+    )
+    db_history_context = await _db_history_snapshot(db, chat_id, limit=40)
     cached_thread_id = _get_thread_id(chat_id, influencer_id)
 
     assistant_id = getattr(influencer, "influencer_gpt_agent_id", None)
@@ -501,12 +684,23 @@ async def handle_turn(
             negging_guard=signals.negging_guard,
             mode="call" if is_audio else "text",
         )
-        history_context = _history_context(history, mode="call" if is_audio else "text")
+        history_context = _history_context(
+            history,
+            mode="call" if is_audio else "text",
+            limit=18 if is_audio else 18,
+        )
         context_sections: list[str] = []
+        if system_context:
+            context_sections.append(system_context.strip())
         if assistant_context.strip():
             context_sections.append(assistant_context.strip())
         if history_context:
             context_sections.append("[recent_history]\n" + history_context)
+        # When Redis is thin, backfill with DB snapshot to keep long-running context.
+        if db_history_context and (not history_context or len(history_context.splitlines()) < 8):
+            context_sections.append("[db_history]\n" + db_history_context)
+        if call_recency:
+            context_sections.append("[recent_call]\n" + call_recency)
         merged_context = "\n\n".join(context_sections).strip()
 
         reply, new_thread_id = await send_agent_message(
@@ -534,16 +728,46 @@ async def handle_turn(
         facts_resp = await FACT_EXTRACTOR.ainvoke(FACT_PROMPT.format(msg=message, ctx=recent_ctx))
         facts_txt = facts_resp.content or ""
         lines = [ln.strip("- ").strip() for ln in facts_txt.split("\n") if ln.strip()]
+        to_save = []
         for line in lines[:5]:
             if line.lower() == "no new memories.":
                 continue
-            await store_fact(db, chat_id, line)
+            to_save.append(line)
+        for fact in to_save:
+            try:
+                await store_fact(db, chat_id, fact)
+            except Exception as inner_ex:
+                log.error("[%s] store_fact failed fact=%r err=%s", cid, fact, inner_ex, exc_info=True)
+        if not to_save:
+            log.info("[%s] Fact extractor returned no savable facts.", cid)
     except Exception as ex:
         log.error("[%s] Fact extraction failed: %s", cid, ex, exc_info=True)
 
     if is_audio:
         return sanitize_tts_text(reply)
     return reply
+
+
+async def reply(
+    message: str,
+    chat_id: str,
+    influencer_id: str,
+    user_id: str | None = None,
+    db=None,
+    is_audio: bool = False,
+) -> str:
+    """
+    Compatibility wrapper for the /reply webhook so older call sites can keep
+    their signature while reusing the consolidated handle_turn logic.
+    """
+    return await handle_turn(
+        message=message,
+        chat_id=chat_id,
+        influencer_id=influencer_id,
+        user_id=user_id,
+        db=db,
+        is_audio=is_audio,
+    )
 
 
 def _normalize_lollity_tag(text: str, score: float) -> str:

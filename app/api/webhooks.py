@@ -16,7 +16,8 @@ from app.api.elevenlabs import (
 )
 from sqlalchemy import select
 from app.db.models import CallRecord
-from app.agents.turn_handler import handle_turn
+from app.services.chat_service import get_or_create_chat
+from app.agents.turn_handler import reply as generate_reply
 
 log = logging.getLogger(__name__)
 
@@ -99,6 +100,31 @@ async def _resolve_user_for_conversation(db, conversation_id: str):
         "chat_id": chat_id,
     }
 
+
+async def _ensure_chat_id(
+    db: AsyncSession,
+    user_id: int | None,
+    influencer_id: str | None,
+    chat_id: str | None,
+) -> str | None:
+    """
+    Return a stable chat id so Redis + OpenAI threads persist between text/voice.
+    """
+    if chat_id:
+        return chat_id
+    if not db or not user_id or not influencer_id:
+        return chat_id or None
+    try:
+        return await get_or_create_chat(db, user_id, influencer_id)
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning(
+            "webhook.chat_id_resolve_failed user=%s infl=%s err=%s",
+            user_id,
+            influencer_id,
+            exc,
+        )
+        return chat_id or f"{user_id}_{influencer_id}"
+
 def _verify_token(shared: str, token: str | None) -> None:
     """Simple shared-secret check (constant time if you prefer)."""
     if not shared:  # secret disabled
@@ -175,14 +201,40 @@ async def eleven_webhook_reply(
         )
         return {"text": "Hmm, I lost track of our chat. Could you say that again?"}
 
+    chat_id = await _ensure_chat_id(db, user_id, influencer_id, chat_id)
+
     if not chat_id:
         chat_id = f"{user_id}_{influencer_id}"
+
+    if conversation_id and chat_id:
+        try:
+            rec = await db.get(CallRecord, conversation_id)
+            if rec:
+                updated = False
+                if not rec.chat_id:
+                    rec.chat_id = chat_id
+                    updated = True
+                if not rec.user_id and user_id:
+                    rec.user_id = user_id
+                    updated = True
+                if not rec.influencer_id and influencer_id:
+                    rec.influencer_id = influencer_id
+                    updated = True
+                if updated:
+                    db.add(rec)
+                    await db.commit()
+        except Exception as exc:  # pragma: no cover - defensive
+            log.warning(
+                "[EL TOOL] failed to backfill chat_id for conversation %s: %s",
+                conversation_id,
+                exc,
+            )
 
     # 4) Gera a resposta (timeout + métricas)
     started = time.perf_counter()
     try:
-        reply = await asyncio.wait_for(
-            handle_turn(
+        ai_reply = await asyncio.wait_for(
+            generate_reply(
                 message=user_text,
                 chat_id=chat_id,
                 influencer_id=influencer_id,
@@ -193,10 +245,10 @@ async def eleven_webhook_reply(
             timeout=8.5,  # ajuste conforme sua latência média
         )
     except asyncio.TimeoutError:
-        reply = "One sec… could you say that again?"
+        ai_reply = "One sec… could you say that again?"
     except Exception as e:
         log.exception("[EL TOOL] handle_turn failed: %s", e)
-        reply = "Sorry, something went wrong."
+        ai_reply = "Sorry, something went wrong."
     finally:
         ms = int((time.perf_counter() - started) * 1000)
         log.info(
@@ -205,10 +257,10 @@ async def eleven_webhook_reply(
         )
 
     # 5) Poda de segurança (fala muito longa atrapalha a UX de voz)
-    if isinstance(reply, str) and len(reply) > 320:
-        reply = reply[:317] + "…"
+    if isinstance(ai_reply, str) and len(ai_reply) > 320:
+        ai_reply = ai_reply[:317] + "…"
 
-    return {"text": reply}
+    return {"text": ai_reply}
 
 @router.post("/elevenlabs")
 async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_db)):
@@ -281,6 +333,19 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
 
     # Only bill when the conversation is fully done (avoid processing/in-progress).
     if status == "done" and user_id:
+        if not chat_id and meta_map.get("influencer_id"):
+            try:
+                chat_id = await get_or_create_chat(db, user_id, meta_map.get("influencer_id"))
+            except Exception as exc:  # pragma: no cover - defensive
+                log.warning(
+                    "webhook.chat_id_create_failed conv=%s user=%s infl=%s err=%s",
+                    _redact(conversation_id),
+                    _redact(user_id),
+                    meta_map.get("influencer_id"),
+                    exc,
+                )
+                chat_id = None
+
         meta = {
             "session_id": sid,
             "conversation_id": conversation_id,

@@ -64,7 +64,12 @@ async def store_fact(db, chat_id: str, fact: str, sender: str = "user"):
         return  # skip saving
 
     # get embedding
-    emb = await get_embedding(norm_fact)
+    try:
+        emb = await get_embedding(norm_fact)
+    except Exception as exc:
+        import logging
+        logging.getLogger("memory").error("get_embedding failed for fact=%r chat=%s err=%s", norm_fact, chat_id, exc, exc_info=True)
+        return
 
     # save or update
     await upsert_memory(
