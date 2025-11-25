@@ -379,6 +379,38 @@ async def _hydrate_history_from_call_record(
             history.add_ai_message(text)
 
 
+async def _db_history_snapshot(db, chat_id: str, limit: int = 40) -> str:
+    """
+    Pull recent DB messages when Redis history is thin, for continuity across modes.
+    """
+    if not db:
+        return ""
+    try:
+        result = await db.execute(
+            select(Message)
+            .where(Message.chat_id == chat_id)
+            .order_by(Message.created_at.desc())
+            .limit(limit)
+        )
+        rows = list(result.scalars().all())
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("history.db_snapshot_failed chat=%s err=%s", chat_id, exc)
+        return ""
+
+    if not rows:
+        return ""
+    rows.reverse()  # chronological
+    lines: list[str] = []
+    for row in rows:
+        content = (row.content or "").strip()
+        if not content:
+            continue
+        speaker = "User" if row.sender == "user" else "AI"
+        chan = "call" if row.channel == "call" else "text"
+        lines.append(f"{speaker} ({chan}): {content}")
+    return "\n".join(lines)
+
+
 async def _recent_call_transcript_text(
     db,
     *,
@@ -588,6 +620,7 @@ async def handle_turn(
         influencer_id=influencer_id,
         user_id=user_id,
     )
+    db_history_context = await _db_history_snapshot(db, chat_id, limit=40)
     cached_thread_id = _get_thread_id(chat_id, influencer_id)
 
     assistant_id = getattr(influencer, "influencer_gpt_agent_id", None)
@@ -663,6 +696,9 @@ async def handle_turn(
             context_sections.append(assistant_context.strip())
         if history_context:
             context_sections.append("[recent_history]\n" + history_context)
+        # When Redis is thin, backfill with DB snapshot to keep long-running context.
+        if db_history_context and (not history_context or len(history_context.splitlines()) < 8):
+            context_sections.append("[db_history]\n" + db_history_context)
         if call_recency:
             context_sections.append("[recent_call]\n" + call_recency)
         merged_context = "\n\n".join(context_sections).strip()
