@@ -16,6 +16,7 @@ from app.api.elevenlabs import (
 )
 from sqlalchemy import select
 from app.db.models import CallRecord
+from app.services.chat_service import get_or_create_chat
 from app.agents.turn_handler import reply as generate_reply
 
 log = logging.getLogger(__name__)
@@ -99,6 +100,31 @@ async def _resolve_user_for_conversation(db, conversation_id: str):
         "chat_id": chat_id,
     }
 
+
+async def _ensure_chat_id(
+    db: AsyncSession,
+    user_id: int | None,
+    influencer_id: str | None,
+    chat_id: str | None,
+) -> str | None:
+    """
+    Return a stable chat id so Redis + OpenAI threads persist between text/voice.
+    """
+    if chat_id:
+        return chat_id
+    if not db or not user_id or not influencer_id:
+        return chat_id or None
+    try:
+        return await get_or_create_chat(db, user_id, influencer_id)
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning(
+            "webhook.chat_id_resolve_failed user=%s infl=%s err=%s",
+            user_id,
+            influencer_id,
+            exc,
+        )
+        return chat_id or f"{user_id}_{influencer_id}"
+
 def _verify_token(shared: str, token: str | None) -> None:
     """Simple shared-secret check (constant time if you prefer)."""
     if not shared:  # secret disabled
@@ -175,8 +201,34 @@ async def eleven_webhook_reply(
         )
         return {"text": "Hmm, I lost track of our chat. Could you say that again?"}
 
+    chat_id = await _ensure_chat_id(db, user_id, influencer_id, chat_id)
+
     if not chat_id:
         chat_id = f"{user_id}_{influencer_id}"
+
+    if conversation_id and chat_id:
+        try:
+            rec = await db.get(CallRecord, conversation_id)
+            if rec:
+                updated = False
+                if not rec.chat_id:
+                    rec.chat_id = chat_id
+                    updated = True
+                if not rec.user_id and user_id:
+                    rec.user_id = user_id
+                    updated = True
+                if not rec.influencer_id and influencer_id:
+                    rec.influencer_id = influencer_id
+                    updated = True
+                if updated:
+                    db.add(rec)
+                    await db.commit()
+        except Exception as exc:  # pragma: no cover - defensive
+            log.warning(
+                "[EL TOOL] failed to backfill chat_id for conversation %s: %s",
+                conversation_id,
+                exc,
+            )
 
     # 4) Gera a resposta (timeout + métricas)
     started = time.perf_counter()
