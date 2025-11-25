@@ -14,7 +14,7 @@ MODEL = ChatOpenAI(
 )
 
 FACT_EXTRACTOR = ChatOpenAI(
-    openai_api_key=settings.OPENAI_API_KEY,
+    api_key=settings.OPENAI_API_KEY,
     model="gpt-4o-mini",
     temperature=0.5,
     max_tokens=512,

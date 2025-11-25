@@ -692,10 +692,18 @@ async def handle_turn(
         facts_resp = await FACT_EXTRACTOR.ainvoke(FACT_PROMPT.format(msg=message, ctx=recent_ctx))
         facts_txt = facts_resp.content or ""
         lines = [ln.strip("- ").strip() for ln in facts_txt.split("\n") if ln.strip()]
+        to_save = []
         for line in lines[:5]:
             if line.lower() == "no new memories.":
                 continue
-            await store_fact(db, chat_id, line)
+            to_save.append(line)
+        for fact in to_save:
+            try:
+                await store_fact(db, chat_id, fact)
+            except Exception as inner_ex:
+                log.error("[%s] store_fact failed fact=%r err=%s", cid, fact, inner_ex, exc_info=True)
+        if not to_save:
+            log.info("[%s] Fact extractor returned no savable facts.", cid)
     except Exception as ex:
         log.error("[%s] Fact extraction failed: %s", cid, ex, exc_info=True)
 
