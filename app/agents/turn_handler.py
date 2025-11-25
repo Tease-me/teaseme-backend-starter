@@ -102,7 +102,7 @@ def _flatten_message_content(content) -> str:
 def _history_context(
     history: RedisChatMessageHistory,
     latest_user_message: str | None = None,
-    limit: int = 6,
+    limit: int = 12,
     mode: str = "text",
 ) -> str:
     lines: list[str] = []
@@ -378,6 +378,56 @@ async def _hydrate_history_from_call_record(
         else:
             history.add_ai_message(text)
 
+
+async def _recent_call_transcript_text(
+    db,
+    *,
+    chat_id: str | None,
+    influencer_id: str | None,
+    user_id: str | None,
+    limit: int = 30,
+) -> str:
+    """
+    Fetch the latest call transcript and format it as plain lines for context.
+    """
+    if not db:
+        return ""
+    try:
+        stmt = select(CallRecord).where(CallRecord.transcript.isnot(None))
+        if chat_id:
+            stmt = stmt.where(CallRecord.chat_id == chat_id)
+        elif user_id and influencer_id:
+            stmt = stmt.where(
+                CallRecord.user_id == user_id,
+                CallRecord.influencer_id == influencer_id,
+            )
+        stmt = stmt.order_by(CallRecord.created_at.desc()).limit(1)
+        res = await db.execute(stmt)
+        rec = res.scalar_one_or_none()
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("recent_call.fetch_failed chat=%s err=%s", chat_id, exc)
+        return ""
+
+    if not rec or not rec.transcript:
+        return ""
+
+    entries = rec.transcript[-limit:] if isinstance(rec.transcript, list) else []
+    lines: list[str] = []
+    for entry in entries:
+        text = str(
+            entry.get("text")
+            or entry.get("content")
+            or entry.get("message")
+            or ""
+        ).strip()
+        if not text:
+            continue
+        role_raw = str(entry.get("sender") or entry.get("role") or "").lower()
+        is_user_flag = entry.get("is_user") or entry.get("from_user")
+        speaker = "User" if role_raw in {"user", "human"} or is_user_flag else "AI"
+        lines.append(f"{speaker}: {text}")
+    return "\n".join(lines)
+
 def _lollity_phase(score: int) -> str:
     if score >= 85:
         return "intimate"
@@ -532,6 +582,12 @@ async def handle_turn(
         user_id=user_id,
     )
     _trim_history(history)
+    call_recency = await _recent_call_transcript_text(
+        db,
+        chat_id=chat_id,
+        influencer_id=influencer_id,
+        user_id=user_id,
+    )
     cached_thread_id = _get_thread_id(chat_id, influencer_id)
 
     assistant_id = getattr(influencer, "influencer_gpt_agent_id", None)
@@ -595,7 +651,11 @@ async def handle_turn(
             negging_guard=signals.negging_guard,
             mode="call" if is_audio else "text",
         )
-        history_context = _history_context(history, mode="call" if is_audio else "text")
+        history_context = _history_context(
+            history,
+            mode="call" if is_audio else "text",
+            limit=18 if is_audio else 18,
+        )
         context_sections: list[str] = []
         if system_context:
             context_sections.append(system_context.strip())
@@ -603,6 +663,8 @@ async def handle_turn(
             context_sections.append(assistant_context.strip())
         if history_context:
             context_sections.append("[recent_history]\n" + history_context)
+        if call_recency:
+            context_sections.append("[recent_call]\n" + call_recency)
         merged_context = "\n\n".join(context_sections).strip()
 
         reply, new_thread_id = await send_agent_message(
