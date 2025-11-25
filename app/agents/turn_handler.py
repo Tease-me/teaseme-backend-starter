@@ -268,7 +268,7 @@ async def _hydrate_history_from_db(history: RedisChatMessageHistory, chat_id: st
     """
     Seed Redis history from DB if empty (helps when switching between calls/text after TTL).
     """
-    if history.messages or not db:
+    if not db:
         return
     try:
         result = await db.execute(
@@ -281,11 +281,35 @@ async def _hydrate_history_from_db(history: RedisChatMessageHistory, chat_id: st
     except Exception as exc:  # pragma: no cover - defensive
         log.warning("history.hydrate_failed chat=%s err=%s", chat_id, exc)
         return
+
+    if not rows:
+        return
+
+    try:
+        # If Redis has fallen behind DB, rebuild the window to guarantee continuity.
+        if not history.messages or len(history.messages) < len(rows):
+            history.clear()
+            existing_pairs: set[tuple[str, str]] = set()
+        else:
+            existing_pairs = set()
+            for msg in history.messages:
+                role = getattr(msg, "type", "") or getattr(msg, "role", "")
+                speaker = "user" if role in {"human", "user"} else "ai"
+                content = _flatten_message_content(getattr(msg, "content", ""))
+                existing_pairs.add((speaker, content))
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("history.prepare_merge_failed chat=%s err=%s", chat_id, exc)
+        return
+
     for row in rows:
         content = (row.content or "").strip()
         if not content:
             continue
-        if row.sender == "user":
+        sender = "user" if row.sender == "user" else "ai"
+        key = (sender, content)
+        if key in existing_pairs:
+            continue
+        if sender == "user":
             history.add_user_message(content)
         else:
             history.add_ai_message(content)

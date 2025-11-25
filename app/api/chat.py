@@ -140,14 +140,23 @@ def _split_into_double_text_chunks(text: str, allow_split: bool = True) -> List[
 
 
 async def _save_ai_messages(db_ai: AsyncSession, chat_id: str, chunks: List[str]) -> None:
-    payloads = [
-        {"chat_id": chat_id, "sender": "ai", "content": chunk.strip()}
-        for chunk in chunks
-        if chunk and chunk.strip()
-    ]
-    if not payloads:
+    rows = []
+    for chunk in chunks:
+        if not chunk or not chunk.strip():
+            continue
+        emb = await _safe_embedding(chunk.strip())
+        rows.append(
+            {
+                "chat_id": chat_id,
+                "sender": "ai",
+                "channel": "text",
+                "content": chunk.strip(),
+                "embedding": emb,
+            }
+        )
+    if not rows:
         return
-    await db_ai.execute(insert(Message), payloads)
+    await db_ai.execute(insert(Message), rows)
     await db_ai.commit()
 
 
@@ -516,6 +525,8 @@ async def websocket_chat(
         log.error("[WS] JWT decode error: %s", e)
         return
 
+    last_chat_id: Optional[str] = None
+
     try:
         while True:
             raw = await ws.receive_json()
@@ -534,7 +545,15 @@ async def websocket_chat(
                 or reply_mode in {"audio", "voice", "tts", "speech"}
             )
 
-            chat_id = raw.get("chat_id") or f"{user_id}_{influencer_id}"
+            chat_id = raw.get("chat_id") or last_chat_id
+            if not chat_id:
+                # Keep a stable chat id shared with calls by using the DB-backed helper.
+                try:
+                    chat_id = await get_or_create_chat(db, user_id, influencer_id)
+                except Exception as exc:
+                    log.warning("[WS] get_or_create_chat failed user=%s infl=%s err=%s", user_id, influencer_id, exc)
+                    chat_id = f"{user_id}_{influencer_id}"
+            last_chat_id = chat_id
 
             # 🔒 PRE-CHECK: deny if user cannot afford a burst (1 unit)
             ok, cost, free_left = await can_afford(db, user_id=user_id, feature="text", units=1)
@@ -603,7 +622,7 @@ async def websocket_chat(
     except WebSocketDisconnect:
         log.info("[WS] Client %s disconnected from %s", user_id, influencer_id)
         # Cleanup buffer on disconnect to prevent memory leaks
-        chat_id = f"{user_id}_{influencer_id}"
+        chat_id = last_chat_id or f"{user_id}_{influencer_id}"
         if chat_id in _buffers:
             buf = _buffers[chat_id]
             # Cancel any pending timer
