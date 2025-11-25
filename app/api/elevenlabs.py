@@ -318,8 +318,8 @@ def _build_agent_patch_payload(
     """
     agent_cfg: Dict[str, Any] = {}
 
-    if first_message is not None:
-        agent_cfg["first_message"] = first_message
+    # if first_message is not None:
+    #     agent_cfg["first_message"] = first_message
 
     if any(v is not None for v in (prompt_text, llm, temperature, max_tokens)):
         prompt_block: Dict[str, Any] = {}
@@ -355,7 +355,7 @@ def _build_agent_create_payload(
         raise HTTPException(400, "voice_id is required to create an ElevenLabs agent.")
 
     agent_cfg: Dict[str, Any] = {
-        "first_message": first_message or "",
+        # "first_message": first_message or "",
         "language": language,
         "prompt": {
             "prompt": prompt_text or "",
@@ -391,7 +391,7 @@ async def _patch_agent_config(
 ) -> None:
     """PATCH /convai/agents/{agent_id} with the minimal update payload."""
     payload = _build_agent_patch_payload(
-        first_message=first_message,
+        # first_message=first_message,
         prompt_text=prompt_text,
         llm=llm,
         temperature=temperature,
@@ -465,7 +465,7 @@ async def _create_agent(
         name=name,
         voice_id=voice_id,
         prompt_text=prompt_text,
-        first_message=first_message,
+        # first_message=first_message,
         language=language,
         llm=llm,
         temperature=temperature,
@@ -612,7 +612,7 @@ async def _push_prompt_to_elevenlabs(
                 await _patch_agent_config(
                     client,
                     agent_id=agent_id,
-                    first_message=first_message,
+                    # first_message=first_message,
                     prompt_text=prompt_text,
                     llm=llm,
                     temperature=temperature,
@@ -640,7 +640,7 @@ async def _push_prompt_to_elevenlabs(
             name=agent_name,
             voice_id=resolved_voice_id,
             prompt_text=prompt_text,
-            first_message=first_message,
+            # first_message=first_message,
             language=language,
             llm=llm,
             temperature=temperature,
@@ -1254,7 +1254,7 @@ async def update_elevenlabs_prompt(
         agent_id = await _push_prompt_to_elevenlabs(
             agent_id=agent_id,
             prompt_text=body.voice_prompt,
-            first_message=body.first_message,
+            # first_message=body.first_message,
             voice_id=resolved_voice_id,
             agent_name=agent_name,
         )
