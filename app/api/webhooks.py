@@ -333,6 +333,19 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
 
     # Only bill when the conversation is fully done (avoid processing/in-progress).
     if status == "done" and user_id:
+        if not chat_id and meta_map.get("influencer_id"):
+            try:
+                chat_id = await get_or_create_chat(db, user_id, meta_map.get("influencer_id"))
+            except Exception as exc:  # pragma: no cover - defensive
+                log.warning(
+                    "webhook.chat_id_create_failed conv=%s user=%s infl=%s err=%s",
+                    _redact(conversation_id),
+                    _redact(user_id),
+                    meta_map.get("influencer_id"),
+                    exc,
+                )
+                chat_id = None
+
         meta = {
             "session_id": sid,
             "conversation_id": conversation_id,
