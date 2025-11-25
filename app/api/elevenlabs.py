@@ -887,11 +887,7 @@ async def get_signed_url(
 ):
     """
     (1) Check user credits before starting a live chat call.
-    (2) Optionally update the agent's first_message (greeting).
-    (3) Return a signed_url for the client to open a conversation.
-    
-    NOTE: PATCHing the agent updates it globally.
-    If concurrent users need distinct greetings, prefer a per-conversation override.
+    (2) Return a signed_url for the client to open a conversation (no first_message override).
     """
     # --- Check credits before starting call ---
     ok, cost_cents, free_left = await can_afford(
@@ -911,22 +907,10 @@ async def get_signed_url(
     agent_id = await get_agent_id_from_influencer(db, influencer_id)
     chat_id = await get_or_create_chat(db, user_id, influencer_id)
 
-    greeting: Optional[str] = first_message
-    if not greeting:
-        greeting = await _generate_contextual_greeting(db, chat_id, influencer_id)
-    if not greeting:
-        greeting = _pick_greeting(influencer_id, greeting_mode)
-    greeting = _add_natural_pause(greeting)
+    # Do not send or patch a first_message; let ElevenLabs handle the default.
+    greeting: Optional[str] = None
 
     async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
-        # Safety: ensure the agent has a first_message to satisfy ConvAI requirement
-        if greeting:
-            try:
-                await _push_first_message_to_agent(client, agent_id, greeting)
-            except HTTPException:
-                raise
-            except Exception as exc:
-                log.warning("signed_url.first_message_patch_failed agent=%s err=%s", agent_id, exc)
         signed_url = await _get_conversation_signed_url(client, agent_id)
 
     return {
@@ -934,7 +918,7 @@ async def get_signed_url(
         "greeting_used": greeting,
         # Send this to ElevenLabs ConvAI as dynamic variable `first_message`
         "first_message_for_convai": greeting,
-        "dynamic_variables": {"first_message": greeting},
+        "dynamic_variables": {"first_message": greeting} if greeting else {},
         "agent_id": agent_id,
         "credits_remainder_secs": credits_remainder_secs,
         "chat_id": chat_id,
@@ -949,34 +933,22 @@ async def get_signed_url_free(
     greeting_mode: str = Query("random", pattern="^(random|rr)$"),
 ):
     """
-    (1) Check user credits before starting a live chat call.
-    (2) Optionally update the agent's first_message (greeting).
-    (3) Return a signed_url for the client to open a conversation.
-    
-    NOTE: PATCHing the agent updates it globally.
-    If concurrent users need distinct greetings, prefer a per-conversation override.
+    (1) Return a signed_url for the client to open a conversation (no first_message override).
     """
     # --- Check credits before starting call ---
 
     agent_id = await get_agent_id_from_influencer(db, influencer_id)
-    greeting = first_message or _pick_greeting(influencer_id, greeting_mode)
-    greeting = _add_natural_pause(greeting)
+    # Do not send or patch a first_message; let ElevenLabs handle the default.
+    greeting = None
 
     async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
-        if greeting:
-            try:
-                await _push_first_message_to_agent(client, agent_id, greeting)
-            except HTTPException:
-                raise
-            except Exception as exc:
-                log.warning("signed_url_free.first_message_patch_failed agent=%s err=%s", agent_id, exc)
         signed_url = await _get_conversation_signed_url(client, agent_id)
 
     return {
         "signed_url": signed_url,
         "greeting_used": greeting,
         "first_message_for_convai": greeting,
-        "dynamic_variables": {"first_message": greeting},
+        "dynamic_variables": {"first_message": greeting} if greeting else {},
         "agent_id": agent_id,
     }
 
