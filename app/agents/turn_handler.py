@@ -546,6 +546,28 @@ async def handle_turn(
     return reply
 
 
+async def reply(
+    message: str,
+    chat_id: str,
+    influencer_id: str,
+    user_id: str | None = None,
+    db=None,
+    is_audio: bool = False,
+) -> str:
+    """
+    Compatibility wrapper for the /reply webhook so older call sites can keep
+    their signature while reusing the consolidated handle_turn logic.
+    """
+    return await handle_turn(
+        message=message,
+        chat_id=chat_id,
+        influencer_id=influencer_id,
+        user_id=user_id,
+        db=db,
+        is_audio=is_audio,
+    )
+
+
 def _normalize_lollity_tag(text: str, score: float) -> str:
     formatted = format_score_value(score)
     tag = f"[Lollity Score: {formatted}/100]"

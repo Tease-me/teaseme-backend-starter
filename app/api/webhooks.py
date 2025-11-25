@@ -16,7 +16,7 @@ from app.api.elevenlabs import (
 )
 from sqlalchemy import select
 from app.db.models import CallRecord
-from app.agents.turn_handler import handle_turn
+from app.agents.turn_handler import reply as generate_reply
 
 log = logging.getLogger(__name__)
 
@@ -181,8 +181,8 @@ async def eleven_webhook_reply(
     # 4) Gera a resposta (timeout + métricas)
     started = time.perf_counter()
     try:
-        reply = await asyncio.wait_for(
-            handle_turn(
+        ai_reply = await asyncio.wait_for(
+            generate_reply(
                 message=user_text,
                 chat_id=chat_id,
                 influencer_id=influencer_id,
@@ -193,10 +193,10 @@ async def eleven_webhook_reply(
             timeout=8.5,  # ajuste conforme sua latência média
         )
     except asyncio.TimeoutError:
-        reply = "One sec… could you say that again?"
+        ai_reply = "One sec… could you say that again?"
     except Exception as e:
         log.exception("[EL TOOL] handle_turn failed: %s", e)
-        reply = "Sorry, something went wrong."
+        ai_reply = "Sorry, something went wrong."
     finally:
         ms = int((time.perf_counter() - started) * 1000)
         log.info(
@@ -205,10 +205,10 @@ async def eleven_webhook_reply(
         )
 
     # 5) Poda de segurança (fala muito longa atrapalha a UX de voz)
-    if isinstance(reply, str) and len(reply) > 320:
-        reply = reply[:317] + "…"
+    if isinstance(ai_reply, str) and len(ai_reply) > 320:
+        ai_reply = ai_reply[:317] + "…"
 
-    return {"text": reply}
+    return {"text": ai_reply}
 
 @router.post("/elevenlabs")
 async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_db)):
