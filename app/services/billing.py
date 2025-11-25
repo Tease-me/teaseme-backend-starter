@@ -7,31 +7,6 @@ from datetime import date
 from fastapi import HTTPException
 from app.db.models import CreditWallet, CreditTransaction, DailyUsage, Pricing
 
-# Feature -> DailyUsage counter column
-_USAGE_FIELD = {
-    "text": "text_count",
-    "voice": "voice_secs",
-    "live_chat": "live_secs",
-}
-
-
-async def _get_pricing(db: AsyncSession, feature: str) -> Pricing:
-    """
-    Return the most recent active pricing row for a feature or raise.
-    """
-    price: Pricing | None = await db.scalar(
-        select(Pricing)
-        .where(Pricing.feature == feature, Pricing.is_active.is_(True))
-        .order_by(Pricing.id.desc())
-    )
-    if not price:
-        raise HTTPException(500, f"Pricing not configured for feature={feature}")
-    return price
-
-
-def _get_usage_field(feature: str) -> str:
-    return _USAGE_FIELD.get(feature) or _USAGE_FIELD["text"]
-
 async def charge_feature(db, *, user_id: int, feature: str, units: int, meta: dict | None = None):
     today = date.today()
     usage = await db.get(DailyUsage, (user_id, today)) or DailyUsage(user_id=user_id, date=today)
@@ -41,17 +16,28 @@ async def charge_feature(db, *, user_id: int, feature: str, units: int, meta: di
         if getattr(usage, field, None) is None:
             setattr(usage, field, 0)
 
-    price: Pricing = await _get_pricing(db, feature)
+    price: Pricing = await db.scalar(select(Pricing).where(
+        Pricing.feature == feature, Pricing.is_active.is_(True)
+    ))
+    if not price:
+        raise HTTPException(500, "Pricing not configured")
 
-    usage_field = _get_usage_field(feature)
-    used = getattr(usage, usage_field, 0) or 0
-    free_left = max((price.free_allowance or 0) - used, 0)
+    free_left = {
+        "text":  max((price.free_allowance or 0) - (usage.text_count or 0), 0),
+        "voice": max((price.free_allowance or 0) - (usage.voice_secs or 0), 0),
+        "live_chat": max((price.free_allowance or 0) - (usage.live_secs or 0), 0),
+    }[feature]
 
     billable = max(units - free_left, 0)
     cost = billable * price.price_cents
 
     # Update usage counters
-    setattr(usage, usage_field, used + units)
+    if feature == "text":
+        usage.text_count += units
+    elif feature == "voice":
+        usage.voice_secs += units
+    else:
+        usage.live_secs += units
     db.add(usage)
 
     # Debit wallet
@@ -183,16 +169,27 @@ async def can_afford(
     No DB mutations.
     """
     # pricing
-    try:
-        price = await _get_pricing(db, feature)
-    except HTTPException:
-        return False, 0, 0
+    price: Pricing | None = await db.scalar(
+        select(Pricing).where(Pricing.feature == feature, Pricing.is_active.is_(True))
+    )
+    if not price:
+        # no pricing? don't block
+        return True, 0, 0
 
     # usage today
     today = date.today()
     usage: DailyUsage | None = await db.get(DailyUsage, (user_id, today))
-    usage_field = _get_usage_field(feature)
-    used = getattr(usage, usage_field, 0) if usage else 0
+    # base counters
+    text_used = getattr(usage, "text_count", 0) if usage else 0
+    voice_used = getattr(usage, "voice_secs", 0) if usage else 0
+    live_used  = getattr(usage, "live_secs",  0) if usage else 0
+
+    if feature == "text":
+        used = text_used
+    elif feature == "voice":
+        used = voice_used
+    else:
+        used = live_used
 
     free_left = max((price.free_allowance or 0) - (used or 0), 0)
     billable = max(units - free_left, 0)
@@ -214,9 +211,10 @@ async def get_remaining_units(db: AsyncSession, user_id: int, feature: str) -> i
     from datetime import date
     from app.db.models import Pricing, DailyUsage, CreditWallet
 
-    try:
-        price = await _get_pricing(db, feature)
-    except HTTPException:
+    price: Pricing | None = await db.scalar(
+        select(Pricing).where(Pricing.feature == feature, Pricing.is_active.is_(True))
+    )
+    if not price:
         return 0
 
     unit_price_cents = price.price_cents
@@ -225,8 +223,7 @@ async def get_remaining_units(db: AsyncSession, user_id: int, feature: str) -> i
     # usage today
     today = date.today()
     usage: DailyUsage | None = await db.get(DailyUsage, (user_id, today))
-    usage_field = _get_usage_field(feature)
-    used = getattr(usage, usage_field, 0) if usage else 0
+    used = getattr(usage, f"{feature}_secs", 0) if usage else 0
     free_left = max(free_allowance - (used or 0), 0)
 
     # wallet
