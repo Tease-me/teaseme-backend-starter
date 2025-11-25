@@ -908,7 +908,11 @@ async def get_signed_url(
     chat_id = await get_or_create_chat(db, user_id, influencer_id)
 
     # Do not send or patch a first_message; let ElevenLabs handle the default.
-    greeting: Optional[str] = None
+    greeting: Optional[str] = first_message
+    if not greeting:
+        greeting = await _generate_contextual_greeting(db, chat_id, influencer_id)
+    if not greeting:
+        greeting = _pick_greeting(influencer_id, greeting_mode)
 
     async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
         signed_url = await _get_conversation_signed_url(client, agent_id)
