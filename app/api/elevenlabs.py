@@ -318,8 +318,8 @@ def _build_agent_patch_payload(
     """
     agent_cfg: Dict[str, Any] = {}
 
-    # if first_message is not None:
-    #     agent_cfg["first_message"] = first_message
+    if first_message is not None:
+        agent_cfg["first_message"] = first_message
 
     if any(v is not None for v in (prompt_text, llm, temperature, max_tokens)):
         prompt_block: Dict[str, Any] = {}
@@ -391,7 +391,7 @@ async def _patch_agent_config(
 ) -> None:
     """PATCH /convai/agents/{agent_id} with the minimal update payload."""
     payload = _build_agent_patch_payload(
-        # first_message=first_message,
+        first_message=first_message,
         prompt_text=prompt_text,
         llm=llm,
         temperature=temperature,
@@ -971,6 +971,13 @@ async def get_signed_url(
         greeting = _pick_greeting(influencer_id, greeting_mode)
 
     async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
+        if greeting:
+            try:
+                await _push_first_message_to_agent(client, agent_id, greeting)
+            except HTTPException:
+                raise
+            except Exception as exc:  # pragma: no cover - defensive
+                log.warning("signed_url.first_message.patch_failed agent=%s err=%s", agent_id, exc)
         signed_url = await _get_conversation_signed_url(client, agent_id)
 
     return {
