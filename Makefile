@@ -14,3 +14,7 @@ seed-users:
 	$(COMPOSE) exec $(SERVICE) poetry run python -m app.scripts.seed_users
 
 seed-all: seed-influencers seed-pricing seed-users
+
+.PHONY: db-wipe-conversations
+db-wipe-conversations:
+	$(COMPOSE) exec db psql -U postgres -d teaseme -c "TRUNCATE messages, memories, chats, calls CASCADE;"
