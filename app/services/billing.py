@@ -19,8 +19,8 @@ async def charge_feature(db, *, user_id: int, feature: str, units: int, meta: di
     price: Pricing = await db.scalar(select(Pricing).where(
         Pricing.feature == feature, Pricing.is_active.is_(True)
     ))
-    if not price or price.price_cents is None:
-        raise HTTPException(500, f"Pricing not configured for feature '{feature}'")
+    if not price:
+        raise HTTPException(500, "Pricing not configured")
 
     free_left = {
         "text":  max((price.free_allowance or 0) - (usage.text_count or 0), 0),
@@ -172,8 +172,9 @@ async def can_afford(
     price: Pricing | None = await db.scalar(
         select(Pricing).where(Pricing.feature == feature, Pricing.is_active.is_(True))
     )
-    if not price or price.price_cents is None:
-        raise HTTPException(500, f"Pricing not configured for feature '{feature}'")
+    if not price:
+        # no pricing? don't block
+        return True, 0, 0
 
     # usage today
     today = date.today()
@@ -222,8 +223,7 @@ async def get_remaining_units(db: AsyncSession, user_id: int, feature: str) -> i
     # usage today
     today = date.today()
     usage: DailyUsage | None = await db.get(DailyUsage, (user_id, today))
-    usage_field = _USAGE_FIELD.get(feature)
-    used = getattr(usage, usage_field, 0) if usage and usage_field else 0
+    used = getattr(usage, f"{feature}_secs", 0) if usage else 0
     free_left = max(free_allowance - (used or 0), 0)
 
     # wallet
