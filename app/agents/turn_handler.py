@@ -283,12 +283,33 @@ def _polish_reply(text: str, history: RedisChatMessageHistory, block_questions: 
     return polished if polished else "I'm here."
 
 
-def redis_history(chat_id: str):
-    return RedisChatMessageHistory(
-        session_id=chat_id,
+def redis_history(chat_id: str, influencer_id: str | None = None) -> RedisChatMessageHistory:
+    """
+    Redis-backed chat history.
+    - New format namespaces by influencer to avoid cross-persona bleed.
+    - If the namespaced history is empty but a legacy (chat-only) history exists, copy it forward.
+    """
+    session_id = f"{chat_id}:{influencer_id}" if influencer_id else chat_id
+    history = RedisChatMessageHistory(
+        session_id=session_id,
         url=settings.REDIS_URL,
         ttl=settings.HISTORY_TTL,
     )
+    # Migrate legacy history once if needed.
+    if influencer_id and session_id != chat_id:
+        try:
+            if not history.messages:
+                legacy = RedisChatMessageHistory(
+                    session_id=chat_id,
+                    url=settings.REDIS_URL,
+                    ttl=settings.HISTORY_TTL,
+                )
+                if legacy.messages:
+                    history.add_messages(list(legacy.messages))
+                    log.info("Migrated legacy redis history chat=%s to namespaced=%s", chat_id, session_id)
+        except Exception as exc:  # pragma: no cover - defensive
+            log.warning("redis_history.migrate_failed chat=%s infl=%s err=%s", chat_id, influencer_id, exc)
+    return history
 
 
 async def _analyze_conversation(
@@ -699,7 +720,10 @@ async def handle_turn(
         is_audio=is_audio,
         last_user_message=message,
     )
-    history = redis_history(chat_id)
+    if knowledge_block:
+        # Prepend critical factual knowledge so it’s never lost in the system prompt.
+        system_context = f"{knowledge_block}\n\n{system_context}"
+    history = redis_history(chat_id, influencer_id)
     await _hydrate_history_from_db(history, chat_id, db)
     await _hydrate_history_from_call_record(
         history,

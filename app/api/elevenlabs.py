@@ -159,13 +159,13 @@ def _format_transcript_entries(transcript: List[Dict[str, Any]]) -> str:
         lines.append(f"{speaker}: {text}")
     return "\n".join(lines)
 
-def _format_redis_history(chat_id: str, limit: int = 12) -> Optional[str]:
+def _format_redis_history(chat_id: str, influencer_id: str, limit: int = 12) -> Optional[str]:
     """
     Pull recent turns from Redis so a new call can reference the prior session
     before the transcript finishes persisting to the DB.
     """
     try:
-        history = redis_history(chat_id)
+        history = redis_history(chat_id, influencer_id)
     except Exception as exc:  # pragma: no cover - defensive
         log.warning("redis_history.fetch_failed chat=%s err=%s", chat_id, exc)
         return None
@@ -224,7 +224,7 @@ async def _generate_contextual_greeting(
 
     if not db_messages:
         try:
-            redis_ctx = _format_redis_history(chat_id)
+            redis_ctx = _format_redis_history(chat_id, influencer_id)
             if redis_ctx:
                 transcript = redis_ctx
         except Exception as exc:  # pragma: no cover - defensive
@@ -556,6 +556,7 @@ async def _poll_and_persist_conversation(
                     conversation_json=snapshot,
                     chat_id=chat_id,
                     conversation_id=conversation_id,
+                    influencer_id=influencer_id,
                 )
         except Exception as exc:  # pragma: no cover - defensive
             log.warning(
@@ -814,6 +815,7 @@ async def _persist_transcript_to_chat(
     conversation_json: Dict[str, Any],
     chat_id: str,
     conversation_id: str,
+    influencer_id: str | None = None,
 ) -> int:
     """
     Store ElevenLabs transcript messages into our Message table for that chat.
@@ -903,7 +905,7 @@ async def _persist_transcript_to_chat(
     await db.commit()
     # Push to Redis so turn_handler can see call history immediately.
     try:
-        history = redis_history(chat_id)
+        history = redis_history(chat_id, influencer_id)
         for msg in new_messages:
             if msg.sender == "user":
                 history.add_user_message(msg.content)
@@ -1159,6 +1161,7 @@ async def finalize_conversation(
                 conversation_json=snapshot,
                 chat_id=chat_id,
                 conversation_id=conversation_id,
+                influencer_id=resolved_influencer_id,
             )
         except Exception as exc:  # pragma: no cover - do not break billing
             log.warning(

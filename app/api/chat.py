@@ -484,7 +484,14 @@ async def _flush_buffer(chat_id: str, ws: WebSocket, influencer_id: str, user_id
                 log.warning("[BUF %s] handle_turn returned empty reply", chat_id)
                 reply = "Sorry, something went wrong. 😔"
 
-            log.info("[BUF %s] handle_turn ok (reply_len=%d)", chat_id, len(reply or ""))
+            log.info(
+                "[BUF %s] handle_turn ok (reply_len=%d channel=%s forced=%s priority=%s)",
+                chat_id,
+                len(reply or ""),
+                (meta or {}).get("channel_choice"),
+                (meta or {}).get("forced_channel"),
+                (meta or {}).get("priority_channel"),
+            )
         except Exception:
             log.exception("[BUF %s] handle_turn error", chat_id)
             try:
@@ -545,6 +552,8 @@ async def _flush_buffer(chat_id: str, ws: WebSocket, influencer_id: str, user_id
                         "action": "start_call",
                         "reply": chunks[0] if chunks else reply,
                         "channel": "call",
+                        "start_call": True,     # alias for clients
+                        "refresh": True,        # hint UI to re-render call UI
                     }
                 )
             elif channel_choice == "voice" and tts_url:
@@ -552,7 +561,9 @@ async def _flush_buffer(chat_id: str, ws: WebSocket, influencer_id: str, user_id
                     {
                         "reply": chunks[0] if chunks else reply,
                         "audio_url": tts_url,
+                        "ai_audio_url": tts_url,  # alias for clients expecting this key
                         "channel": "voice",
+                        "refresh": True,  # hint UI to refresh/re-render for voice payloads
                     }
                 )
             else:
