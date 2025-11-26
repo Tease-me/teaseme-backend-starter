@@ -317,6 +317,7 @@ async def _analyze_conversation(
     older_ctx: str,
     user_message: str,
     call_ctx: str | None,
+    lollity_score: int | float,
 ) -> str:
     """LLM snapshot to summarize intent/emotion and suggest channel with recency weighting."""
     if not user_message:
@@ -335,6 +336,7 @@ async def _analyze_conversation(
                 recent=recent_block[-3000:],
                 older=older_block[-2000:],
                 message=user_message,
+                lollity_score=lollity_score,
             )
         )
         content = getattr(resp, "content", "") or ""
@@ -836,6 +838,7 @@ async def handle_turn(
             older_ctx=db_history_context or "",
             user_message=message,
             call_ctx=call_recency or "",
+            lollity_score=score,
         )
         priority_directive = ""
         if analysis_block:

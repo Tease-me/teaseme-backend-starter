@@ -136,6 +136,13 @@ def _verify_token(shared: str, token: str | None) -> None:
         raise HTTPException(status_code=403, detail="Invalid webhook token")
 
 
+def _coerce_int(val) -> int | None:
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return None
+
+
 @router.post("/reply")
 async def eleven_webhook_reply(
     req: Request,
@@ -175,10 +182,11 @@ async def eleven_webhook_reply(
     conversation_id = payload.get("conversation_id")
 
     # 3b) Contexto: primeiro meta, depois fallback por conversation_id
-    meta = payload.get("meta") or {}
-    user_id       = meta.get("user_id")
-    influencer_id = meta.get("influencer_id")
-    chat_id       = meta.get("chat_id")
+    meta = payload.get("meta") or payload.get("metadata") or {}
+    user_id       = _coerce_int(meta.get("user_id") or meta.get("userId"))
+    influencer_id = meta.get("influencer_id") or meta.get("influencerId") or meta.get("persona_id") or meta.get("personaId")
+    chat_id       = meta.get("chat_id") or meta.get("chatId")
+    sid           = meta.get("sid") or conversation_id
 
     if (not user_id or not influencer_id or not chat_id) and conversation_id:
         try:
@@ -192,6 +200,27 @@ async def eleven_webhook_reply(
                 chat_id = rec.chat_id
         except Exception as e:
             log.exception("[EL TOOL] lookup CallRecord failed: %s", e)
+
+    snapshot_meta: dict[str, Any] = {}
+    if (not user_id or not influencer_id or not chat_id) and conversation_id:
+        try:
+            async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
+                snapshot = await _get_conversation_snapshot(client, conversation_id)
+            snapshot_meta = snapshot.get("meta") or snapshot.get("metadata") or {}
+            user_id = user_id or _coerce_int(
+                snapshot_meta.get("user_id")
+                or snapshot_meta.get("userId")
+                or snapshot_meta.get("user")
+            )
+            influencer_id = influencer_id or snapshot_meta.get("influencer_id") or snapshot_meta.get("persona_id")
+            chat_id = chat_id or snapshot_meta.get("chat_id") or snapshot_meta.get("chatId")
+            sid = sid or snapshot_meta.get("sid") or conversation_id
+        except Exception as exc:  # pragma: no cover - defensive
+            log.warning(
+                "[EL TOOL] snapshot context fallback failed conv=%s err=%s",
+                conversation_id,
+                exc,
+            )
 
     # 3c) Validações finais (sem defaults perigosos!)
     if not user_id or not influencer_id:
@@ -220,9 +249,23 @@ async def eleven_webhook_reply(
                 if not rec.influencer_id and influencer_id:
                     rec.influencer_id = influencer_id
                     updated = True
+                if not rec.sid and sid:
+                    rec.sid = sid
+                    updated = True
                 if updated:
                     db.add(rec)
                     await db.commit()
+            elif user_id:
+                rec = CallRecord(
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    influencer_id=influencer_id,
+                    chat_id=chat_id,
+                    sid=sid,
+                    status="pending",
+                )
+                db.add(rec)
+                await db.commit()
         except Exception as exc:  # pragma: no cover - defensive
             log.warning(
                 "[EL TOOL] failed to backfill chat_id for conversation %s: %s",
