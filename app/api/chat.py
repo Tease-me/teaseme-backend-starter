@@ -48,7 +48,7 @@ async def start_chat(
 
 # ---------- Buffer state ----------
 class _Buf:
-    __slots__ = ("messages", "timer", "lock", "flush_task", "active_messages", "prefer_single_chunk")
+    __slots__ = ("messages", "timer", "lock", "flush_task", "active_messages", "prefer_single_chunk", "last_user_embedding", "last_user_text")
 
     def __init__(self) -> None:
         self.messages: List[str] = []
@@ -57,6 +57,8 @@ class _Buf:
         self.flush_task: Optional[asyncio.Task] = None
         self.active_messages: Optional[List[str]] = None
         self.prefer_single_chunk: bool = False
+        self.last_user_embedding: Optional[list[float]] = None
+        self.last_user_text: Optional[str] = None
 
 _buffers: Dict[str, _Buf] = {}  # chat_id -> _Buf
 MAX_BUFFERS = 1000  # Maximum number of active buffers to prevent memory issues
@@ -303,6 +305,14 @@ async def _flush_buffer_without_ws(chat_id: str, influencer_id: str, user_id: in
         return
 
     log.info("[BUF %s] FLUSH (no-WS) start; user_text=%r", chat_id, user_text)
+    user_embedding: Optional[list[float]] = None
+    try:
+        if len(payload) == 1 and buf.last_user_text == payload[0] and buf.last_user_embedding:
+            user_embedding = buf.last_user_embedding
+        else:
+            user_embedding = await get_embedding(user_text)
+    except Exception:
+        log.warning("[BUF %s] Failed to compute/reuse embedding (no-WS); continuing without cached embedding", chat_id)
 
     # 1) Billing – fresh session
     async with SessionLocal() as db_bill:
@@ -331,6 +341,7 @@ async def _flush_buffer_without_ws(chat_id: str, influencer_id: str, user_id: in
                 db=db_ht,
                 is_audio=False,
                 return_meta=True,
+                message_embedding=user_embedding,
             )
             if isinstance(reply_payload, dict):
                 reply = reply_payload.get("reply")
@@ -385,6 +396,14 @@ async def _flush_buffer(chat_id: str, ws: WebSocket, influencer_id: str, user_id
             return
 
         log.info("[BUF %s] FLUSH start; user_text=%r", chat_id, user_text)
+        user_embedding: Optional[list[float]] = None
+        try:
+            if len(payload) == 1 and buf.last_user_text == payload[0] and buf.last_user_embedding:
+                user_embedding = buf.last_user_embedding
+            else:
+                user_embedding = await get_embedding(user_text)
+        except Exception:
+            log.warning("[BUF %s] Failed to compute/reuse embedding; continuing without cached embedding", chat_id)
 
         # 1) Billing – fresh session
         async with SessionLocal() as db_bill:
@@ -473,6 +492,7 @@ async def _flush_buffer(chat_id: str, ws: WebSocket, influencer_id: str, user_id
                     db=db_ht,
                     is_audio=False,
                     return_meta=True,
+                    message_embedding=user_embedding,
                 )
                 if isinstance(reply_payload, dict):
                     reply = reply_payload.get("reply")
@@ -669,6 +689,9 @@ async def websocket_chat(
                     )
                 )
                 await db.commit()
+                buf = _buffers.setdefault(chat_id, _Buf())
+                buf.last_user_embedding = emb
+                buf.last_user_text = text
             except Exception:
                 await db.rollback()
                 log.exception("[WS %s] Failed to save user message", chat_id)

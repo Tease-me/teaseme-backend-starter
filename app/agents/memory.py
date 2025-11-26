@@ -3,7 +3,14 @@ from sqlalchemy import select
 from sqlalchemy.sql import func
 from app.db.models import Memory
 
-async def find_similar_memories(db, chat_id: str, message: str, influencer_id: str = None, top_k: int = 7):
+async def find_similar_memories(
+    db,
+    chat_id: str,
+    message: str,
+    influencer_id: str = None,
+    top_k: int = 7,
+    embedding: list[float] | None = None,
+):
     """
     Find similar memories from both chat-specific and influencer knowledge base.
     
@@ -13,11 +20,12 @@ async def find_similar_memories(db, chat_id: str, message: str, influencer_id: s
         message: User message to find similar memories for
         influencer_id: ID of the influencer (optional, for knowledge base search)
         top_k: Number of memories to return
+        embedding: Optional precomputed embedding for the message (reuse to avoid duplicate calls)
     
     Returns:
         Tuple of (chat_memories, knowledge_base_content) - both are lists of strings
     """
-    emb = await get_embedding(message)
+    emb = embedding or await get_embedding(message)
     
     # Get chat-specific memories (existing behavior)
     chat_memories = await search_similar_memories(db, chat_id, emb, top_k=top_k)

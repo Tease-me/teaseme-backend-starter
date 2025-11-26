@@ -677,13 +677,20 @@ async def handle_turn(
     db=None,
     is_audio: bool = False,
     return_meta: bool = False,
+    message_embedding: list[float] | None = None,
 ) -> str | dict:
     cid = uuid4().hex[:8]
     log.info("[%s] START persona=%s chat=%s user=%s", cid, influencer_id, chat_id, user_id)
 
     score = get_score(user_id or chat_id, influencer_id)
     if db and user_id:
-        chat_memories, knowledge_base = await find_similar_memories(db, chat_id, message, influencer_id=influencer_id)
+        chat_memories, knowledge_base = await find_similar_memories(
+            db,
+            chat_id,
+            message,
+            influencer_id=influencer_id,
+            embedding=message_embedding,
+        )
         mem_block = "\n".join(m.strip() for m in chat_memories if m and m.strip())
         # Format knowledge base content separately and more prominently
         log.info("[%s] Knowledge base chunks found: %d for influencer_id=%s", cid, len(knowledge_base), influencer_id)
@@ -868,13 +875,17 @@ async def handle_turn(
                 context_sections.insert(0, priority_directive)
         if analysis_block:
             # Compact log to verify analyzer is being used without dumping full history.
+            clipped = analysis_block.replace("\n", " ")
+            max_len = 800
+            display = (clipped[: max_len] + "...") if len(clipped) > max_len else clipped
             log.info(
-                "[%s] Conversation analysis attached (channel=%s forced=%s priority=%s): %s",
+                "[%s] Conversation analysis attached (channel=%s forced=%s priority=%s len=%d): %s",
                 cid,
                 channel_choice or "unknown",
                 bool(forced_choice),
                 bool(priority_directive),
-                analysis_block.replace("\n", " ")[:400],
+                len(clipped),
+                display,
             )
         merged_context = "\n\n".join(context_sections).strip()
 
