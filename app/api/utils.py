@@ -15,7 +15,7 @@ async def get_embedding(text: str) -> list[float]:
 async def search_similar_memories(db, chat_id, embedding, top_k=5):
     sql = text("""
         SELECT content
-        FROM messages
+        FROM memories
         WHERE chat_id = :chat_id
           AND embedding IS NOT NULL
         ORDER BY embedding <-> :embedding
@@ -143,5 +143,4 @@ async def search_influencer_knowledge(db, influencer_id: str, embedding: list[fl
     }
     result = await db.execute(sql, params)
     return [{"content": row[0], "metadata": row[1]} for row in result.fetchall()]
-
 

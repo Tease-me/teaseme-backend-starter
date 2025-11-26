@@ -48,7 +48,7 @@ async def start_chat(
 
 # ---------- Buffer state ----------
 class _Buf:
-    __slots__ = ("messages", "timer", "lock", "flush_task", "active_messages", "prefer_single_chunk")
+    __slots__ = ("messages", "timer", "lock", "flush_task", "active_messages", "prefer_single_chunk", "last_user_embedding", "last_user_text")
 
     def __init__(self) -> None:
         self.messages: List[str] = []
@@ -57,6 +57,8 @@ class _Buf:
         self.flush_task: Optional[asyncio.Task] = None
         self.active_messages: Optional[List[str]] = None
         self.prefer_single_chunk: bool = False
+        self.last_user_embedding: Optional[list[float]] = None
+        self.last_user_text: Optional[str] = None
 
 _buffers: Dict[str, _Buf] = {}  # chat_id -> _Buf
 MAX_BUFFERS = 1000  # Maximum number of active buffers to prevent memory issues
@@ -139,7 +141,14 @@ def _split_into_double_text_chunks(text: str, allow_split: bool = True) -> List[
     return _merge_trailing_lollity([stripped])
 
 
-async def _save_ai_messages(db_ai: AsyncSession, chat_id: str, chunks: List[str]) -> None:
+async def _save_ai_messages(
+    db_ai: AsyncSession,
+    chat_id: str,
+    chunks: List[str],
+    *,
+    channel: str = "text",
+    audio_url: str | None = None,
+) -> None:
     rows = []
     for chunk in chunks:
         if not chunk or not chunk.strip():
@@ -149,8 +158,9 @@ async def _save_ai_messages(db_ai: AsyncSession, chat_id: str, chunks: List[str]
             {
                 "chat_id": chat_id,
                 "sender": "ai",
-                "channel": "text",
+                "channel": channel,
                 "content": chunk.strip(),
+                "audio_url": audio_url,
                 "embedding": emb,
             }
         )
@@ -295,6 +305,14 @@ async def _flush_buffer_without_ws(chat_id: str, influencer_id: str, user_id: in
         return
 
     log.info("[BUF %s] FLUSH (no-WS) start; user_text=%r", chat_id, user_text)
+    user_embedding: Optional[list[float]] = None
+    try:
+        if len(payload) == 1 and buf.last_user_text == payload[0] and buf.last_user_embedding:
+            user_embedding = buf.last_user_embedding
+        else:
+            user_embedding = await get_embedding(user_text)
+    except Exception:
+        log.warning("[BUF %s] Failed to compute/reuse embedding (no-WS); continuing without cached embedding", chat_id)
 
     # 1) Billing – fresh session
     async with SessionLocal() as db_bill:
@@ -311,17 +329,25 @@ async def _flush_buffer_without_ws(chat_id: str, influencer_id: str, user_id: in
 
     # 2) Get LLM reply
     reply = None
+    meta: dict | None = None
     try:
         log.info("[BUF %s] calling handle_turn() (no-WS)", chat_id)
         async with SessionLocal() as db_ht:
-            reply = await handle_turn(
+            reply_payload = await handle_turn(
                 message=user_text,
                 chat_id=chat_id,
                 influencer_id=influencer_id,
                 user_id=user_id,
                 db=db_ht,
                 is_audio=False,
+                return_meta=True,
+                message_embedding=user_embedding,
             )
+            if isinstance(reply_payload, dict):
+                reply = reply_payload.get("reply")
+                meta = reply_payload
+            else:
+                reply = reply_payload
         
         if not reply:
             log.warning("[BUF %s] handle_turn returned empty reply (no-WS)", chat_id)
@@ -330,12 +356,13 @@ async def _flush_buffer_without_ws(chat_id: str, influencer_id: str, user_id: in
         log.exception("[BUF %s] handle_turn error (no-WS)", chat_id)
         return
 
+    channel_for_store = meta.get("channel_choice") if meta else "text"
     chunks = _split_into_double_text_chunks(reply, allow_split=not prefer_single_chunk)
 
     # 3) Persist AI reply to DB (client will get it on reconnect via chat history)
     async with SessionLocal() as db_ai:
         try:
-            await _save_ai_messages(db_ai, chat_id, chunks)
+            await _save_ai_messages(db_ai, chat_id, chunks, channel=channel_for_store or "text")
             log.info(
                 "[BUF %s] Saved %d AI chunk(s) to DB (no-WS)",
                 chat_id,
@@ -369,6 +396,14 @@ async def _flush_buffer(chat_id: str, ws: WebSocket, influencer_id: str, user_id
             return
 
         log.info("[BUF %s] FLUSH start; user_text=%r", chat_id, user_text)
+        user_embedding: Optional[list[float]] = None
+        try:
+            if len(payload) == 1 and buf.last_user_text == payload[0] and buf.last_user_embedding:
+                user_embedding = buf.last_user_embedding
+            else:
+                user_embedding = await get_embedding(user_text)
+        except Exception:
+            log.warning("[BUF %s] Failed to compute/reuse embedding; continuing without cached embedding", chat_id)
 
         # 1) Billing – fresh session
         async with SessionLocal() as db_bill:
@@ -445,23 +480,38 @@ async def _flush_buffer(chat_id: str, ws: WebSocket, influencer_id: str, user_id
 
         # 2) Get LLM reply – fresh session for handle_turn
         reply = None
+        meta: dict | None = None
         try:
             log.info("[BUF %s] calling handle_turn()", chat_id)
             async with SessionLocal() as db_ht:
-                reply = await handle_turn(
+                reply_payload = await handle_turn(
                     message=user_text,
                     chat_id=chat_id,
                     influencer_id=influencer_id,
                     user_id=user_id,
                     db=db_ht,
                     is_audio=False,
+                    return_meta=True,
+                    message_embedding=user_embedding,
                 )
+                if isinstance(reply_payload, dict):
+                    reply = reply_payload.get("reply")
+                    meta = reply_payload
+                else:
+                    reply = reply_payload
 
             if not reply:
                 log.warning("[BUF %s] handle_turn returned empty reply", chat_id)
                 reply = "Sorry, something went wrong. 😔"
 
-            log.info("[BUF %s] handle_turn ok (reply_len=%d)", chat_id, len(reply or ""))
+            log.info(
+                "[BUF %s] handle_turn ok (reply_len=%d channel=%s forced=%s priority=%s)",
+                chat_id,
+                len(reply or ""),
+                (meta or {}).get("channel_choice"),
+                (meta or {}).get("forced_channel"),
+                (meta or {}).get("priority_channel"),
+            )
         except Exception:
             log.exception("[BUF %s] handle_turn error", chat_id)
             try:
@@ -470,19 +520,74 @@ async def _flush_buffer(chat_id: str, ws: WebSocket, influencer_id: str, user_id
                 pass
             return
 
-        chunks = _split_into_double_text_chunks(reply, allow_split=not prefer_single_chunk)
+        channel_choice = meta.get("channel_choice") if meta else None
+        tts_key: str | None = None
+        tts_url: str | None = None
+        # Auto-generate audio when voice is chosen; keep single chunk to align with one audio.
+        if channel_choice == "voice":
+            prefer_single_chunk = True
+            try:
+                async with SessionLocal() as db_tts:
+                    audio_bytes, audio_mime = await synthesize_audio_with_elevenlabs_V3(
+                        reply,
+                        db_tts,
+                        influencer_id,
+                    )
+                if audio_bytes:
+                    tts_key = await save_ia_audio_to_s3(audio_bytes, user_id)
+                    tts_url = generate_presigned_url(tts_key)
+                    log.info("[BUF %s] Generated TTS audio for voice reply", chat_id)
+                else:
+                    log.warning("[BUF %s] TTS returned no audio for voice reply", chat_id)
+            except Exception as tts_exc:
+                log.warning("[BUF %s] TTS generation failed: %s", chat_id, tts_exc)
+        if channel_choice == "call":
+            prefer_single_chunk = True
+
+        chunks = _split_into_double_text_chunks(
+            reply,
+            allow_split=(channel_choice not in {"voice", "call"} and not prefer_single_chunk),
+        )
 
         # 3) Persist AI reply – fresh session
+        channel_for_store = channel_choice or "text"
         async with SessionLocal() as db_ai:
             try:
-                await _save_ai_messages(db_ai, chat_id, chunks)
+                await _save_ai_messages(
+                    db_ai,
+                    chat_id,
+                    chunks,
+                    channel=channel_for_store,
+                    audio_url=tts_key,
+                )
             except Exception:
                 await db_ai.rollback()
                 log.exception("[WS %s] Failed to save AI message", chat_id)
 
         # 4) Send to client
         try:
-            await _send_reply_chunks(ws, chat_id, chunks)
+            if channel_choice == "call":
+                await ws.send_json(
+                    {
+                        "action": "start_call",
+                        "reply": chunks[0] if chunks else reply,
+                        "channel": "call",
+                        "start_call": True,     # alias for clients
+                        "refresh": True,        # hint UI to re-render call UI
+                    }
+                )
+            elif channel_choice == "voice" and tts_url:
+                await ws.send_json(
+                    {
+                        "reply": chunks[0] if chunks else reply,
+                        "audio_url": tts_url,
+                        "ai_audio_url": tts_url,  # alias for clients expecting this key
+                        "channel": "voice",
+                        "refresh": True,  # hint UI to refresh/re-render for voice payloads
+                    }
+                )
+            else:
+                await _send_reply_chunks(ws, chat_id, chunks)
         except Exception:
             log.exception("[WS %s] Failed to send reply", chat_id)
     except asyncio.CancelledError:
@@ -584,6 +689,9 @@ async def websocket_chat(
                     )
                 )
                 await db.commit()
+                buf = _buffers.setdefault(chat_id, _Buf())
+                buf.last_user_embedding = emb
+                buf.last_user_text = text
             except Exception:
                 await db.rollback()
                 log.exception("[WS %s] Failed to save user message", chat_id)

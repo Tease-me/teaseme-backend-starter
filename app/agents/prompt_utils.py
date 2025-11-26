@@ -10,6 +10,23 @@ from fastapi import HTTPException
 import logging
 log = logging.getLogger("teaseme-script")
 
+
+class _SafeFormatDict(dict):
+    """Default missing keys to their literal placeholder to avoid KeyError."""
+    def __missing__(self, key):
+        return "{" + key + "}"
+
+
+def _format_persona_template(template: str, score: int) -> str:
+    """Safely format persona template with lollity_score without breaking on stray {}."""
+    if not template:
+        return ""
+    try:
+        return template.format_map(_SafeFormatDict(lollity_score=score))
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("persona.format_failed len=%d err=%s", len(template), exc)
+        return template
+
 BASE_SYSTEM = """
 SYSTEM:
 
@@ -142,7 +159,7 @@ async def build_system_prompt(
     influencer = await db.get(Influencer, influencer_id)
     if not influencer:
         raise HTTPException(404, "Influencer not found")
-    persona_rules = influencer.prompt_template.format(lollity_score=score)
+    persona_rules = _format_persona_template(influencer.prompt_template, score)
 
     if score > 70:
         score_rule = "Your affection is high — show more warmth, loving words, and reward the user. Maybe let your guard down."
