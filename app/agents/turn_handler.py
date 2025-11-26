@@ -343,7 +343,7 @@ async def handle_turn(
     log.info("[%s] START persona=%s chat=%s user=%s", cid, influencer_id, chat_id, user_id)
 
     score = get_score(user_id or chat_id, influencer_id)
-    if db and user_id:
+    if db and user_id and not is_audio:
         chat_memories, knowledge_base = await find_similar_memories(
             db,
             chat_id,
@@ -364,7 +364,13 @@ async def handle_turn(
     else:
         mem_block = ""
         knowledge_block = ""
-        log.info("[%s] Skipping knowledge base (db=%s, user_id=%s)", cid, db is not None, user_id)
+        log.info(
+            "[%s] Skipping knowledge base (db=%s, user_id=%s, is_audio=%s)",
+            cid,
+            db is not None,
+            user_id,
+            is_audio,
+        )
 
     influencer = await db.get(Influencer, influencer_id)
     if not influencer:
@@ -577,25 +583,26 @@ async def handle_turn(
     history.add_ai_message(reply)
     _trim_history(history)
 
-    recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
-    try:
-        facts_resp = await FACT_EXTRACTOR.ainvoke(FACT_PROMPT.format(msg=message, ctx=recent_ctx))
-        facts_txt = facts_resp.content or ""
-        lines = [ln.strip("- ").strip() for ln in facts_txt.split("\n") if ln.strip()]
-        to_save = []
-        for line in lines[:5]:
-            if line.lower() == "no new memories.":
-                continue
-            to_save.append(line)
-        for fact in to_save:
-            try:
-                await store_fact(db, chat_id, fact)
-            except Exception as inner_ex:
-                log.error("[%s] store_fact failed fact=%r err=%s", cid, fact, inner_ex, exc_info=True)
-        if not to_save:
-            log.info("[%s] Fact extractor returned no savable facts.", cid)
-    except Exception as ex:
-        log.error("[%s] Fact extraction failed: %s", cid, ex, exc_info=True)
+    if not is_audio:
+        recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
+        try:
+            facts_resp = await FACT_EXTRACTOR.ainvoke(FACT_PROMPT.format(msg=message, ctx=recent_ctx))
+            facts_txt = facts_resp.content or ""
+            lines = [ln.strip("- ").strip() for ln in facts_txt.split("\n") if ln.strip()]
+            to_save = []
+            for line in lines[:5]:
+                if line.lower() == "no new memories.":
+                    continue
+                to_save.append(line)
+            for fact in to_save:
+                try:
+                    await store_fact(db, chat_id, fact)
+                except Exception as inner_ex:
+                    log.error("[%s] store_fact failed fact=%r err=%s", cid, fact, inner_ex, exc_info=True)
+            if not to_save:
+                log.info("[%s] Fact extractor returned no savable facts.", cid)
+        except Exception as ex:
+            log.error("[%s] Fact extraction failed: %s", cid, ex, exc_info=True)
 
     final_reply = sanitize_tts_text(reply) if is_audio else reply
     if return_meta:
