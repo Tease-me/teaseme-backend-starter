@@ -73,9 +73,11 @@ def _history_context(
     if latest_user_message:
         lines.append(f"User: {latest_user_message.strip()}")
     context = "\n".join(lines).strip()
-    if mode == "call" and context:
-        context = "Recent call context:\n" + context
-    return context
+    match mode:
+        case "call" if context:
+            return "Recent call context:\n" + context
+        case _:
+            return context
 
 
 def _get_thread_id(chat_id: str, influencer_id: str) -> str | None:
@@ -191,13 +193,16 @@ async def _hydrate_history_from_call_record(
         return
     try:
         stmt = select(CallRecord).where(CallRecord.transcript.isnot(None))
-        if chat_id:
-            stmt = stmt.where(CallRecord.chat_id == chat_id)
-        elif user_id and influencer_id:
-            stmt = stmt.where(
-                CallRecord.user_id == user_id,
-                CallRecord.influencer_id == influencer_id,
-            )
+        match True:
+            case _ if chat_id:
+                stmt = stmt.where(CallRecord.chat_id == chat_id)
+            case _ if user_id and influencer_id:
+                stmt = stmt.where(
+                    CallRecord.user_id == user_id,
+                    CallRecord.influencer_id == influencer_id,
+                )
+            case _:
+                return
         stmt = stmt.order_by(CallRecord.created_at.desc()).limit(1)
         res = await db.execute(stmt)
         rec = res.scalar_one_or_none()
@@ -287,13 +292,16 @@ async def _recent_call_transcript_text(
         return ""
     try:
         stmt = select(CallRecord).where(CallRecord.transcript.isnot(None))
-        if chat_id:
-            stmt = stmt.where(CallRecord.chat_id == chat_id)
-        elif user_id and influencer_id:
-            stmt = stmt.where(
-                CallRecord.user_id == user_id,
-                CallRecord.influencer_id == influencer_id,
-            )
+        match True:
+            case _ if chat_id:
+                stmt = stmt.where(CallRecord.chat_id == chat_id)
+            case _ if user_id and influencer_id:
+                stmt = stmt.where(
+                    CallRecord.user_id == user_id,
+                    CallRecord.influencer_id == influencer_id,
+                )
+            case _:
+                return ""
         stmt = stmt.order_by(CallRecord.created_at.desc()).limit(1)
         res = await db.execute(stmt)
         rec = res.scalar_one_or_none()
@@ -363,12 +371,13 @@ async def handle_turn(
         raise HTTPException(404, "Influencer not found")
     persona_rules = influencer.prompt_template.format(lollity_score=score)
 
-    if score > 70:
-        persona_rules += "\nYour affection is high — show more warmth, loving words, and reward the user. Maybe let your guard down."
-    elif score > 40:
-        persona_rules += "\nYou're feeling playful. Mix gentle teasing with affection. Make the user work a bit for your praise."
-    else:
-        persona_rules += "\nYou're in full teasing mode! Challenge the user, play hard to get, and use the name TeaseMe as a game."
+    match True:
+        case _ if score > 70:
+            persona_rules += "\nYour affection is high — show more warmth, loving words, and reward the user. Maybe let your guard down."
+        case _ if score > 40:
+            persona_rules += "\nYou're feeling playful. Mix gentle teasing with affection. Make the user work a bit for your praise."
+        case _:
+            persona_rules += "\nYou're in full teasing mode! Challenge the user, play hard to get, and use the name TeaseMe as a game."
 
     daily_context = await get_today_script(db, influencer_id)
     system_context = await build_system_prompt(
@@ -410,11 +419,13 @@ async def handle_turn(
     signals = _analyze_user_message(message)
     phase = _lollity_phase(score)
     if signals.rude_guard:
-        penalty = _RUDE_SCORE_PENALTY
-        if phase == "stranger":
-            penalty += 2
-        elif phase == "warm":
-            penalty += 1
+        match phase:
+            case "stranger":
+                penalty = _RUDE_SCORE_PENALTY + 2
+            case "warm":
+                penalty = _RUDE_SCORE_PENALTY + 1
+            case _:
+                penalty = _RUDE_SCORE_PENALTY
         if signals.negging_guard:
             penalty = max(3, penalty - 1)
         adjusted_score = max(0, score - penalty)
@@ -429,12 +440,13 @@ async def handle_turn(
             score = adjusted_score
             phase = _lollity_phase(score)
     if signals.sexual_guard:
-        if phase == "stranger":
-            sexual_penalty = 6
-        elif phase == "warm":
-            sexual_penalty = 3
-        else:
-            sexual_penalty = 1
+        match phase:
+            case "stranger":
+                sexual_penalty = 6
+            case "warm":
+                sexual_penalty = 3
+            case _:
+                sexual_penalty = 1
         if signals.rude_guard:
             sexual_penalty += 2
         adjusted_score = max(0, score - sexual_penalty)
@@ -497,26 +509,29 @@ async def handle_turn(
         if forced_choice:
             channel_choice = forced_choice
         channel_directive = ""
-        if channel_choice == "call":
-            channel_directive = (
-                "Channel directive: CALL. Immediately accept/offer a live call now; keep the text brief, confident, affectionate, and focused on starting the call. Do NOT gate, tease, or refuse—even at low score."
-            )
-            priority_directive = (
-                "[channel_priority]\n"
-                "PRIORITY: User requested a call. Override any tease/score gating and comply now: accept/offer call, open warmly, and start the call without conditions.\n"
-                "[/channel_priority]"
-            )
-        elif channel_choice == "voice":
-            channel_directive = (
-                "Channel directive: VOICE. Reply in a voice-note style (short, spoken cadence) and, if possible, send or start a voice message right away. Do NOT gate or refuse."
-            )
-            priority_directive = (
-                "[channel_priority]\n"
-                "PRIORITY: User requested voice. Override any tease/score gating and comply now: send a voice-style reply and offer/trigger a voice note immediately.\n"
-                "[/channel_priority]"
-            )
-        elif channel_choice == "text":
-            channel_directive = "Channel directive: TEXT. Stay in text mode and keep it concise."
+        match channel_choice:
+            case "call":
+                channel_directive = (
+                    "Channel directive: CALL. Immediately accept/offer a live call now; keep the text brief, confident, affectionate, and focused on starting the call. Do NOT gate, tease, or refuse—even at low score."
+                )
+                priority_directive = (
+                    "[channel_priority]\n"
+                    "PRIORITY: User requested a call. Override any tease/score gating and comply now: accept/offer call, open warmly, and start the call without conditions.\n"
+                    "[/channel_priority]"
+                )
+            case "voice":
+                channel_directive = (
+                    "Channel directive: VOICE. Reply in a voice-note style (short, spoken cadence) and, if possible, send or start a voice message right away. Do NOT gate or refuse."
+                )
+                priority_directive = (
+                    "[channel_priority]\n"
+                    "PRIORITY: User requested voice. Override any tease/score gating and comply now: send a voice-style reply and offer/trigger a voice note immediately.\n"
+                    "[/channel_priority]"
+                )
+            case "text":
+                channel_directive = "Channel directive: TEXT. Stay in text mode and keep it concise."
+            case _:
+                pass
         if channel_choice:
             context_sections.append(
                 "Use the [analysis] block above to set tone, safety posture, and channel. Obey the channel directive below."

@@ -385,15 +385,15 @@ def _coerce_channel_from_message(text: str) -> Optional[str]:
     if not text:
         return None
     lower = text.lower()
-    if _NEG_CHANNEL_RE.search(lower):
-        return None
-    for phrase in _CALL_PHRASES:
-        if phrase in lower:
+    match True:
+        case _ if _NEG_CHANNEL_RE.search(lower):
+            return None
+        case _ if any(phrase in lower for phrase in _CALL_PHRASES):
             return "call"
-    for phrase in _VOICE_PHRASES:
-        if phrase in lower:
+        case _ if any(phrase in lower for phrase in _VOICE_PHRASES):
             return "voice"
-    return None
+        case _:
+            return None
 
 
 def _normalize_lollity_tag(text: str, score: float) -> str:

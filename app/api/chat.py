@@ -307,10 +307,11 @@ async def _flush_buffer_without_ws(chat_id: str, influencer_id: str, user_id: in
     log.info("[BUF %s] FLUSH (no-WS) start; user_text=%r", chat_id, user_text)
     user_embedding: Optional[list[float]] = None
     try:
-        if len(payload) == 1 and buf.last_user_text == payload[0] and buf.last_user_embedding:
-            user_embedding = buf.last_user_embedding
-        else:
-            user_embedding = await get_embedding(user_text)
+        match True:
+            case _ if len(payload) == 1 and buf.last_user_text == payload[0] and buf.last_user_embedding:
+                user_embedding = buf.last_user_embedding
+            case _:
+                user_embedding = await get_embedding(user_text)
     except Exception:
         log.warning("[BUF %s] Failed to compute/reuse embedding (no-WS); continuing without cached embedding", chat_id)
 
@@ -398,10 +399,11 @@ async def _flush_buffer(chat_id: str, ws: WebSocket, influencer_id: str, user_id
         log.info("[BUF %s] FLUSH start; user_text=%r", chat_id, user_text)
         user_embedding: Optional[list[float]] = None
         try:
-            if len(payload) == 1 and buf.last_user_text == payload[0] and buf.last_user_embedding:
-                user_embedding = buf.last_user_embedding
-            else:
-                user_embedding = await get_embedding(user_text)
+            match True:
+                case _ if len(payload) == 1 and buf.last_user_text == payload[0] and buf.last_user_embedding:
+                    user_embedding = buf.last_user_embedding
+                case _:
+                    user_embedding = await get_embedding(user_text)
         except Exception:
             log.warning("[BUF %s] Failed to compute/reuse embedding; continuing without cached embedding", chat_id)
 
