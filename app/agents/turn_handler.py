@@ -9,7 +9,12 @@ from redis import Redis
 from sqlalchemy import select
 
 from app.agents.memory import find_similar_memories, store_fact
-from app.agents.prompts import FACT_EXTRACTOR, FACT_PROMPT
+from app.agents.prompts import (
+    CONVERSATION_ANALYZER,
+    CONVERSATION_ANALYZER_PROMPT,
+    FACT_EXTRACTOR,
+    FACT_PROMPT,
+)
 from app.agents.prompt_utils import (
     build_system_prompt,
     get_today_script,
@@ -54,6 +59,36 @@ _NEGGING_NEGATIVE_RE = re.compile(
 _SECOND_PERSON_RE = re.compile(r"\b(u|you|ya|ur|you're|youre)\b", re.IGNORECASE)
 _RUDE_SCORE_PENALTY = 5
 _SCORE_TAG_RE = re.compile(r"\[Lollity Score:[^\]]+\]", re.IGNORECASE)
+_CHANNEL_CHOICE_RE = re.compile(r'"choice"\s*:\s*"(text|voice|call)"', re.IGNORECASE)
+# More precise intent heuristics; avoid forcing call/voice if user expressed avoidance.
+_NEG_CHANNEL_RE = re.compile(r"\b(don't|do not|no|not) (call|voice|phone|dial)\b", re.IGNORECASE)
+_CALL_PHRASES = [
+    "call me",
+    "can you call",
+    "could you call",
+    "please call",
+    "give me a call",
+    "call right now",
+    "call now",
+    "call asap",
+    "phone me",
+    "ring me",
+    "dial me",
+    "want a call",
+    "i need a call",
+]
+_VOICE_PHRASES = [
+    "voice note",
+    "voice message",
+    "voice msg",
+    "send a voice",
+    "send me a voice",
+    "hear your voice",
+    "i want your voice",
+    "drop a voice",
+    "voice clip",
+    "audio note",
+]
 
 THREAD_KEY = "assistant_thread:{chat}:{persona}"
 _thread_store = Redis.from_url(settings.REDIS_URL, decode_responses=True)
@@ -254,6 +289,65 @@ def redis_history(chat_id: str):
         url=settings.REDIS_URL,
         ttl=settings.HISTORY_TTL,
     )
+
+
+async def _analyze_conversation(
+    recent_ctx: str,
+    older_ctx: str,
+    user_message: str,
+    call_ctx: str | None,
+) -> str:
+    """LLM snapshot to summarize intent/emotion and suggest channel with recency weighting."""
+    if not user_message:
+        return ""
+    recent_block = (recent_ctx or "").strip()
+    older_block = (older_ctx or "").strip()
+    call_block = (call_ctx or "").strip()
+    if call_block:
+        if recent_block:
+            recent_block = f"{recent_block}\n\n[recent_call]\n{call_block}"
+        else:
+            recent_block = f"[recent_call]\n{call_block}"
+    try:
+        resp = await CONVERSATION_ANALYZER.ainvoke(
+            CONVERSATION_ANALYZER_PROMPT.format(
+                recent=recent_block[-3000:],
+                older=older_block[-2000:],
+                message=user_message,
+            )
+        )
+        content = getattr(resp, "content", "") or ""
+        if content.strip():
+            return f"[analysis]\n{content.strip()}\n[/analysis]"
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("conversation_analysis.failed err=%s", exc)
+    return ""
+
+
+def _extract_channel_choice(analysis_block: str) -> str | None:
+    """
+    Pull the suggested channel from the analysis JSON so we can hard-enforce call/voice when requested.
+    """
+    if not analysis_block:
+        return None
+    match = _CHANNEL_CHOICE_RE.search(analysis_block)
+    return match.group(1).lower() if match else None
+
+
+def _coerce_channel_from_message(text: str) -> str | None:
+    """Heuristic override: if the user explicitly asks for call/voice, honor it even if analyzer is soft."""
+    if not text:
+        return None
+    lower = text.lower()
+    if _NEG_CHANNEL_RE.search(lower):
+        return None
+    for phrase in _CALL_PHRASES:
+        if phrase in lower:
+            return "call"
+    for phrase in _VOICE_PHRASES:
+        if phrase in lower:
+            return "voice"
+    return None
 
 
 def _trim_history(history: RedisChatMessageHistory) -> None:
@@ -561,7 +655,8 @@ async def handle_turn(
     user_id: str | None = None,
     db=None,
     is_audio: bool = False,
-) -> str:
+    return_meta: bool = False,
+) -> str | dict:
     cid = uuid4().hex[:8]
     log.info("[%s] START persona=%s chat=%s user=%s", cid, influencer_id, chat_id, user_id)
 
@@ -670,6 +765,9 @@ async def handle_turn(
             )
             score = adjusted_score
             phase = _lollity_phase(score)
+    channel_choice: str | None = None
+    priority_directive = ""
+    forced_choice: str | None = None
     try:
         assistant_context = _build_assistant_payload(
             user_message=message,
@@ -701,6 +799,59 @@ async def handle_turn(
             context_sections.append("[db_history]\n" + db_history_context)
         if call_recency:
             context_sections.append("[recent_call]\n" + call_recency)
+        forced_choice = _coerce_channel_from_message(message)
+        analysis_block = await _analyze_conversation(
+            recent_ctx=history_context or "",
+            older_ctx=db_history_context or "",
+            user_message=message,
+            call_ctx=call_recency or "",
+        )
+        priority_directive = ""
+        if analysis_block:
+            context_sections.append(analysis_block)
+        channel_choice = _extract_channel_choice(analysis_block) if analysis_block else None
+        if forced_choice:
+            channel_choice = forced_choice
+        channel_directive = ""
+        if channel_choice == "call":
+            channel_directive = (
+                "Channel directive: CALL. Immediately accept/offer a live call now; keep the text brief, confident, affectionate, and focused on starting the call. Do NOT gate, tease, or refuse—even at low score."
+            )
+            priority_directive = (
+                "[channel_priority]\n"
+                "PRIORITY: User requested a call. Override any tease/score gating and comply now: accept/offer call, open warmly, and start the call without conditions.\n"
+                "[/channel_priority]"
+            )
+        elif channel_choice == "voice":
+            channel_directive = (
+                "Channel directive: VOICE. Reply in a voice-note style (short, spoken cadence) and, if possible, send or start a voice message right away. Do NOT gate or refuse."
+            )
+            priority_directive = (
+                "[channel_priority]\n"
+                "PRIORITY: User requested voice. Override any tease/score gating and comply now: send a voice-style reply and offer/trigger a voice note immediately.\n"
+                "[/channel_priority]"
+            )
+        elif channel_choice == "text":
+            channel_directive = "Channel directive: TEXT. Stay in text mode and keep it concise."
+        if channel_choice:
+            context_sections.append(
+                "Use the [analysis] block above to set tone, safety posture, and channel. Obey the channel directive below."
+            )
+            if channel_directive:
+                context_sections.append(channel_directive)
+            if priority_directive:
+                # Move priority to the top so it overrides tease/gating rules.
+                context_sections.insert(0, priority_directive)
+        if analysis_block:
+            # Compact log to verify analyzer is being used without dumping full history.
+            log.info(
+                "[%s] Conversation analysis attached (channel=%s forced=%s priority=%s): %s",
+                cid,
+                channel_choice or "unknown",
+                bool(forced_choice),
+                bool(priority_directive),
+                analysis_block.replace("\n", " ")[:400],
+            )
         merged_context = "\n\n".join(context_sections).strip()
 
         reply, new_thread_id = await send_agent_message(
@@ -743,9 +894,15 @@ async def handle_turn(
     except Exception as ex:
         log.error("[%s] Fact extraction failed: %s", cid, ex, exc_info=True)
 
-    if is_audio:
-        return sanitize_tts_text(reply)
-    return reply
+    final_reply = sanitize_tts_text(reply) if is_audio else reply
+    if return_meta:
+        return {
+            "reply": final_reply,
+            "channel_choice": channel_choice,
+            "forced_channel": bool(forced_choice),
+            "priority_channel": bool(priority_directive),
+        }
+    return final_reply
 
 
 async def reply(

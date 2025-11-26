@@ -2,10 +2,6 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from app.core.config import settings
 
-from langchain_core.prompts import (
-    ChatPromptTemplate,
-)
-
 MODEL = ChatOpenAI(
     api_key=settings.OPENAI_API_KEY,
     model_name="gpt-4-turbo",
@@ -19,6 +15,38 @@ FACT_EXTRACTOR = ChatOpenAI(
     temperature=0.5,
     max_tokens=512,
 )
+
+CONVERSATION_ANALYZER = ChatOpenAI(
+    api_key=settings.OPENAI_API_KEY,
+    model="gpt-4o-mini",
+    temperature=0.2,
+    max_tokens=320,
+)
+
+CONVERSATION_ANALYZER_PROMPT = ChatPromptTemplate.from_template("""
+You are a conversation analyst. Use recent context first, older context only as backup. Return ONLY compact JSON (no narration):
+
+{{
+  "intent": "<what they want or mean>",
+  "summary": "<one-line summary of situation>",
+  "emotion": "<dominant emotion>",
+  "energy": "low|medium|high",
+  "tone": "<supportive|warm|playful|firm|reassuring|flirty|professional>",
+  "urgency": "low|medium|high",
+  "safety_flags": ["rude"|"sexual"|"self_harm"|"violence"|"none", ...],
+  "channel": {{"choice": "text|voice|call", "reason": "<why this channel fits>"}},
+  "reply_focus": "<1–2 lines on what the persona should prioritize; if channel is voice/call, say to comply now without gating>"
+}}
+
+Recent context (highest weight):
+{recent}
+
+Older context (lower weight):
+{older}
+
+Latest user message:
+{message}
+""")
 
 FACT_PROMPT = ChatPromptTemplate.from_template("""
 You extract user memories. Output only if NEW and EXPLICIT in the user’s message (not inferred).
