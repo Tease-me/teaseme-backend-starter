@@ -38,6 +38,17 @@ c
 
 Database migrations run automatically in the backend container, so no local tooling is required.
 
+## Live reload / sync during development
+
+- The backend mounts your repo (`.:/usr/src/app`) for hot-reload via `uvicorn --reload`.
+- With Docker Compose v2.22+, you can also use the built-in watcher to sync and rebuild on changes:
+  ```bash
+  docker compose up --watch
+  # or
+  docker compose watch
+  ```
+  This uses the `develop.watch` config in `compose.yml` to sync source into the container and rebuild if `Dockerfile` changes.
+
 ## Local development without Docker
 
 Prefer running services directly? Install dependencies with Poetry and use Docker only for databases.
