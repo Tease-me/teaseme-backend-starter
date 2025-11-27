@@ -4,7 +4,7 @@ from uuid import uuid4
 from app.core.config import settings
 from app.agents.scoring import get_score, update_score, extract_score
 from app.agents.memory import find_similar_memories, store_fact
-from app.agents.prompts import MODEL, FACT_EXTRACTOR, FACT_PROMPT
+from app.agents.prompts import MODEL, FACT_EXTRACTOR, get_fact_prompt
 from app.agents.prompt_utils import GLOBAL_PROMPT, GLOBAL_AUDIO_PROMPT, get_today_script
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import RedisChatMessageHistory
@@ -79,8 +79,14 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     update_score(user_id or chat_id, influencer_id, extract_score(reply, score))
 
     recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
+    
     try:
-        facts_resp = await FACT_EXTRACTOR.ainvoke(FACT_PROMPT.format(msg=message, ctx=recent_ctx))
+        fact_prompt = await get_fact_prompt(db)
+
+        facts_resp = await FACT_EXTRACTOR.ainvoke(
+            fact_prompt.format(msg=message, ctx=recent_ctx)
+        )
+
         facts_txt = facts_resp.content or ""
         lines = [ln.strip("- ").strip() for ln in facts_txt.split("\n") if ln.strip()]
         for line in lines[:5]:

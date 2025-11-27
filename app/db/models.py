@@ -183,3 +183,20 @@ class InfluencerKnowledgeChunk(Base):
     __table_args__ = (
         Index("idx_knowledge_chunks_influencer", "influencer_id"),
     )
+
+class SystemPrompt(Base):
+    __tablename__ = "system_prompts"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
