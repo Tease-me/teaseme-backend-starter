@@ -1,12 +1,9 @@
-import hmac
-import json
-import time
-import logging
-import logging
+
+import asyncio, time, logging, json, hmac
 
 from hashlib import sha256
 from typing import Optional, Any
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.session import get_db
@@ -14,6 +11,7 @@ from app.services.billing import charge_feature
 from app.api.elevenlabs import _extract_total_seconds
 from sqlalchemy import select
 from app.db.models import CallRecord
+from app.agents.turn_handler import handle_turn
 
 log = logging.getLogger(__name__)
 
@@ -200,3 +198,108 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
     )
     # Always respond quickly with 200 on success.
     return {"ok": True, "conversation_id": conversation_id, "status": status, "total_seconds": int(total_seconds)}
+
+
+def _verify_token(shared: str, token: str | None) -> None:
+    """Simple shared-secret check (constant time if you prefer)."""
+    if not shared:  # secret disabled
+        return
+    if not token:
+        raise HTTPException(status_code=403, detail="Missing webhook token")
+    # constant-time compare (avoid timing attacks)
+    if not hmac.compare_digest(shared, token):
+        raise HTTPException(status_code=403, detail="Invalid webhook token")
+    
+@router.post("/reply")
+async def eleven_webhook_reply(
+    req: Request,
+    db: AsyncSession = Depends(get_db),
+    x_webhook_token: str | None = Header(default=None),
+):
+    """
+    ElevenLabs ConvAI tool webhook.
+    Expects JSON payload with at least "text" and "conversation_id".
+    """
+   
+    _verify_token(ELEVENLABS_CONVAI_WEBHOOK_SECRET, x_webhook_token)
+
+    try:
+        payload = await req.json()
+    except Exception:
+        return {"text": "Sorry, I didn’t catch that. Could you repeat?"}
+
+    try:
+        log.info("[EL TOOL] payload(head)=%s", str(payload)[:800])
+    except Exception:
+        pass
+
+    args = payload.get("arguments") or {}
+    raw_text = (
+        payload.get("text")
+        or payload.get("input")
+        or (args.get("text") if isinstance(args, dict) else None)
+        or ""
+    )
+    user_text = str(raw_text).strip()
+    if not user_text:
+        return {"text": "I didn’t catch that. Could you repeat?"}
+
+    conversation_id = payload.get("conversation_id")
+
+    meta = payload.get("meta") or {}
+    user_id       = meta.get("user_id")
+    influencer_id = meta.get("influencer_id")
+    chat_id       = meta.get("chat_id")
+
+    if (not user_id or not influencer_id or not chat_id) and conversation_id:
+        try:
+            res = await db.execute(
+                select(CallRecord).where(CallRecord.conversation_id == conversation_id)
+            )
+            rec = res.scalar_one_or_none()
+            if rec:
+                user_id       = user_id or rec.user_id
+                influencer_id = influencer_id or rec.influencer_id
+                chat_id = rec.chat_id
+        except Exception as e:
+            log.exception("[EL TOOL] lookup CallRecord failed: %s", e)
+
+    if not user_id or not influencer_id:
+        log.warning(
+            "[EL TOOL] missing context (user_id=%s, influencer_id=%s, conv=%s)",
+            user_id, influencer_id, conversation_id
+        )
+        return {"text": "Hmm, I lost track of our chat. Could you say that again?"}
+
+    if not chat_id:
+        chat_id = f"{user_id}_{influencer_id}"
+
+    started = time.perf_counter()
+    try:
+        reply = await asyncio.wait_for(
+            handle_turn(
+                message=user_text,
+                chat_id=chat_id,
+                influencer_id=influencer_id,
+                user_id=user_id,
+                db=db,
+                is_audio=True,
+            ),
+            timeout=8.5,
+        )
+    except asyncio.TimeoutError:
+        reply = "One sec… could you say that again?"
+    except Exception as e:
+        log.exception("[EL TOOL] handle_turn failed: %s", e)
+        reply = "Sorry, something went wrong."
+    finally:
+        ms = int((time.perf_counter() - started) * 1000)
+        log.info(
+            "[EL TOOL] reply ms=%d conv=%s user=%s infl=%s",
+            ms, conversation_id, user_id, influencer_id
+        )
+
+    if isinstance(reply, str) and len(reply) > 320:
+        reply = reply[:317] + "…"
+
+    return {"text": reply}
