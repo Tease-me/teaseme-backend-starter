@@ -20,6 +20,19 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: teaseme-backend
+    develop: 
+      watch:
+        - action: sync
+          path: .
+          target: /usr/src/app
+          ignore:
+            - .git
+            - .venv
+            - __pycache__
+            - node_modules
+            - .cert
+        - action: rebuild
+          path: Dockerfile
     command:
       - sh
       - -c
