@@ -343,34 +343,47 @@ async def handle_turn(
     log.info("[%s] START persona=%s chat=%s user=%s", cid, influencer_id, chat_id, user_id)
 
     score = get_score(user_id or chat_id, influencer_id)
-    if db and user_id and not is_audio:
-        chat_memories, knowledge_base = await find_similar_memories(
-            db,
-            chat_id,
-            message,
-            influencer_id=influencer_id,
-            embedding=message_embedding,
-        )
-        mem_block = "\n".join(m.strip() for m in chat_memories if m and m.strip())
-        # Format knowledge base content separately and more prominently
-        log.info("[%s] Knowledge base chunks found: %d for influencer_id=%s", cid, len(knowledge_base), influencer_id)
-        if knowledge_base:
-            knowledge_text = "\n".join(kb.strip() for kb in knowledge_base if kb and kb.strip())
-            knowledge_block = f"=== CRITICAL: Factual Information About the User ===\nYou MUST use this information when the user asks about themselves or related topics. This is verified factual data:\n\n{knowledge_text}\n\nWhen the user asks about themselves, reference this information naturally in your response. Do NOT say you don't know - use this information instead."
-            log.info("[%s] Knowledge block created, length: %d chars", cid, len(knowledge_block))
-        else:
-            knowledge_block = ""
-            log.warning("[%s] No knowledge base chunks found for influencer_id=%s, message=%s", cid, influencer_id, message[:50])
-    else:
-        mem_block = ""
-        knowledge_block = ""
-        log.info(
-            "[%s] Skipping knowledge base (db=%s, user_id=%s, is_audio=%s)",
-            cid,
-            db is not None,
-            user_id,
-            is_audio,
-        )
+    mem_block = ""
+    knowledge_block = ""
+    match (is_audio, bool(db), bool(user_id)):
+        case (False, True, True):
+            chat_memories, knowledge_base = await find_similar_memories(
+                db,
+                chat_id,
+                message,
+                influencer_id=influencer_id,
+                embedding=message_embedding,
+            )
+            mem_block = "\n".join(m.strip() for m in chat_memories if m and m.strip())
+            log.info("[%s] Knowledge base chunks found: %d for influencer_id=%s", cid, len(knowledge_base), influencer_id)
+            match knowledge_base:
+                case kb if kb:
+                    knowledge_text = "\n".join(kb.strip() for kb in knowledge_base if kb and kb.strip())
+                    knowledge_block = (
+                        "=== CRITICAL: Factual Information About the User ===\n"
+                        "You MUST use this information when the user asks about themselves or related topics. "
+                        "This is verified factual data:\n\n"
+                        f"{knowledge_text}\n\n"
+                        "When the user asks about themselves, reference this information naturally in your response. "
+                        "Do NOT say you don't know - use this information instead."
+                    )
+                    log.info("[%s] Knowledge block created, length: %d chars", cid, len(knowledge_block))
+                case _:
+                    knowledge_block = ""
+                    log.warning(
+                        "[%s] No knowledge base chunks found for influencer_id=%s, message=%s",
+                        cid,
+                        influencer_id,
+                        message[:50],
+                    )
+        case _:
+            log.info(
+                "[%s] Skipping knowledge base (db=%s, user_id=%s, is_audio=%s)",
+                cid,
+                db is not None,
+                user_id,
+                is_audio,
+            )
 
     influencer = await db.get(Influencer, influencer_id)
     if not influencer:
@@ -424,8 +437,9 @@ async def handle_turn(
 
     signals = _analyze_user_message(message)
     phase = _lollity_phase(score)
-    if signals.rude_guard:
-        match phase:
+
+    def _apply_rude_penalty(current_score: int, current_phase: str) -> tuple[int, str]:
+        match current_phase:
             case "stranger":
                 penalty = _RUDE_SCORE_PENALTY + 2
             case "warm":
@@ -434,19 +448,19 @@ async def handle_turn(
                 penalty = _RUDE_SCORE_PENALTY
         if signals.negging_guard:
             penalty = max(3, penalty - 1)
-        adjusted_score = max(0, score - penalty)
-        if adjusted_score != score:
+        updated_score = max(0, current_score - penalty)
+        if updated_score != current_score:
             log.info(
                 "[%s] Rude tone detected during %s phase; lowering score from %d to %d before prompting",
                 cid,
-                phase,
-                score,
-                adjusted_score,
+                current_phase,
+                current_score,
+                updated_score,
             )
-            score = adjusted_score
-            phase = _lollity_phase(score)
-    if signals.sexual_guard:
-        match phase:
+        return updated_score, _lollity_phase(updated_score)
+
+    def _apply_sexual_penalty(current_score: int, current_phase: str) -> tuple[int, str]:
+        match current_phase:
             case "stranger":
                 sexual_penalty = 6
             case "warm":
@@ -455,17 +469,27 @@ async def handle_turn(
                 sexual_penalty = 1
         if signals.rude_guard:
             sexual_penalty += 2
-        adjusted_score = max(0, score - sexual_penalty)
-        if adjusted_score != score:
+        updated_score = max(0, current_score - sexual_penalty)
+        if updated_score != current_score:
             log.info(
                 "[%s] Sexual boundary push during %s phase; lowering score from %d to %d before prompting",
                 cid,
-                phase,
-                score,
-                adjusted_score,
+                current_phase,
+                current_score,
+                updated_score,
             )
-            score = adjusted_score
-            phase = _lollity_phase(score)
+        return updated_score, _lollity_phase(updated_score)
+
+    match (signals.rude_guard, signals.sexual_guard):
+        case (True, True):
+            score, phase = _apply_rude_penalty(score, phase)
+            score, phase = _apply_sexual_penalty(score, phase)
+        case (True, False):
+            score, phase = _apply_rude_penalty(score, phase)
+        case (False, True):
+            score, phase = _apply_sexual_penalty(score, phase)
+        case _:
+            pass
     channel_choice: str | None = None
     priority_directive = ""
     forced_choice: str | None = None
@@ -583,36 +607,41 @@ async def handle_turn(
     history.add_ai_message(reply)
     _trim_history(history)
 
-    if not is_audio:
-        recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
-        try:
-            facts_resp = await FACT_EXTRACTOR.ainvoke(FACT_PROMPT.format(msg=message, ctx=recent_ctx))
-            facts_txt = facts_resp.content or ""
-            lines = [ln.strip("- ").strip() for ln in facts_txt.split("\n") if ln.strip()]
-            to_save = []
-            for line in lines[:5]:
-                if line.lower() == "no new memories.":
-                    continue
-                to_save.append(line)
-            for fact in to_save:
-                try:
-                    await store_fact(db, chat_id, fact)
-                except Exception as inner_ex:
-                    log.error("[%s] store_fact failed fact=%r err=%s", cid, fact, inner_ex, exc_info=True)
-            if not to_save:
-                log.info("[%s] Fact extractor returned no savable facts.", cid)
-        except Exception as ex:
-            log.error("[%s] Fact extraction failed: %s", cid, ex, exc_info=True)
+    match is_audio:
+        case False:
+            recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
+            try:
+                facts_resp = await FACT_EXTRACTOR.ainvoke(FACT_PROMPT.format(msg=message, ctx=recent_ctx))
+                facts_txt = facts_resp.content or ""
+                lines = [ln.strip("- ").strip() for ln in facts_txt.split("\n") if ln.strip()]
+                to_save = []
+                for line in lines[:5]:
+                    if line.lower() == "no new memories.":
+                        continue
+                    to_save.append(line)
+                for fact in to_save:
+                    try:
+                        await store_fact(db, chat_id, fact)
+                    except Exception as inner_ex:
+                        log.error("[%s] store_fact failed fact=%r err=%s", cid, fact, inner_ex, exc_info=True)
+                if not to_save:
+                    log.info("[%s] Fact extractor returned no savable facts.", cid)
+            except Exception as ex:
+                log.error("[%s] Fact extraction failed: %s", cid, ex, exc_info=True)
+        case _:
+            pass
 
     final_reply = sanitize_tts_text(reply) if is_audio else reply
-    if return_meta:
-        return {
-            "reply": final_reply,
-            "channel_choice": channel_choice,
-            "forced_channel": bool(forced_choice),
-            "priority_channel": bool(priority_directive),
-        }
-    return final_reply
+    match return_meta:
+        case True:
+            return {
+                "reply": final_reply,
+                "channel_choice": channel_choice,
+                "forced_channel": bool(forced_choice),
+                "priority_channel": bool(priority_directive),
+            }
+        case _:
+            return final_reply
 
 
 async def reply(
