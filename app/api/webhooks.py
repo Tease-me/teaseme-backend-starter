@@ -1,5 +1,5 @@
+
 import asyncio, time, logging, json, hmac
-import httpx
 
 from hashlib import sha256
 from typing import Optional, Any
@@ -8,16 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.session import get_db
 from app.services.billing import charge_feature
-from app.api.elevenlabs import (
-    _extract_total_seconds,
-    _get_conversation_snapshot,
-    _persist_transcript_to_chat,
-    _normalize_transcript,
-)
+from app.api.elevenlabs import _extract_total_seconds
 from sqlalchemy import select
 from app.db.models import CallRecord
-from app.services.chat_service import get_or_create_chat
-from app.agents.turn_handler import reply as generate_reply
+from app.agents.turn_handler import handle_turn
 
 log = logging.getLogger(__name__)
 
@@ -26,7 +20,8 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 ELEVENLABS_CONVAI_WEBHOOK_SECRET = settings.ELEVENLABS_CONVAI_WEBHOOK_SECRET
 ELEVEN_BASE_URL = "https://api.elevenlabs.io/v1"
 
-log = logging.getLogger(__name__)
+log = logging.getLogger(__name__)  # <-- logger
+
 
 def _redact(val: Any) -> str:
     """Redact potentially sensitive IDs in logs; works for int/str/None."""
@@ -84,226 +79,17 @@ def _verify_hmac(raw_body: bytes, signature_header: Optional[str]) -> None:
 
 async def _resolve_user_for_conversation(db, conversation_id: str):
     log.info("resolver.called conversation_id=%s", conversation_id)
-    q = select(CallRecord.user_id, CallRecord.influencer_id, CallRecord.sid, CallRecord.chat_id)\
+    q = select(CallRecord.user_id, CallRecord.influencer_id, CallRecord.sid)\
         .where(CallRecord.conversation_id == conversation_id)
     res = await db.execute(q)
     row = res.first()
     if not row:
         log.info("resolver.miss conversation_id=%s", conversation_id)
-        return {"user_id": None, "influencer_id": None, "sid": conversation_id, "chat_id": None}
-    user_id, influencer_id, sid, chat_id = row
+        return {"user_id": None, "influencer_id": None, "sid": conversation_id}
+    user_id, influencer_id, sid = row
     log.info("resolver.hit conversation_id=%s user_id=%s", conversation_id, user_id)
-    return {
-        "user_id": user_id,
-        "influencer_id": influencer_id,
-        "sid": sid or conversation_id,
-        "chat_id": chat_id,
-    }
+    return {"user_id": user_id, "influencer_id": influencer_id, "sid": sid or conversation_id}
 
-
-async def _ensure_chat_id(
-    db: AsyncSession,
-    user_id: int | None,
-    influencer_id: str | None,
-    chat_id: str | None,
-) -> str | None:
-    """
-    Return a stable chat id so Redis + OpenAI threads persist between text/voice.
-    """
-    if chat_id:
-        return chat_id
-    if not db or not user_id or not influencer_id:
-        return chat_id or None
-    try:
-        return await get_or_create_chat(db, user_id, influencer_id)
-    except Exception as exc:  # pragma: no cover - defensive
-        log.warning(
-            "webhook.chat_id_resolve_failed user=%s infl=%s err=%s",
-            user_id,
-            influencer_id,
-            exc,
-        )
-        return chat_id or f"{user_id}_{influencer_id}"
-
-def _verify_token(shared: str, token: str | None) -> None:
-    """Simple shared-secret check (constant time if you prefer)."""
-    if not shared:  # secret disabled
-        return
-    if not token:
-        raise HTTPException(status_code=403, detail="Missing webhook token")
-    # constant-time compare (avoid timing attacks)
-    if not hmac.compare_digest(shared, token):
-        raise HTTPException(status_code=403, detail="Invalid webhook token")
-
-
-def _coerce_int(val) -> int | None:
-    try:
-        return int(val)
-    except (TypeError, ValueError):
-        return None
-
-
-@router.post("/reply")
-async def eleven_webhook_reply(
-    req: Request,
-    db: AsyncSession = Depends(get_db),
-    x_webhook_token: str | None = Header(default=None),
-):
-    """
-    ElevenLabs ConvAI tool webhook.
-    Recebe a fala do usuário e devolve o texto para o TTS.
-    """
-    # 1) Auth
-    _verify_token(ELEVENLABS_CONVAI_WEBHOOK_SECRET, x_webhook_token)
-
-    # 2) Parse payload
-    try:
-        payload = await req.json()
-    except Exception:
-        return {"text": "Sorry, I didn’t catch that. Could you repeat?"}
-
-    try:
-        log.info("[EL TOOL] payload(head)=%s", str(payload)[:800])
-    except Exception:
-        pass
-
-    # 3) Texto do usuário (aceita formatos comuns)
-    args = payload.get("arguments") or {}
-    raw_text = (
-        payload.get("text")
-        or payload.get("input")
-        or (args.get("text") if isinstance(args, dict) else None)
-        or ""
-    )
-    user_text = str(raw_text).strip()
-    if not user_text:
-        return {"text": "I didn’t catch that. Could you repeat?"}
-
-    conversation_id = payload.get("conversation_id")
-
-    # 3b) Contexto: primeiro meta, depois fallback por conversation_id
-    meta = payload.get("meta") or payload.get("metadata") or {}
-    user_id       = _coerce_int(meta.get("user_id") or meta.get("userId"))
-    influencer_id = meta.get("influencer_id") or meta.get("influencerId") or meta.get("persona_id") or meta.get("personaId")
-    chat_id       = meta.get("chat_id") or meta.get("chatId")
-    sid           = meta.get("sid") or conversation_id
-
-    if (not user_id or not influencer_id or not chat_id) and conversation_id:
-        try:
-            res = await db.execute(
-                select(CallRecord).where(CallRecord.conversation_id == conversation_id)
-            )
-            rec = res.scalar_one_or_none()
-            if rec:
-                user_id       = user_id or rec.user_id
-                influencer_id = influencer_id or rec.influencer_id
-                chat_id = rec.chat_id
-        except Exception as e:
-            log.exception("[EL TOOL] lookup CallRecord failed: %s", e)
-
-    snapshot_meta: dict[str, Any] = {}
-    if (not user_id or not influencer_id or not chat_id) and conversation_id:
-        try:
-            async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
-                snapshot = await _get_conversation_snapshot(client, conversation_id)
-            snapshot_meta = snapshot.get("meta") or snapshot.get("metadata") or {}
-            user_id = user_id or _coerce_int(
-                snapshot_meta.get("user_id")
-                or snapshot_meta.get("userId")
-                or snapshot_meta.get("user")
-            )
-            influencer_id = influencer_id or snapshot_meta.get("influencer_id") or snapshot_meta.get("persona_id")
-            chat_id = chat_id or snapshot_meta.get("chat_id") or snapshot_meta.get("chatId")
-            sid = sid or snapshot_meta.get("sid") or conversation_id
-        except Exception as exc:  # pragma: no cover - defensive
-            log.warning(
-                "[EL TOOL] snapshot context fallback failed conv=%s err=%s",
-                conversation_id,
-                exc,
-            )
-
-    # 3c) Validações finais (sem defaults perigosos!)
-    if not user_id or not influencer_id:
-        log.warning(
-            "[EL TOOL] missing context (user_id=%s, influencer_id=%s, conv=%s)",
-            user_id, influencer_id, conversation_id
-        )
-        return {"text": "Hmm, I lost track of our chat. Could you say that again?"}
-
-    chat_id = await _ensure_chat_id(db, user_id, influencer_id, chat_id)
-
-    if not chat_id:
-        chat_id = f"{user_id}_{influencer_id}"
-
-    if conversation_id and chat_id:
-        try:
-            rec = await db.get(CallRecord, conversation_id)
-            if rec:
-                updated = False
-                if not rec.chat_id:
-                    rec.chat_id = chat_id
-                    updated = True
-                if not rec.user_id and user_id:
-                    rec.user_id = user_id
-                    updated = True
-                if not rec.influencer_id and influencer_id:
-                    rec.influencer_id = influencer_id
-                    updated = True
-                if not rec.sid and sid:
-                    rec.sid = sid
-                    updated = True
-                if updated:
-                    db.add(rec)
-                    await db.commit()
-            elif user_id:
-                rec = CallRecord(
-                    conversation_id=conversation_id,
-                    user_id=user_id,
-                    influencer_id=influencer_id,
-                    chat_id=chat_id,
-                    sid=sid,
-                    status="pending",
-                )
-                db.add(rec)
-                await db.commit()
-        except Exception as exc:  # pragma: no cover - defensive
-            log.warning(
-                "[EL TOOL] failed to backfill chat_id for conversation %s: %s",
-                conversation_id,
-                exc,
-            )
-
-    # 4) Gera a resposta (timeout + métricas)
-    started = time.perf_counter()
-    try:
-        ai_reply = await asyncio.wait_for(
-            generate_reply(
-                message=user_text,
-                chat_id=chat_id,
-                influencer_id=influencer_id,
-                user_id=user_id,
-                db=db,
-                is_audio=True,
-            ),
-            timeout=8.5,  # ajuste conforme sua latência média
-        )
-    except asyncio.TimeoutError:
-        ai_reply = "One sec… could you say that again?"
-    except Exception as e:
-        log.exception("[EL TOOL] handle_turn failed: %s", e)
-        ai_reply = "Sorry, something went wrong."
-    finally:
-        ms = int((time.perf_counter() - started) * 1000)
-        log.info(
-            "[EL TOOL] reply ms=%d conv=%s user=%s infl=%s",
-            ms, conversation_id, user_id, influencer_id
-        )
-
-    # 5) Poda de segurança (fala muito longa atrapalha a UX de voz)
-    if isinstance(ai_reply, str) and len(ai_reply) > 320:
-        ai_reply = ai_reply[:317] + "…"
-
-    return {"text": ai_reply}
 
 @router.post("/elevenlabs")
 async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_db)):
@@ -338,7 +124,7 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
         log.warning("webhook.json.invalid ip=%s", client_ip)
         raise HTTPException(400, "Invalid JSON payload")
 
-    event_type = payload.get("type")
+    event_type = payload.get("type")  # "post_call_transcription" or "post_call_audio"
     data = payload.get("data") or {}
 
     conversation_id = data.get("conversation_id")
@@ -358,37 +144,9 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
     meta_map = await _resolve_user_for_conversation(db, conversation_id)
     user_id = meta_map.get("user_id") or data.get("user_id")  # last-resort fallback
     sid = meta_map.get("sid") or conversation_id
-    chat_id = meta_map.get("chat_id")
-
-    snapshot_for_history = data
-    if not snapshot_for_history.get("transcript"):
-        try:
-            async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
-                snapshot_for_history = await _get_conversation_snapshot(client, conversation_id)
-        except Exception as exc:
-            log.warning(
-                "webhook.snapshot_fetch_failed conv=%s err=%s",
-                _redact(conversation_id),
-                exc,
-            )
-            snapshot_for_history = data
-    normalized_transcript = _normalize_transcript(snapshot_for_history)
 
     # Only bill when the conversation is fully done (avoid processing/in-progress).
     if status == "done" and user_id:
-        if not chat_id and meta_map.get("influencer_id"):
-            try:
-                chat_id = await get_or_create_chat(db, user_id, meta_map.get("influencer_id"))
-            except Exception as exc:  # pragma: no cover - defensive
-                log.warning(
-                    "webhook.chat_id_create_failed conv=%s user=%s infl=%s err=%s",
-                    _redact(conversation_id),
-                    _redact(user_id),
-                    meta_map.get("influencer_id"),
-                    exc,
-                )
-                chat_id = None
-
         meta = {
             "session_id": sid,
             "conversation_id": conversation_id,
@@ -396,48 +154,15 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
             "agent_id": data.get("agent_id"),
             "start_time_unix_secs": (data.get("metadata") or {}).get("start_time_unix_secs"),
             "has_audio": data.get("has_audio", False),
-            "has_user_audio": data.get("has_user_auƒdio", False),
+            "has_user_audio": data.get("has_user_audio", False),
             "has_response_audio": data.get("has_response_audio", False),
             "source": "webhook",
             "event_type": event_type,
         }
-        log.info(
+        log.info(     
             "webhook.billing.start user=%s conv_id=%s seconds=%s",
             _redact(user_id), _redact(conversation_id), total_seconds
         )
-        if chat_id:
-            try:
-                await _persist_transcript_to_chat(
-                    db,
-                    conversation_json=snapshot_for_history,
-                    chat_id=chat_id,
-                    conversation_id=conversation_id,
-                )
-            except Exception as exc:
-                log.warning(
-                    "webhook.persist_transcript_failed conv=%s chat=%s err=%s",
-                    _redact(conversation_id),
-                    chat_id,
-                    exc,
-                )
-        try:
-            call_record = await db.get(CallRecord, conversation_id)
-            if call_record:
-                call_record.status = status
-                call_record.call_duration_secs = total_seconds
-                call_record.transcript = normalized_transcript or call_record.transcript
-                if chat_id:
-                    call_record.chat_id = chat_id
-                if meta_map.get("influencer_id"):
-                    call_record.influencer_id = meta_map.get("influencer_id")
-                db.add(call_record)
-                await db.commit()
-        except Exception as exc:
-            log.warning(
-                "webhook.update_call_record_failed conv=%s err=%s",
-                _redact(conversation_id),
-                exc,
-            )
         try:
             # Important: charge_feature must be idempotent by conversation_id
             await charge_feature(
@@ -473,3 +198,108 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
     )
     # Always respond quickly with 200 on success.
     return {"ok": True, "conversation_id": conversation_id, "status": status, "total_seconds": int(total_seconds)}
+
+
+def _verify_token(shared: str, token: str | None) -> None:
+    """Simple shared-secret check (constant time if you prefer)."""
+    if not shared:  # secret disabled
+        return
+    if not token:
+        raise HTTPException(status_code=403, detail="Missing webhook token")
+    # constant-time compare (avoid timing attacks)
+    if not hmac.compare_digest(shared, token):
+        raise HTTPException(status_code=403, detail="Invalid webhook token")
+    
+@router.post("/reply")
+async def eleven_webhook_reply(
+    req: Request,
+    db: AsyncSession = Depends(get_db),
+    x_webhook_token: str | None = Header(default=None),
+):
+    """
+    ElevenLabs ConvAI tool webhook.
+    Expects JSON payload with at least "text" and "conversation_id".
+    """
+   
+    _verify_token(ELEVENLABS_CONVAI_WEBHOOK_SECRET, x_webhook_token)
+
+    try:
+        payload = await req.json()
+    except Exception:
+        return {"text": "Sorry, I didn’t catch that. Could you repeat?"}
+
+    try:
+        log.info("[EL TOOL] payload(head)=%s", str(payload)[:800])
+    except Exception:
+        pass
+
+    args = payload.get("arguments") or {}
+    raw_text = (
+        payload.get("text")
+        or payload.get("input")
+        or (args.get("text") if isinstance(args, dict) else None)
+        or ""
+    )
+    user_text = str(raw_text).strip()
+    if not user_text:
+        return {"text": "I didn’t catch that. Could you repeat?"}
+
+    conversation_id = payload.get("conversation_id")
+
+    meta = payload.get("meta") or {}
+    user_id       = meta.get("user_id")
+    influencer_id = meta.get("influencer_id")
+    chat_id       = meta.get("chat_id")
+
+    if (not user_id or not influencer_id or not chat_id) and conversation_id:
+        try:
+            res = await db.execute(
+                select(CallRecord).where(CallRecord.conversation_id == conversation_id)
+            )
+            rec = res.scalar_one_or_none()
+            if rec:
+                user_id       = user_id or rec.user_id
+                influencer_id = influencer_id or rec.influencer_id
+                chat_id = rec.chat_id
+        except Exception as e:
+            log.exception("[EL TOOL] lookup CallRecord failed: %s", e)
+
+    if not user_id or not influencer_id:
+        log.warning(
+            "[EL TOOL] missing context (user_id=%s, influencer_id=%s, conv=%s)",
+            user_id, influencer_id, conversation_id
+        )
+        return {"text": "Hmm, I lost track of our chat. Could you say that again?"}
+
+    if not chat_id:
+        chat_id = f"{user_id}_{influencer_id}"
+
+    started = time.perf_counter()
+    try:
+        reply = await asyncio.wait_for(
+            handle_turn(
+                message=user_text,
+                chat_id=chat_id,
+                influencer_id=influencer_id,
+                user_id=user_id,
+                db=db,
+                is_audio=True,
+            ),
+            timeout=8.5,
+        )
+    except asyncio.TimeoutError:
+        reply = "One sec… could you say that again?"
+    except Exception as e:
+        log.exception("[EL TOOL] handle_turn failed: %s", e)
+        reply = "Sorry, something went wrong."
+    finally:
+        ms = int((time.perf_counter() - started) * 1000)
+        log.info(
+            "[EL TOOL] reply ms=%d conv=%s user=%s infl=%s",
+            ms, conversation_id, user_id, influencer_id
+        )
+
+    if isinstance(reply, str) and len(reply) > 320:
+        reply = reply[:317] + "…"
+
+    return {"text": reply}

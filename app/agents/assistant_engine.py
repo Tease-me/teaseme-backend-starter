@@ -9,7 +9,7 @@ from langchain_community.chat_message_histories import RedisChatMessageHistory
 from app.agents.prompts import CONVERSATION_ANALYZER, CONVERSATION_ANALYZER_PROMPT
 from app.agents.scoring import format_score_value
 
-log = logging.getLogger("teaseme-turn")
+log = logging.getLogger("teaseme-agent-turn")
 
 _DASH_RE = re.compile(r"[—–-]+")
 _MULTISPACE_RE = re.compile(r"\s{2,}")
