@@ -9,10 +9,37 @@ from app.db.models import Influencer
 from datetime import date
 from fastapi import Depends, HTTPException
 from app.db.session import get_db
+from app.services.system_prompt_service import get_system_prompt
 
 import logging
 log = logging.getLogger("teaseme-script")
 
+
+async def get_base_system(db: AsyncSession) -> str:
+    """
+    Search BASE_SYSTEM in the DB.
+    Returns the BASE_SYSTEM text from the database.
+    """
+    text = await get_system_prompt(db, "BASE_SYSTEM")
+    return text or BASE_SYSTEM  # fallback pra não quebrar
+
+
+async def get_base_audio_system(db: AsyncSession) -> str:
+    """
+    Merge BASE_SYSTEM and BASE_AUDIO_SYSTEM from the DB.
+    Search both prompts in the DB and concatenate them.
+    """
+    base = await get_system_prompt(db, "BASE_SYSTEM")
+    audio_suffix = await get_system_prompt(db, "BASE_AUDIO_SYSTEM")
+
+    if not base:
+        base = BASE_SYSTEM
+    if not audio_suffix:
+        audio_suffix = BASE_AUDIO_SYSTEM.replace(BASE_SYSTEM, "").lstrip()
+
+    return base + "\n\n" + audio_suffix
+
+# TODO: DELTETE AFTER MIGRATION
 BASE_SYSTEM = """
 You are the user’s playful, attentive girlfriend, keeping conversations sweet, natural, and tinged with subtle sensuality.
 - Occasionally use gentle teasing or affectionate expressions—always natural, never forced.
@@ -108,7 +135,11 @@ async def build_system_prompt(
         score_rule = "You’re in full teasing mode! Challenge the user, play hard to get, and use the name TeaseMe as a game."
     persona_rules += "\n" + score_rule
 
-    system_prompt = BASE_AUDIO_SYSTEM if is_audio else BASE_SYSTEM
+    if is_audio:
+        system_prompt = await get_base_audio_system(db)
+    else:
+        system_prompt = await get_base_system(db)
+        
     daily_context = await get_today_script(db, influencer_id)
     memories_text = "\n".join(memories)
 
