@@ -5,7 +5,7 @@ from app.core.config import settings
 from app.agents.scoring import get_score, update_score, extract_score
 from app.agents.memory import find_similar_memories, store_fact
 from app.agents.prompts import MODEL, FACT_EXTRACTOR, get_fact_prompt
-from app.agents.prompt_utils import GLOBAL_PROMPT, GLOBAL_AUDIO_PROMPT, get_today_script
+from app.agents.prompt_utils import get_global_audio_prompt, get_global_prompt, get_today_script
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import RedisChatMessageHistory
 from app.db.models import Influencer
@@ -40,7 +40,11 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     else:
         persona_rules += "\nYou’re in full teasing mode! Challenge the user, play hard to get, and use the name TeaseMe as a game."
 
-    prompt_template = GLOBAL_AUDIO_PROMPT if is_audio else GLOBAL_PROMPT
+    if is_audio:
+        prompt_template = await get_global_audio_prompt(db)
+    else:
+        prompt_template = await get_global_prompt(db)
+
     prompt = prompt_template.partial(
         persona_rules=persona_rules, 
         memories=mem_block, 

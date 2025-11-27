@@ -80,39 +80,64 @@ Output Rules:
 - Keep lines short and conversational. Vary rhythm with ellipses and breaks.
 """
 
-GLOBAL_PROMPT = ChatPromptTemplate.from_messages(
-    [
-        ("system", BASE_SYSTEM),
-        ("system", "{persona_rules}"),
-        ("system", "Today’s inspiration for you (use ONLY if it fits the current conversation, otherwise ignore): {daily_context}"),
-        (
-            "system",
-            "These past memories may help:\n{memories}\n"
-            "If you see the user’s preferred name here, use it *occasionally and naturally, only when it fits the conversation or for affection*. Don’t overuse the name.\n"
-            "Here is the user’s latest message for your reference only:\n"
-            "\"{last_user_message}\"\n"
-            "If the user changed topic, you do NOT need to talk about this. Use only if it makes the reply feel natural."
-        ),
-        MessagesPlaceholder("history"),
-        ("user", "{input}"),
-    ]
-)
-GLOBAL_AUDIO_PROMPT = ChatPromptTemplate.from_messages(
-    [
-        ("system", BASE_AUDIO_SYSTEM),
-        ("system", "{persona_rules}"),
-        ("system", "Today’s inspiration for you (use ONLY if it fits the current conversation, otherwise ignore): {daily_context}"),
-        (
-            "system",
-            "These past memories may help:\n{memories}\n"
-            "If you see the user’s preferred name here, use it *occasionally and naturally, only when it fits the conversation or for affection*. Don’t overuse the name.\n"
-            "Refer to the user's last message below for emotional context and continuity:\n"
-            "\"{last_user_message}\""
-        ),
-        MessagesPlaceholder("history"),
-        ("user", "{input}"),
-    ]
-)
+
+async def get_global_prompt(
+    db: AsyncSession,
+) -> ChatPromptTemplate:
+    """
+    Version of GLOBAL_PROMPT that fetches BASE_SYSTEM from the DB.
+    """
+    system_prompt = await get_base_system(db)
+
+    return ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt),
+            ("system", "{persona_rules}"),
+            (
+                "system",
+                "Today’s inspiration for you (use ONLY if it fits the current conversation, otherwise ignore): {daily_context}"
+            ),
+            (
+                "system",
+                "These past memories may help:\n{memories}\n"
+                "If you see the user’s preferred name here, use it *occasionally and naturally, only when it fits the conversation or for affection*. Don’t overuse the name.\n"
+                "Here is the user’s latest message for your reference only:\n"
+                "\"{last_user_message}\"\n"
+                "If the user changed topic, you do NOT need to talk about this. Use only if it makes the reply feel natural."
+            ),
+            MessagesPlaceholder("history"),
+            ("user", "{input}"),
+        ]
+    )
+
+
+async def get_global_audio_prompt(
+    db: AsyncSession,
+) -> ChatPromptTemplate:
+    """
+    Version dynamically built from DB BASE_AUDIO_SYSTEM.
+    """
+    system_prompt = await get_base_audio_system(db)
+
+    return ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt),
+            ("system", "{persona_rules}"),
+            (
+                "system",
+                "Today’s inspiration for you (use ONLY if it fits the current conversation, otherwise ignore): {daily_context}"
+            ),
+            (
+                "system",
+                "These past memories may help:\n{memories}\n"
+                "If you see the user’s preferred name here, use it *occasionally and naturally, only when it fits the conversation or for affection*. Don’t overuse the name.\n"
+                "Refer to the user's last message below for emotional context and continuity:\n"
+                "\"{last_user_message}\""
+            ),
+            MessagesPlaceholder("history"),
+            ("user", "{input}"),
+        ]
+    )
 
 async def build_system_prompt(
     db: AsyncSession,
