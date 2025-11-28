@@ -3,9 +3,9 @@ from uuid import uuid4
 from app.core.config import settings
 from app.agents.scoring import get_score, update_score, extract_score
 from app.agents.memory import find_similar_memories, store_fact
-from app.agents.prompts import MODEL
+from app.agents.prompts import MODEL, FACT_EXTRACTOR, get_fact_prompt
+from app.db.session import SessionLocal
 from app.agents.prompt_utils import get_global_audio_prompt, get_global_prompt, get_today_script
-from app.services.system_prompt_service import extract_and_store_facts_for_turn
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import RedisChatMessageHistory
 from app.db.models import Influencer
@@ -41,6 +41,35 @@ def _norm(m):
         return str(m).strip()
     # Anything else
     return str(m).strip()
+
+
+async def extract_and_store_facts_for_turn(
+    message: str,
+    recent_ctx: str,
+    chat_id: str,
+    cid: str,
+) -> None:
+    """
+    Runs the fact extraction flow and stores new facts in the DB.
+    Intended to be called from handle_turn (sync or background).
+    """
+    async with SessionLocal() as db:
+        try:
+            fact_prompt = await get_fact_prompt(db)
+
+            facts_resp = await FACT_EXTRACTOR.ainvoke(
+                fact_prompt.format(msg=message, ctx=recent_ctx)
+            )
+
+            facts_txt = facts_resp.content or ""
+            lines = [ln.strip("- ").strip() for ln in facts_txt.split("\n") if ln.strip()]
+
+            for line in lines[:5]:
+                if line.lower() == "no new memories.":
+                    continue
+                await store_fact(db, chat_id, line)
+        except Exception as ex:
+            log.error("[%s] Fact extraction failed: %s", cid, ex, exc_info=True)
 
 async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: str | None = None, db=None, is_audio: bool = False) -> str:
     cid = uuid4().hex[:8]
