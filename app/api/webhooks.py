@@ -10,7 +10,7 @@ from app.db.session import get_db
 from app.services.billing import charge_feature
 from app.api.elevenlabs import _extract_total_seconds
 from sqlalchemy import select
-from app.db.models import CallRecord
+from app.db.models import CallRecord, Chat
 from app.agents.turn_handler import handle_turn
 
 log = logging.getLogger(__name__)
@@ -219,10 +219,16 @@ async def eleven_webhook_reply(
     """
     ElevenLabs ConvAI tool webhook.
     Expects JSON payload with at least "text" and "conversation_id".
+
+    This implementation:
+    - DOES NOT use any defaults.
+    - Relies on CallRecord created earlier (via /elevenlabs/conversations/{conversation_id}/register).
     """
-   
+
+    # 1) Auth
     _verify_token(ELEVENLABS_CONVAI_WEBHOOK_SECRET, x_webhook_token)
 
+    # 2) Parse payload
     try:
         payload = await req.json()
     except Exception:
@@ -233,6 +239,7 @@ async def eleven_webhook_reply(
     except Exception:
         pass
 
+    # 3) Extract user text
     args = payload.get("arguments") or {}
     raw_text = (
         payload.get("text")
@@ -245,35 +252,67 @@ async def eleven_webhook_reply(
         return {"text": "I didn’t catch that. Could you repeat?"}
 
     conversation_id = payload.get("conversation_id")
+    if not conversation_id:
+        log.warning("[EL TOOL] missing conversation_id in payload=%s", str(payload)[:300])
+        return {"text": "I’m missing the call ID. Please try again."}
 
-    meta = payload.get("meta") or {}
-    user_id       = meta.get("user_id")
-    influencer_id = meta.get("influencer_id")
-    chat_id       = meta.get("chat_id")
-
-    if (not user_id or not influencer_id or not chat_id) and conversation_id:
-        try:
-            res = await db.execute(
-                select(CallRecord).where(CallRecord.conversation_id == conversation_id)
-            )
-            rec = res.scalar_one_or_none()
-            if rec:
-                user_id       = user_id or rec.user_id
-                influencer_id = influencer_id or rec.influencer_id
-                chat_id = rec.chat_id
-        except Exception as e:
-            log.exception("[EL TOOL] lookup CallRecord failed: %s", e)
-
-    if not user_id or not influencer_id:
-        log.warning(
-            "[EL TOOL] missing context (user_id=%s, influencer_id=%s, conv=%s)",
-            user_id, influencer_id, conversation_id
+    # 4) Look up CallRecord – must exist (set by /elevenlabs/conversations/{conversation_id}/register)
+    try:
+        res = await db.execute(
+            select(CallRecord).where(CallRecord.conversation_id == conversation_id)
         )
-        return {"text": "Hmm, I lost track of our chat. Could you say that again?"}
+        call = res.scalar_one_or_none()
+    except Exception as e:
+        log.exception("[EL TOOL] CallRecord lookup failed: %s", e)
+        return {"text": "I had an internal issue looking up this call. Please try again."}
 
-    if not chat_id:
-        chat_id = f"{user_id}_{influencer_id}"
+    if not call:
+        log.warning("[EL TOOL] No CallRecord found for conv=%s", conversation_id)
+        return {
+            "text": (
+                "I lost track of this call on my side. "
+                "Please hang up and start a new one."
+            )
+        }
 
+    user_id = call.user_id
+    influencer_id = call.influencer_id
+    chat_id = call.chat_id
+
+    # 5) Validate context – no defaults
+    if not user_id or not influencer_id or not chat_id:
+        log.warning(
+            "[EL TOOL] incomplete CallRecord context conv=%s user=%s infl=%s chat=%s",
+            conversation_id, user_id, influencer_id, chat_id
+        )
+        return {
+            "text": (
+                "I’m having trouble with this call’s context. "
+                "Let’s start fresh next time, okay?"
+            )
+        }
+
+    # 6) Ensure Chat exists
+    try:
+        res = await db.execute(select(Chat).where(Chat.id == chat_id))
+        chat = res.scalar_one_or_none()
+    except Exception as e:
+        log.exception("[EL TOOL] Chat lookup failed: %s", e)
+        return {"text": "I hit an error accessing our chat. Please try again later."}
+
+    if not chat:
+        log.warning(
+            "[EL TOOL] Chat not found for conv=%s chat=%s user=%s infl=%s",
+            conversation_id, chat_id, user_id, influencer_id
+        )
+        return {
+            "text": (
+                "I can’t find our previous messages right now. "
+                "Let’s start again next time?"
+            )
+        }
+
+    # 7) Generate reply via handle_turn
     started = time.perf_counter()
     try:
         reply = await asyncio.wait_for(
@@ -295,10 +334,11 @@ async def eleven_webhook_reply(
     finally:
         ms = int((time.perf_counter() - started) * 1000)
         log.info(
-            "[EL TOOL] reply ms=%d conv=%s user=%s infl=%s",
-            ms, conversation_id, user_id, influencer_id
+            "[EL TOOL] reply ms=%d conv=%s user=%s infl=%s chat=%s",
+            ms, conversation_id, user_id, influencer_id, chat_id
         )
 
+    # 8) Trim for TTS
     if isinstance(reply, str) and len(reply) > 320:
         reply = reply[:317] + "…"
 

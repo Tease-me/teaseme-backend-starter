@@ -1,10 +1,10 @@
-import time
-import logging
+import logging,asyncio
 from uuid import uuid4
 from app.core.config import settings
 from app.agents.scoring import get_score, update_score, extract_score
 from app.agents.memory import find_similar_memories, store_fact
 from app.agents.prompts import MODEL, FACT_EXTRACTOR, get_fact_prompt
+from app.db.session import SessionLocal
 from app.agents.prompt_utils import get_global_audio_prompt, get_global_prompt, get_today_script
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import RedisChatMessageHistory
@@ -18,6 +18,58 @@ def redis_history(chat_id: str):
     return RedisChatMessageHistory(
         session_id=chat_id, url=settings.REDIS_URL, ttl=settings.HISTORY_TTL)
 
+def _norm(m):
+    if m is None:
+        return ""
+    # Already a string
+    if isinstance(m, str):
+        return m.strip()
+    # List or tuple → flatten and join
+    if isinstance(m, (list, tuple)):
+        parts = []
+        for x in m:
+            if isinstance(x, str):
+                parts.append(x.strip())
+            else:
+                parts.append(str(x).strip())
+        return " ".join(part for part in parts if part)
+    # Dict → try common content fields
+    if isinstance(m, dict):
+        for key in ("content", "text", "message", "snippet", "summary"):
+            if key in m and isinstance(m[key], str):
+                return m[key].strip()
+        return str(m).strip()
+    # Anything else
+    return str(m).strip()
+
+
+async def extract_and_store_facts_for_turn(
+    message: str,
+    recent_ctx: str,
+    chat_id: str,
+    cid: str,
+) -> None:
+    """
+    Runs the fact extraction flow and stores new facts in the DB.
+    Intended to be called from handle_turn (sync or background).
+    """
+    async with SessionLocal() as db:
+        try:
+            fact_prompt = await get_fact_prompt(db)
+
+            facts_resp = await FACT_EXTRACTOR.ainvoke(
+                fact_prompt.format(msg=message, ctx=recent_ctx)
+            )
+
+            facts_txt = facts_resp.content or ""
+            lines = [ln.strip("- ").strip() for ln in facts_txt.split("\n") if ln.strip()]
+
+            for line in lines[:5]:
+                if line.lower() == "no new memories.":
+                    continue
+                await store_fact(db, chat_id, line)
+        except Exception as ex:
+            log.error("[%s] Fact extraction failed: %s", cid, ex, exc_info=True)
 
 async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: str | None = None, db=None, is_audio: bool = False) -> str:
     cid = uuid4().hex[:8]
@@ -26,7 +78,9 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
 
     score = get_score(user_id or chat_id, influencer_id)
     memories = await find_similar_memories(db, chat_id, message) if (db and user_id) else []
-    mem_block = "\n".join(m.strip() for m in memories if m and m.strip())
+    mem_block = "\n".join(
+        s for s in (_norm(m) for m in memories or []) if s
+    )
 
     influencer = await db.get(Influencer, influencer_id)
     if not influencer:
@@ -84,21 +138,18 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
 
     recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
     
+    # background task
     try:
-        fact_prompt = await get_fact_prompt(db)
-
-        facts_resp = await FACT_EXTRACTOR.ainvoke(
-            fact_prompt.format(msg=message, ctx=recent_ctx)
+        asyncio.create_task(
+            extract_and_store_facts_for_turn(
+                message=message,
+                recent_ctx=recent_ctx,
+                chat_id=chat_id,
+                cid=cid,
+            )
         )
-
-        facts_txt = facts_resp.content or ""
-        lines = [ln.strip("- ").strip() for ln in facts_txt.split("\n") if ln.strip()]
-        for line in lines[:5]:
-            if line.lower() == "no new memories.":
-                continue
-            await store_fact(db, chat_id, line)
     except Exception as ex:
-        log.error("[%s] Fact extraction failed: %s", cid, ex, exc_info=True)
+        log.error("[%s] Failed to schedule fact extraction: %s", cid, ex, exc_info=True)
 
     if is_audio:
         tts_text = sanitize_tts_text(reply)
