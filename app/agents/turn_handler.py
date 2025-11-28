@@ -2,9 +2,9 @@ import time
 import logging
 from uuid import uuid4
 from app.core.config import settings
-from app.agents.scoring import get_score, update_score, extract_score
+from app.agents.scoring import get_score, update_score, extract_score, format_score_value
 from app.agents.memory import find_similar_memories, store_fact
-from app.agents.prompts import MODEL, FACT_EXTRACTOR, get_fact_prompt
+from app.agents.prompts import MODEL, FACT_EXTRACTOR, CONVO_ANALYZER, get_fact_prompt, get_convo_analyzer_prompt
 from app.agents.prompt_utils import get_global_audio_prompt, get_global_prompt, get_today_script
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import RedisChatMessageHistory
@@ -40,19 +40,40 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     else:
         persona_rules += "\nYou’re in full teasing mode! Challenge the user, play hard to get, and use the name TeaseMe as a game."
 
+    history = redis_history(chat_id)
+
+    if len(history.messages) > settings.MAX_HISTORY_WINDOW:
+        trimmed = history.messages[-settings.MAX_HISTORY_WINDOW:]
+        history.clear()
+        history.add_messages(trimmed)
+
+    recent_ctx_for_analysis = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
+    analysis_summary = "Intent: unknown\nMeaning: unknown\nEmotion: unknown\nUrgency/Risk: none noted"
+
+    try:
+        analyzer_prompt = await get_convo_analyzer_prompt(db)
+        analyzer_kwargs = {"msg": message, "ctx": recent_ctx_for_analysis}
+        if "lollity_score" in analyzer_prompt.input_variables:
+            analyzer_kwargs["lollity_score"] = format_score_value(score)
+        analysis_resp = await CONVO_ANALYZER.ainvoke(analyzer_prompt.format(**analyzer_kwargs))
+        if analysis_resp.content:
+            analysis_summary = analysis_resp.content.strip()
+    except Exception as ex:
+        log.error("[%s] Conversation analysis failed: %s", cid, ex, exc_info=True)
+
     if is_audio:
         prompt_template = await get_global_audio_prompt(db)
     else:
         prompt_template = await get_global_prompt(db)
 
     prompt = prompt_template.partial(
-        persona_rules=persona_rules, 
-        memories=mem_block, 
+        lollity_score=format_score_value(score),
+        analysis=analysis_summary,
+        persona_rules=persona_rules,
+        memories=mem_block,
         daily_context= await get_today_script(db,influencer_id),
         last_user_message=message
     )
-
-    history = redis_history(chat_id)
 
     try:
         hist_msgs = history.messages
@@ -63,12 +84,6 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
         log.info("[%s] Prompt logging failed: %s", cid, log_ex)
     
     chain = prompt | MODEL
-    history = redis_history(chat_id)
-
-    if len(history.messages) > settings.MAX_HISTORY_WINDOW:
-        trimmed = history.messages[-settings.MAX_HISTORY_WINDOW:]
-        history.clear()
-        history.add_messages(trimmed)
 
     runnable = RunnableWithMessageHistory(
         chain, lambda _: history, input_messages_key="input", history_messages_key="history")
@@ -104,7 +119,3 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
         tts_text = sanitize_tts_text(reply)
         return tts_text
     return reply
-
-    
-
-

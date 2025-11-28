@@ -15,6 +15,13 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    ACCESS_TOKEN_COOKIE_NAME: str = "access_token"
+    REFRESH_TOKEN_COOKIE_NAME: str = "refresh_token"
+    ACCESS_TOKEN_HTTPONLY: bool = True
+    REFRESH_TOKEN_HTTPONLY: bool = True
+    COOKIE_DOMAIN: str | None = None
+    COOKIE_SECURE: bool = False
+    COOKIE_SAMESITE: str = "lax"
 
     BLAND_API_KEY: str
     BLAND_VOICE_ID: str
