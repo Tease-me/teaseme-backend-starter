@@ -18,6 +18,29 @@ def redis_history(chat_id: str):
     return RedisChatMessageHistory(
         session_id=chat_id, url=settings.REDIS_URL, ttl=settings.HISTORY_TTL)
 
+def _norm(m):
+    if m is None:
+        return ""
+    # Already a string
+    if isinstance(m, str):
+        return m.strip()
+    # List or tuple → flatten and join
+    if isinstance(m, (list, tuple)):
+        parts = []
+        for x in m:
+            if isinstance(x, str):
+                parts.append(x.strip())
+            else:
+                parts.append(str(x).strip())
+        return " ".join(part for part in parts if part)
+    # Dict → try common content fields
+    if isinstance(m, dict):
+        for key in ("content", "text", "message", "snippet", "summary"):
+            if key in m and isinstance(m[key], str):
+                return m[key].strip()
+        return str(m).strip()
+    # Anything else
+    return str(m).strip()
 
 async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: str | None = None, db=None, is_audio: bool = False) -> str:
     cid = uuid4().hex[:8]
@@ -26,7 +49,9 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
 
     score = get_score(user_id or chat_id, influencer_id)
     memories = await find_similar_memories(db, chat_id, message) if (db and user_id) else []
-    mem_block = "\n".join(m.strip() for m in memories if m and m.strip())
+    mem_block = "\n".join(
+        s for s in (_norm(m) for m in memories or []) if s
+    )
 
     influencer = await db.get(Influencer, influencer_id)
     if not influencer:
