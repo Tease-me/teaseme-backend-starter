@@ -25,17 +25,9 @@ async def _sync_influencer_integrations(
 ) -> None:
     """Ensure GPT + ElevenLabs agents stay in sync before committing."""
     instructions = getattr(influencer, "prompt_template", None)
-    display_name = getattr(influencer, "display_name", None) or influencer.id
 
     if instructions is None:
         raise HTTPException(400, "prompt_template is required to sync influencer assistants.")
-
-    assistant_id = await upsert_influencer_agent(
-        name=display_name,
-        instructions=instructions,
-        assistant_id=getattr(influencer, "influencer_gpt_agent_id", None),
-    )
-    influencer.influencer_gpt_agent_id = assistant_id
 
     if not getattr(influencer, "voice_id", None) and settings.ELEVENLABS_VOICE_ID:
         influencer.voice_id = settings.ELEVENLABS_VOICE_ID
