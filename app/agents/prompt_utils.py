@@ -91,6 +91,11 @@ async def get_global_prompt(
 
     return ChatPromptTemplate.from_messages(
         [
+            (
+                "system",
+                "Lollity score with this user: {lollity_score}/100. Conversation analysis (keep private): {analysis}"
+                "\nUse this to adjust warmth, teasing, and boundaries. Do not expose the numeric score unless it fits naturally."
+            ),
             ("system", system_prompt),
             ("system", "{persona_rules}"),
             (
@@ -121,6 +126,11 @@ async def get_global_audio_prompt(
 
     return ChatPromptTemplate.from_messages(
         [
+            (
+                "system",
+                "Lollity score with this user: {lollity_score}/100. Conversation analysis (keep private): {analysis}"
+                "\nUse this to adjust warmth, teasing, and boundaries. Do not expose the numeric score unless it fits naturally."
+            ),
             ("system", system_prompt),
             ("system", "{persona_rules}"),
             (
