@@ -8,6 +8,11 @@ import logging
 
 from app.db.models import SystemPrompt
 
+from app.db.session import SessionLocal
+from app.agents.prompts import get_fact_prompt, FACT_EXTRACTOR
+from app.agents.memory import store_fact 
+
+
 log = logging.getLogger(__name__)
 
 
@@ -69,3 +74,32 @@ async def update_system_prompt(
     await db.commit()
     await db.refresh(row)
     return row
+
+
+async def extract_and_store_facts_for_turn(
+    message: str,
+    recent_ctx: str,
+    chat_id: str,
+    cid: str,
+) -> None:
+    """
+    Runs the fact extraction flow and stores new facts in the DB.
+    Intended to be called from handle_turn (sync or background).
+    """
+    async with SessionLocal() as db:
+        try:
+            fact_prompt = await get_fact_prompt(db)
+
+            facts_resp = await FACT_EXTRACTOR.ainvoke(
+                fact_prompt.format(msg=message, ctx=recent_ctx)
+            )
+
+            facts_txt = facts_resp.content or ""
+            lines = [ln.strip("- ").strip() for ln in facts_txt.split("\n") if ln.strip()]
+
+            for line in lines[:5]:
+                if line.lower() == "no new memories.":
+                    continue
+                await store_fact(db, chat_id, line)
+        except Exception as ex:
+            log.error("[%s] Fact extraction failed: %s", cid, ex, exc_info=True)

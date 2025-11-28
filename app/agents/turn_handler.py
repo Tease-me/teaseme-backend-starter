@@ -1,11 +1,11 @@
-import time
-import logging
+import logging,asyncio
 from uuid import uuid4
 from app.core.config import settings
 from app.agents.scoring import get_score, update_score, extract_score
 from app.agents.memory import find_similar_memories, store_fact
-from app.agents.prompts import MODEL, FACT_EXTRACTOR, get_fact_prompt
+from app.agents.prompts import MODEL
 from app.agents.prompt_utils import get_global_audio_prompt, get_global_prompt, get_today_script
+from app.services.system_prompt_service import extract_and_store_facts_for_turn
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import RedisChatMessageHistory
 from app.db.models import Influencer
@@ -109,21 +109,18 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
 
     recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
     
+    # background task
     try:
-        fact_prompt = await get_fact_prompt(db)
-
-        facts_resp = await FACT_EXTRACTOR.ainvoke(
-            fact_prompt.format(msg=message, ctx=recent_ctx)
+        asyncio.create_task(
+            extract_and_store_facts_for_turn(
+                message=message,
+                recent_ctx=recent_ctx,
+                chat_id=chat_id,
+                cid=cid,
+            )
         )
-
-        facts_txt = facts_resp.content or ""
-        lines = [ln.strip("- ").strip() for ln in facts_txt.split("\n") if ln.strip()]
-        for line in lines[:5]:
-            if line.lower() == "no new memories.":
-                continue
-            await store_fact(db, chat_id, line)
     except Exception as ex:
-        log.error("[%s] Fact extraction failed: %s", cid, ex, exc_info=True)
+        log.error("[%s] Failed to schedule fact extraction: %s", cid, ex, exc_info=True)
 
     if is_audio:
         tts_text = sanitize_tts_text(reply)
