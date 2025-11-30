@@ -18,3 +18,13 @@ seed-all: seed-influencers seed-pricing seed-users
 .PHONY: db-wipe-conversations
 db-wipe-conversations:
 	$(COMPOSE) exec db psql -U postgres -d teaseme -c "TRUNCATE messages, memories, chats, calls CASCADE;"
+
+.PHONY: alembic-revision alembic-upgrade alembic-downgrade
+alembic-revision:
+	$(COMPOSE) exec $(SERVICE) poetry run alembic revision --autogenerate -m "$(MESSAGE)"
+
+alembic-upgrade:
+	$(COMPOSE) exec $(SERVICE) poetry run alembic upgrade head
+
+alembic-downgrade:
+	$(COMPOSE) exec $(SERVICE) poetry run alembic downgrade -1

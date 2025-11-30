@@ -96,7 +96,7 @@ try:
         temperature=0.7,
         max_tokens=120,
     )
-except Exception as exc:  # pragma: no cover - fallback only when misconfigured
+except Exception as exc: 
     GREETING_GENERATOR = None
     log.warning("Contextual greeting generator disabled: %s", exc)
 

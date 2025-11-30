@@ -1477,16 +1477,6 @@ async def import_persona_csv(
             if not getattr(influencer, "voice_id", None) and settings.ELEVENLABS_VOICE_ID:
                 influencer.voice_id = settings.ELEVENLABS_VOICE_ID
 
-            try:
-                assistant_id = await upsert_influencer_agent(
-                    name=display_name,
-                    instructions=instructions,
-                    assistant_id=getattr(influencer, "influencer_gpt_agent_id", None),
-                )
-                influencer.influencer_gpt_agent_id = assistant_id
-            except Exception as exc:  # pragma: no cover - OpenAI/network issues
-                log.error("Failed to sync OpenAI assistant for %s: %s", influencer_id, exc)
-
             agent_id = getattr(influencer, "influencer_agent_id_third_part", None)
             resolved_voice_id = getattr(influencer, "voice_id", None) or settings.ELEVENLABS_VOICE_ID
             should_sync_voice = voice_prompt and (agent_id or resolved_voice_id)
