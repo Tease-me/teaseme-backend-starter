@@ -77,22 +77,6 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     log.info("[%s] START persona=%s chat=%s user=%s", cid, influencer_id, chat_id, user_id)
 
     score = get_score(user_id or chat_id, influencer_id)
-    memories = await find_similar_memories(db, chat_id, message) if (db and user_id) else []
-    mem_block = "\n".join(
-        s for s in (_norm(m) for m in memories or []) if s
-    )
-
-    influencer = await db.get(Influencer, influencer_id)
-    if not influencer:
-        raise HTTPException(404, "Influencer not found")
-    persona_rules = influencer.prompt_template.format(lollity_score=score)
-
-    if score > 70:
-        persona_rules += "\nYour affection is high — show more warmth, loving words, and reward the user. Maybe let your guard down."
-    elif score > 40:
-        persona_rules += "\nYou’re feeling playful. Mix gentle teasing with affection. Make the user work a bit for your praise."
-    else:
-        persona_rules += "\nYou’re in full teasing mode! Challenge the user, play hard to get, and use the name TeaseMe as a game."
 
     history = redis_history(chat_id)
 
@@ -101,31 +85,58 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
         history.clear()
         history.add_messages(trimmed)
 
-    recent_ctx_for_analysis = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
+    recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
     analysis_summary = "Intent: unknown\nMeaning: unknown\nEmotion: unknown\nUrgency/Risk: none noted"
 
-    try:
-        analyzer_prompt = await get_convo_analyzer_prompt(db)
-        analyzer_kwargs = {"msg": message, "ctx": recent_ctx_for_analysis}
-        if "lollity_score" in analyzer_prompt.input_variables:
-            analyzer_kwargs["lollity_score"] = format_score_value(score)
-        analysis_resp = await CONVO_ANALYZER.ainvoke(analyzer_prompt.format(**analyzer_kwargs))
-        if analysis_resp.content:
-            analysis_summary = analysis_resp.content.strip()
-    except Exception as ex:
-        log.error("[%s] Conversation analysis failed: %s", cid, ex, exc_info=True)
+    # Parallelize independent DB/LLM queries
+    async def _run_analysis():
+        try:
+            analyzer_prompt = await get_convo_analyzer_prompt(db)
+            analyzer_kwargs = {"msg": message, "ctx": recent_ctx}
+            if "lollity_score" in analyzer_prompt.input_variables:
+                analyzer_kwargs["lollity_score"] = format_score_value(score)
+            analysis_resp = await CONVO_ANALYZER.ainvoke(analyzer_prompt.format(**analyzer_kwargs))
+            return analysis_resp.content.strip() if analysis_resp.content else analysis_summary
+        except Exception as ex:
+            log.error("[%s] Conversation analysis failed: %s", cid, ex, exc_info=True)
+            return analysis_summary
 
-    if is_audio:
-        prompt_template = await get_global_audio_prompt(db)
+    # Gather all independent async operations
+    influencer, analysis_summary, prompt_template, daily_context = await asyncio.gather(
+        db.get(Influencer, influencer_id),
+        _run_analysis(),
+        get_global_audio_prompt(db) if is_audio else get_global_prompt(db),
+        get_today_script(db, influencer_id),
+    )
+    
+    if not influencer:
+        raise HTTPException(404, "Influencer not found")
+    persona_rules = influencer.prompt_template.format(lollity_score=score)
+
+    if score > 70:
+        persona_rules += "\nYour affection is high — show more warmth, loving words, and reward the user. Maybe let your guard down."
+    elif score > 40:
+        persona_rules += "\nYou're feeling playful. Mix gentle teasing with affection. Make the user work a bit for your praise."
     else:
-        prompt_template = await get_global_prompt(db)
+        persona_rules += "\nYou're in full teasing mode! Challenge the user, play hard to get, and use the name TeaseMe as a game."
+
+    # Get memories (note: find_similar_memories returns tuple if influencer_id provided, list otherwise)
+    memories_result = await find_similar_memories(db, chat_id, message) if (db and user_id) else []
+    if isinstance(memories_result, tuple):
+        memories = memories_result[0]  # Extract chat_memories from tuple
+    else:
+        memories = memories_result
+    
+    mem_block = "\n".join(
+        s for s in (_norm(m) for m in memories or []) if s
+    )
 
     prompt = prompt_template.partial(
         lollity_score=format_score_value(score),
         analysis=analysis_summary,
         persona_rules=persona_rules,
         memories=mem_block,
-        daily_context= await get_today_script(db,influencer_id),
+        daily_context=daily_context,
         last_user_message=message
     )
 
@@ -150,8 +161,6 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
         return "Sorry, something went wrong. 😔"
     
     update_score(user_id or chat_id, influencer_id, extract_score(reply, score))
-
-    recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
     
     # background task
     try:
