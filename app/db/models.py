@@ -28,7 +28,6 @@ class Influencer(Base):
     influencer_agent_id_third_part: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at:     Mapped[datetime]     = mapped_column(DateTime, default=datetime.utcnow)
     chats:          Mapped[List["Chat"]] = relationship(back_populates="influencer")
-    influencer_gpt_agent_id: Mapped[str | None] = mapped_column(String, nullable=True)  
 
 class User(Base):
     __tablename__ = "users"

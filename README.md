@@ -38,6 +38,28 @@ c
 
 Database migrations run automatically in the backend container, so no local tooling is required.
 
+## Development with Docker
+
+- The backend mounts your repo (`.:/usr/src/app`) for hot reload via `uvicorn --reload`.
+- With Docker Compose v2.22+, you can also use the built-in watcher to sync and rebuild on changes:
+  ```bash
+  docker compose up --watch
+  # or
+  docker compose watch
+  ```
+  This uses the `develop.watch` config in `compose.yml` to sync source into the container and rebuild if `Dockerfile` changes.
+
+## Database migrations (Alembic)
+
+Common commands are aliased in the `Makefile` (run from repo root with your compose stack up):
+
+- Create a migration (set a message):  
+  `MESSAGE="Remove influencer gpt agent col" make alembic-revision`
+- Apply all migrations:  
+  `make alembic-upgrade`
+- Roll back one migration:  
+  `make alembic-downgrade`
+
 ## Local development without Docker
 
 Prefer running services directly? Install dependencies with Poetry and use Docker only for databases.
