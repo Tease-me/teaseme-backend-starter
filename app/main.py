@@ -34,6 +34,7 @@ origins = [
     "https://teaseme.mxjprod.work",
     "https://api.teaseme.live",
     "https://teaseme.live",
+    "https://www.teaseme.live",
 ]
 
 app = FastAPI()
