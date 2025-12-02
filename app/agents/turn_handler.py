@@ -14,7 +14,7 @@ from app.utils.tts_sanitizer import sanitize_tts_text
 
 log = logging.getLogger("teaseme-turn")
 
-def redis_history(chat_id: str):
+def redis_history(chat_id: str, influencer_id: str | None = None):
     return RedisChatMessageHistory(
         session_id=chat_id, url=settings.REDIS_URL, ttl=settings.HISTORY_TTL)
 
