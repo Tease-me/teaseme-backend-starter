@@ -1299,7 +1299,8 @@ async def update_elevenlabs_prompt(
             influencer.voice_id = voice_id
         if not agent_id:
             agent_id = getattr(influencer, "influencer_agent_id_third_part", None)
-        # Note: do not persist the appended reply_text; only send it to ElevenLabs.
+        
+        influencer.voice_prompt = body.voice_prompt
     
     resolved_voice_id = voice_id or DEFAULT_ELEVENLABS_VOICE_ID
 
