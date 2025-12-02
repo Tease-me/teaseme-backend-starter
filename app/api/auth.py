@@ -1,6 +1,6 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +21,46 @@ import secrets
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def _set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
+    access_max_age = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    refresh_max_age = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
+    response.set_cookie(
+        key=settings.ACCESS_TOKEN_COOKIE_NAME,
+        value=access_token,
+        max_age=access_max_age,
+        httponly=settings.ACCESS_TOKEN_HTTPONLY,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        domain=settings.COOKIE_DOMAIN,
+        path="/",
+    )
+    response.set_cookie(
+        key=settings.REFRESH_TOKEN_COOKIE_NAME,
+        value=refresh_token,
+        max_age=refresh_max_age,
+        httponly=settings.REFRESH_TOKEN_HTTPONLY,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        domain=settings.COOKIE_DOMAIN,
+        path="/",
+    )
+
+def _clear_auth_cookies(response: Response) -> None:
+    for name, httponly in (
+        (settings.ACCESS_TOKEN_COOKIE_NAME, settings.ACCESS_TOKEN_HTTPONLY),
+        (settings.REFRESH_TOKEN_COOKIE_NAME, settings.REFRESH_TOKEN_HTTPONLY),
+    ):
+        response.set_cookie(
+            key=name,
+            value="",
+            max_age=0,
+            httponly=httponly,
+            secure=settings.COOKIE_SECURE,
+            samesite=settings.COOKIE_SAMESITE,
+            domain=settings.COOKIE_DOMAIN,
+            path="/",
+        )
 
 @router.post("/register")
 async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
@@ -70,7 +110,11 @@ async def confirm_email(token: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login", response_model=Token)
-async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(
+    data: LoginRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(select(User).where(User.email == data.email))
     user = result.scalar()
 
@@ -84,15 +128,22 @@ async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
         {"sub": str(user.id)}, settings.REFRESH_SECRET_KEY, timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     )
 
-    return Token(
-        access_token=access_token,
-        refresh_token=refresh_token
-    )
+    _set_auth_cookies(response, access_token, refresh_token)
+
+    return Token(access_token=access_token, refresh_token=refresh_token)
 
 @router.post("/refresh", response_model=Token)
-async def refresh_token(refresh_token: str, db: AsyncSession = Depends(get_db)):
+async def refresh_token(
+    request: Request,
+    response: Response,
+    refresh_token: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    token_value = refresh_token or request.cookies.get(settings.REFRESH_TOKEN_COOKIE_NAME)
+    if not token_value:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
     try:
-        payload = jwt.decode(refresh_token, settings.REFRESH_SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(token_value, settings.REFRESH_SECRET_KEY, algorithms=[settings.ALGORITHM])
         user_id = payload.get("sub")
         if user_id is None:
             raise HTTPException(status_code=401, detail="Invalid refresh token")
@@ -110,10 +161,14 @@ async def refresh_token(refresh_token: str, db: AsyncSession = Depends(get_db)):
         {"sub": str(user.id)}, settings.REFRESH_SECRET_KEY, timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     )
 
-    return Token(
-        access_token=new_access_token,
-        refresh_token=new_refresh_token
-    )
+    _set_auth_cookies(response, new_access_token, new_refresh_token)
+
+    return Token(access_token=new_access_token, refresh_token=new_refresh_token)
+
+@router.post("/logout")
+async def logout(response: Response) -> dict:
+    _clear_auth_cookies(response)
+    return {"ok": True, "message": "Logged out"}
 
 @router.get("/me")
 async def get_me(user: User = Depends(get_current_user)):
@@ -165,7 +220,7 @@ async def forgot_password(email: str, db: AsyncSession = Depends(get_db)):
     if user:
         reset_token = secrets.token_urlsafe(32)
         user.password_reset_token = reset_token
-        user.password_reset_token_expires_at = datetime.utcnow() + timedelta(hours=1)
+        user.password_reset_token_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
         await db.commit()
 
         send_password_reset_email(user.email, reset_token)
@@ -177,7 +232,7 @@ async def reset_password(data: PasswordResetRequest, db: AsyncSession = Depends(
     result = await db.execute(select(User).where(User.password_reset_token == data.token))
     user = result.scalar_one_or_none()
 
-    if not user or user.password_reset_token_expires_at < datetime.utcnow():
+    if not user or user.password_reset_token_expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="Token inválido ou expirado.")
 
     user.password_hash = pwd_context.hash(data.new_password)

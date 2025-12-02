@@ -1,10 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from app.core.config import settings
-
-from langchain_core.prompts import (
-    ChatPromptTemplate,
-)
+from app.services.system_prompt_service import get_system_prompt
 
 MODEL = ChatOpenAI(
     api_key=settings.OPENAI_API_KEY,
@@ -20,25 +17,41 @@ FACT_EXTRACTOR = ChatOpenAI(
     max_tokens=512,
 )
 
-FACT_PROMPT = ChatPromptTemplate.from_template("""
-You extract user memories. Output only if NEW and EXPLICIT in the user’s message (not inferred).
-Allowed categories (English, lowercase): preference, relationship, request, fact, contextual_note.
-- “preference”: stable likes/dislikes & style (“prefers playful teasing”)
-- “relationship”: how user relates to AI (“calls you girlfriend”, “misses you”)
-- “request”: asks for future action (“remind me…”, “introduce me to…”)
-- “fact”: stable personal info (name, city, time zone)
-- “contextual_note”: short-lived state or mood (“tired”, “busy”, “traveling”)
+CONVO_ANALYZER = ChatOpenAI(
+    openai_api_key=settings.OPENAI_API_KEY,
+    model="gpt-4o-mini",
+    temperature=0.2,
+    max_tokens=256,
+)
 
-Rules:
-- Max 5 bullets.
-- No duplicates of memories you already have in Context.
-- Be literal; no guessing or reading between the lines.
-- If nothing new: exactly `No new memories.`
-
-Format EXACTLY:
-[categoria] short sentence
+DEFAULT_CONVO_ANALYZER_PROMPT = """
+You are a concise conversation analyst that helps a romantic, teasing AI craft better replies.
+Using the latest user message and short recent context, summarize the following (short phrases, no bullet noise):
+- Intent: what the user wants or is trying to do.
+- Meaning: key facts/requests implied or stated.
+- Emotion: the user's emotional state and tone (e.g., flirty, frustrated, sad, excited).
+- Urgency/Risk: any urgency, boundaries, or safety concerns.
+Lollity score with the user: {lollity_score}/100 (0 = stranger, 100 = very intimate). Use it to interpret tone and closeness.
+Format exactly as:
+Intent: ...
+Meaning: ...
+Emotion: ...
+Urgency/Risk: ...
+Keep it under 70 words. Do not address the user directly. If something is unknown, say "unknown".
 
 User message: {msg}
-Context (past memories): {ctx}
-Bullet points:
-""")
+Recent context:
+{ctx}
+""".strip()
+
+async def get_fact_prompt(db) -> ChatPromptTemplate:
+    template_str = await get_system_prompt(db, "FACT_PROMPT")
+    return ChatPromptTemplate.from_template(template_str)
+
+
+async def get_convo_analyzer_prompt(db) -> ChatPromptTemplate:
+    template_str = await get_system_prompt(db, "CONVO_ANALYZER_PROMPT")
+    if not template_str:
+        template_str = DEFAULT_CONVO_ANALYZER_PROMPT
+    return ChatPromptTemplate.from_template(template_str)
+

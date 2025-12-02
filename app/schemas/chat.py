@@ -14,7 +14,7 @@ class MessageSchema(BaseModel):
     content: str
     audio_url: Optional[str] = None
     created_at: datetime  
-
+    channel: Optional[str] = None
     class Config:
         from_attributes = True
         json_encoders = {

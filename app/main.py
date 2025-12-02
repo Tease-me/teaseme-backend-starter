@@ -13,8 +13,12 @@ from app.api.elevenlabs import router as elevenlabs_router
 from app.api.webhooks import router as webhooks_router
 
 from app.api.persona_import import router as persona_import_router
+from app.api.influencer_knowledge import router as influencer_knowledge_router
+
+from app.api import system_prompts as system_prompts_router
 
 from .api import health_router
+from app.mcp.router import router as mcp_router
 
 log = logging.getLogger("teaseme")
 logging.basicConfig(
@@ -24,10 +28,12 @@ logging.basicConfig(
 
 origins = [
     "https://localhost:3000",  # frontend dev
-    "http://localhost:3000",  # frontend dev
     "https://192.168.68.72:4174",  # frontend dev
     "https://192.168.68.61:3000",  # frontend dev
-    "https://teaseme.mxjprod.work/"
+    "https://localhost:4174",
+    "https://teaseme.mxjprod.work",
+    "https://api.teaseme.live",
+    "https://teaseme.live",
 ]
 
 app = FastAPI()
@@ -49,3 +55,6 @@ app.include_router(elevenlabs_router)
 app.include_router(health_router.router)
 app.include_router(persona_import_router)
 app.include_router(webhooks_router)
+app.include_router(mcp_router)
+app.include_router(influencer_knowledge_router)
+app.include_router(system_prompts_router.router)

@@ -38,5 +38,31 @@ def message_to_schema_with_presigned(msg):
         sender=msg.sender,
         content=msg.content,
         created_at=msg.created_at,
-        audio_url=audio_url
+        audio_url=audio_url,
+        channel=msg.channel
     )
+
+# Save knowledge file to S3 and return the S3 key
+async def save_knowledge_file_to_s3(file_obj, filename: str, content_type: str, influencer_id: str) -> str:
+    """Save a knowledge file (PDF, DOCX, TXT) to S3"""
+    ext = filename.split('.')[-1].lower() if '.' in filename else 'txt'
+    key = f"knowledge/{influencer_id}/{uuid.uuid4()}.{ext}"
+    file_obj.seek(0)
+    s3.upload_fileobj(
+        file_obj, 
+        BUCKET_NAME, 
+        key, 
+        ExtraArgs={"ContentType": content_type}
+    )
+    return key
+
+# Delete file from S3
+async def delete_file_from_s3(key: str) -> None:
+    """Delete a file from S3"""
+    try:
+        s3.delete_object(Bucket=BUCKET_NAME, Key=key)
+    except Exception as e:
+        # Log error but don't fail if file doesn't exist
+        import logging
+        log = logging.getLogger("s3")
+        log.warning(f"Failed to delete S3 file {key}: {e}")

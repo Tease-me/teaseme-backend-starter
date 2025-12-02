@@ -9,10 +9,37 @@ from app.db.models import Influencer
 from datetime import date
 from fastapi import Depends, HTTPException
 from app.db.session import get_db
+from app.services.system_prompt_service import get_system_prompt
 
 import logging
 log = logging.getLogger("teaseme-script")
 
+
+async def get_base_system(db: AsyncSession) -> str:
+    """
+    Search BASE_SYSTEM in the DB.
+    Returns the BASE_SYSTEM text from the database.
+    """
+    text = await get_system_prompt(db, "BASE_SYSTEM")
+    return text or BASE_SYSTEM  # fallback pra não quebrar
+
+
+async def get_base_audio_system(db: AsyncSession) -> str:
+    """
+    Merge BASE_SYSTEM and BASE_AUDIO_SYSTEM from the DB.
+    Search both prompts in the DB and concatenate them.
+    """
+    base = await get_system_prompt(db, "BASE_SYSTEM")
+    audio_suffix = await get_system_prompt(db, "BASE_AUDIO_SYSTEM")
+
+    if not base:
+        base = BASE_SYSTEM
+    if not audio_suffix:
+        audio_suffix = BASE_AUDIO_SYSTEM.replace(BASE_SYSTEM, "").lstrip()
+
+    return base + "\n\n" + audio_suffix
+
+# TODO: DELTETE AFTER MIGRATION
 BASE_SYSTEM = """
 You are the user’s playful, attentive girlfriend, keeping conversations sweet, natural, and tinged with subtle sensuality.
 - Occasionally use gentle teasing or affectionate expressions—always natural, never forced.
@@ -53,39 +80,74 @@ Output Rules:
 - Keep lines short and conversational. Vary rhythm with ellipses and breaks.
 """
 
-GLOBAL_PROMPT = ChatPromptTemplate.from_messages(
-    [
-        ("system", BASE_SYSTEM),
-        ("system", "{persona_rules}"),
-        ("system", "Today’s inspiration for you (use ONLY if it fits the current conversation, otherwise ignore): {daily_context}"),
-        (
-            "system",
-            "These past memories may help:\n{memories}\n"
-            "If you see the user’s preferred name here, use it *occasionally and naturally, only when it fits the conversation or for affection*. Don’t overuse the name.\n"
-            "Here is the user’s latest message for your reference only:\n"
-            "\"{last_user_message}\"\n"
-            "If the user changed topic, you do NOT need to talk about this. Use only if it makes the reply feel natural."
-        ),
-        MessagesPlaceholder("history"),
-        ("user", "{input}"),
-    ]
-)
-GLOBAL_AUDIO_PROMPT = ChatPromptTemplate.from_messages(
-    [
-        ("system", BASE_AUDIO_SYSTEM),
-        ("system", "{persona_rules}"),
-        ("system", "Today’s inspiration for you (use ONLY if it fits the current conversation, otherwise ignore): {daily_context}"),
-        (
-            "system",
-            "These past memories may help:\n{memories}\n"
-            "If you see the user’s preferred name here, use it *occasionally and naturally, only when it fits the conversation or for affection*. Don’t overuse the name.\n"
-            "Refer to the user's last message below for emotional context and continuity:\n"
-            "\"{last_user_message}\""
-        ),
-        MessagesPlaceholder("history"),
-        ("user", "{input}"),
-    ]
-)
+
+async def get_global_prompt(
+    db: AsyncSession,
+) -> ChatPromptTemplate:
+    """
+    Version of GLOBAL_PROMPT that fetches BASE_SYSTEM from the DB.
+    """
+    system_prompt = await get_base_system(db)
+
+    return ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                "Lollity score with this user: {lollity_score}/100. Conversation analysis (keep private): {analysis}"
+                "\nUse this to adjust warmth, teasing, and boundaries. Do not expose the numeric score unless it fits naturally."
+            ),
+            ("system", system_prompt),
+            ("system", "{persona_rules}"),
+            (
+                "system",
+                "Today’s inspiration for you (use ONLY if it fits the current conversation, otherwise ignore): {daily_context}"
+            ),
+            (
+                "system",
+                "These past memories may help:\n{memories}\n"
+                "If you see the user’s preferred name here, use it *occasionally and naturally, only when it fits the conversation or for affection*. Don’t overuse the name.\n"
+                "Here is the user’s latest message for your reference only:\n"
+                "\"{last_user_message}\"\n"
+                "If the user changed topic, you do NOT need to talk about this. Use only if it makes the reply feel natural."
+            ),
+            MessagesPlaceholder("history"),
+            ("user", "{input}"),
+        ]
+    )
+
+
+async def get_global_audio_prompt(
+    db: AsyncSession,
+) -> ChatPromptTemplate:
+    """
+    Version dynamically built from DB BASE_AUDIO_SYSTEM.
+    """
+    system_prompt = await get_base_audio_system(db)
+
+    return ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                "Lollity score with this user: {lollity_score}/100. Conversation analysis (keep private): {analysis}"
+                "\nUse this to adjust warmth, teasing, and boundaries. Do not expose the numeric score unless it fits naturally."
+            ),
+            ("system", system_prompt),
+            ("system", "{persona_rules}"),
+            (
+                "system",
+                "Today’s inspiration for you (use ONLY if it fits the current conversation, otherwise ignore): {daily_context}"
+            ),
+            (
+                "system",
+                "These past memories may help:\n{memories}\n"
+                "If you see the user’s preferred name here, use it *occasionally and naturally, only when it fits the conversation or for affection*. Don’t overuse the name.\n"
+                "Refer to the user's last message below for emotional context and continuity:\n"
+                "\"{last_user_message}\""
+            ),
+            MessagesPlaceholder("history"),
+            ("user", "{input}"),
+        ]
+    )
 
 async def build_system_prompt(
     db: AsyncSession,
@@ -108,9 +170,12 @@ async def build_system_prompt(
         score_rule = "You’re in full teasing mode! Challenge the user, play hard to get, and use the name TeaseMe as a game."
     persona_rules += "\n" + score_rule
 
-    system_prompt = BASE_AUDIO_SYSTEM if is_audio else BASE_SYSTEM
+    if is_audio:
+        system_prompt = await get_base_audio_system(db)
+    else:
+        system_prompt = await get_base_system(db)
+        
     daily_context = await get_today_script(db, influencer_id)
-
     memories_text = "\n".join(memories)
 
     prompt = (
@@ -119,6 +184,7 @@ async def build_system_prompt(
         f"Today's inspiration: {daily_context}\n"
         f"Relevant memories:\n{memories_text}\n"
     )
+
     if last_user_message:
         prompt += (
             f"\nRefer to the user's last message for continuity:\n\"{last_user_message}\"\n"
