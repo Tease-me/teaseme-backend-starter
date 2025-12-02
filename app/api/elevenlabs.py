@@ -213,6 +213,9 @@ async def _generate_contextual_greeting(
     if GREETING_GENERATOR is None:
         return None
 
+    stale_delta = timedelta(minutes=5)
+    last_interaction: Optional[datetime] = None
+
     result = await db.execute(
         select(Message)
         .where(Message.chat_id == chat_id)
@@ -231,6 +234,7 @@ async def _generate_contextual_greeting(
             log.warning("contextual_greeting.redis_fallback_failed chat=%s err=%s", chat_id, exc)
 
     if db_messages:
+        last_interaction = getattr(db_messages[0], "created_at", None) or last_interaction
         db_messages.reverse()
         transcript = _format_history(db_messages)
 
@@ -257,6 +261,12 @@ async def _generate_contextual_greeting(
                 call_row = call_res.scalar_one_or_none()
                 if call_row and call_row.transcript:
                     transcript = _format_transcript_entries(call_row.transcript)
+                if call_row and call_row.created_at:
+                    last_interaction = (
+                        max(last_interaction, call_row.created_at)
+                        if last_interaction
+                        else call_row.created_at
+                    )
             except Exception as exc:  # pragma: no cover - defensive
                 log.warning(
                     "contextual_greeting.call_fallback_failed chat=%s user=%s infl=%s err=%s",
@@ -265,6 +275,9 @@ async def _generate_contextual_greeting(
                     influencer_id,
                     exc,
                 )
+
+    if last_interaction and datetime.utcnow() - last_interaction > stale_delta:
+        return "Hey, you called again. What's up?"
 
     if not transcript:
         return _pick_dopamine_greeting(influencer_id)
