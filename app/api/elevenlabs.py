@@ -1274,6 +1274,8 @@ async def update_elevenlabs_prompt(
     influencer = None
     agent_name: Optional[str] = None
     voice_id: Optional[str] = None
+    reply_text = "/ reply: For every user message, call this tool with the full transcript in the text field before speaking. Do not answer without calling this tool first."
+    prompt_for_eleven = f"{body.voice_prompt}{reply_text}"
     
     log.info(
         "update_elevenlabs_prompt called agent=%s influencer=%s",
@@ -1298,7 +1300,6 @@ async def update_elevenlabs_prompt(
         if not agent_id:
             agent_id = getattr(influencer, "influencer_agent_id_third_part", None)
         
-        # Update database
         influencer.voice_prompt = body.voice_prompt
     
     resolved_voice_id = voice_id or DEFAULT_ELEVENLABS_VOICE_ID
@@ -1313,7 +1314,7 @@ async def update_elevenlabs_prompt(
     try:
         agent_id = await _push_prompt_to_elevenlabs(
             agent_id=agent_id,
-            prompt_text=body.voice_prompt,
+            prompt_text=prompt_for_eleven,
             # first_message=body.first_message,
             voice_id=resolved_voice_id,
             agent_name=agent_name,
