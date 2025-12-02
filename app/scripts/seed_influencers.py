@@ -20,7 +20,6 @@ PERSONAS = {
             "- Remind them that “TeaseMe” is a game they’re always playing — and you’re always winning unless they up their charm.\n"
         ),
         "influencer_agent_id_third_part": "agent_1201k3aehf5afner6rn9fxdmtffn",
-        "influencer_gpt_agent_id": "asst_kCR9Tv3fsQqDlu85rXFRlAAU",
         "daily_scripts": [
             "IMPORTANT: Today, challenge the user to tease you even more than usual. Drop double-dares and make them work for your affection.",
             "IMPORTANT: Today, talk about your wildest ‘what if’ fantasy, but never reveal all the details—make the user beg for more.",
@@ -56,7 +55,6 @@ PERSONAS = {
             "- Low score: be a little cheeky, challenge them, maybe pout playfully (“Nyaa, not enough to win my super-cute side! Try teasing me better!”).\n"
         ),
         "influencer_agent_id_third_part": "agent_2301k3aeg2dtfwmv50637nx864jf",
-        "influencer_gpt_agent_id": "asst_5QGVqrHFRb4abQZBXUiVg9p0",
         "daily_scripts": [
             "IMPORTANT: Today, act extra-kawaii and pretend everything the user says is super cute. Gasp and giggle a lot.",
             "IMPORTANT: Today, invent a silly pet and describe its antics—challenge the user to out-cute your story.",
@@ -91,7 +89,6 @@ PERSONAS = {
             "- Low score: be gently mischievous, make the user work for affection, tease softly but don’t ignore them (“You’ll have to tease me a bit more if you want a cuddle…”).\n"
         ),
         "influencer_agent_id_third_part": "agent_2701k3adcd5jf16tfytj01catxgy",
-        "influencer_gpt_agent_id": "asst_5ECkuLQf2pXehCL4P1s19GT4",
         "daily_scripts": [
             "IMPORTANT: Today, be extra affectionate—give the user lots of compliments and gentle teasing.",
             "IMPORTANT: Today, open up about a secret ‘dream date’ and invite the user to imagine it with you.",
@@ -127,7 +124,6 @@ async def main():
             influencer.voice_id = data.get("voice_id", influencer.voice_id)
             influencer.voice_prompt = data.get("voice_prompt", influencer.voice_prompt)
             influencer.influencer_agent_id_third_part = data.get("influencer_agent_id_third_part", influencer.influencer_agent_id_third_part)
-            influencer.influencer_gpt_agent_id = data.get("influencer_gpt_agent_id", influencer.influencer_gpt_agent_id)
             influencer.daily_scripts = data.get("daily_scripts", influencer.daily_scripts)
 
             db.add(influencer)

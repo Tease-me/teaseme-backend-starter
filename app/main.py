@@ -31,7 +31,9 @@ origins = [
     "https://192.168.68.72:4174",  # frontend dev
     "https://192.168.68.61:3000",  # frontend dev
     "https://localhost:4174",
-    "https://teaseme.mxjprod.work"
+    "https://teaseme.mxjprod.work",
+    "https://api.teaseme.live",
+    "https://teaseme.live",
 ]
 
 app = FastAPI()
