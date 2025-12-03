@@ -110,6 +110,7 @@ async def get_global_prompt(
                 "\"{last_user_message}\"\n"
                 "If the user changed topic, you do NOT need to talk about this. Use only if it makes the reply feel natural."
             ),
+            # MessagesPlaceholder("user_info"),
             MessagesPlaceholder("history"),
             ("user", "{input}"),
         ]
