@@ -996,6 +996,18 @@ async def get_signed_url_free(
         "agent_id": agent_id,
     }
 
+@router.get("/signed-url-free-landing")
+async def get_signed_url_free_landing(db: AsyncSession = Depends(get_db)):
+    agent_id = settings.LANDING_PAGE_AGENT_ID
+
+    async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
+        signed_url = await _get_conversation_signed_url(client, agent_id)
+
+    return {
+        "signed_url": signed_url,
+        "agent_id": agent_id,
+    }
+
 # ---------- Persistence hooks (stubs) ----------
 async def save_pending_conversation(
     db: AsyncSession,
