@@ -2,10 +2,14 @@ import boto3
 import uuid
 import io
 import json
+import os
 from app.schemas.chat import MessageSchema
+from dotenv import load_dotenv
+load_dotenv()
 
 s3 = boto3.client("s3")
-BUCKET_NAME = "bucket-audio-message-tease-me"
+BUCKET_NAME = os.getenv("BUCKET_NAME", "bucket-audio-message-tease-me")
+INFLUENCER_BUCKET_NAME = os.getenv("INFLUENCER_BUCKET_NAME", "bucket-influencer-assets")
 
 # Save audio file to S3 and return the S3 key
 async def save_audio_to_s3(file_obj, filename, content_type, user_id):
@@ -75,7 +79,6 @@ async def delete_file_from_s3(key: str) -> None:
         log = logging.getLogger("s3")
         log.warning(f"Failed to delete S3 file {key}: {e}")
         
-INFLUENCER_BUCKET_NAME = "bucket-influencer-assets"
 INFLUENCER_PREFIX = "influencers"
 
 def _influencer_key(influencer_id: str, suffix: str) -> str:
