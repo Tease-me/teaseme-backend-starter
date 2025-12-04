@@ -1,6 +1,7 @@
 import boto3
 import uuid
 import io
+import json
 from app.schemas.chat import MessageSchema
 
 s3 = boto3.client("s3")
@@ -26,6 +27,13 @@ def generate_presigned_url(key: str, expires: int = 3600) -> str:
         "get_object",
         Params={"Bucket": BUCKET_NAME, "Key": key},
         ExpiresIn=expires
+    )
+
+def generate_influencer_presigned_url(key: str, expires: int = 3600) -> str:
+    return s3.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": INFLUENCER_BUCKET_NAME, "Key": key},
+        ExpiresIn=expires,
     )
 
 def message_to_schema_with_presigned(msg):
@@ -66,3 +74,48 @@ async def delete_file_from_s3(key: str) -> None:
         import logging
         log = logging.getLogger("s3")
         log.warning(f"Failed to delete S3 file {key}: {e}")
+        
+INFLUENCER_BUCKET_NAME = "bucket-influencer-assets"
+INFLUENCER_PREFIX = "influencers"
+
+def _influencer_key(influencer_id: str, suffix: str) -> str:
+    return f"{INFLUENCER_PREFIX}/{influencer_id}/{suffix}"
+
+async def save_influencer_photo_to_s3(file_obj, filename: str, content_type: str, influencer_id: str) -> str:
+    ext = (filename.rsplit(".", 1)[-1] if "." in filename else "jpg").lower()
+    key = _influencer_key(influencer_id, f"photo.{ext}")
+    file_obj.seek(0)
+    s3.upload_fileobj(file_obj, INFLUENCER_BUCKET_NAME, key, ExtraArgs={"ContentType": content_type})
+    return key
+
+async def save_influencer_video_to_s3(file_obj, filename: str, content_type: str, influencer_id: str) -> str:
+    ext = (filename.rsplit(".", 1)[-1] if "." in filename else "mp4").lower()
+    key = _influencer_key(influencer_id, f"video.{ext}")
+    file_obj.seek(0)
+    s3.upload_fileobj(file_obj, INFLUENCER_BUCKET_NAME, key, ExtraArgs={"ContentType": content_type})
+    return key
+
+async def save_influencer_profile_to_s3(
+    influencer_id: str,
+    *,
+    about: str | None = None,
+    native_language: str | None = None,
+    extras: dict | None = None,
+) -> str:
+    payload = {"about": about, "native_language": native_language, "extras": extras or {}}
+    key = _influencer_key(influencer_id, "profile.json")
+    s3.put_object(
+        Bucket=INFLUENCER_BUCKET_NAME,
+        Key=key,
+        Body=json.dumps(payload).encode("utf-8"),
+        ContentType="application/json",
+    )
+    return key
+
+async def get_influencer_profile_from_s3(influencer_id: str) -> dict:
+    key = _influencer_key(influencer_id, "profile.json")
+    try:
+        obj = s3.get_object(Bucket=INFLUENCER_BUCKET_NAME, Key=key)
+        return json.loads(obj["Body"].read().decode("utf-8"))
+    except Exception:
+        return {}

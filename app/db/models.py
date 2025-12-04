@@ -22,6 +22,10 @@ class Influencer(Base):
     voice_id:       Mapped[str | None]   = mapped_column(String, nullable=True)        # ElevenLabs, etc.
     prompt_template:Mapped[str]          = mapped_column(Text, nullable=False)
     voice_prompt:   Mapped[str | None] = mapped_column(String, nullable=True)
+    profile_photo_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    profile_video_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    native_language: Mapped[str | None] = mapped_column(String, nullable=True)
+    date_of_birth: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     daily_scripts:  Mapped[List[str] | None] = mapped_column(JSON, nullable=True)
     influencer_agent_id_third_part: Mapped[str | None] = mapped_column(String, nullable=True)  
     created_at:     Mapped[datetime]     = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
