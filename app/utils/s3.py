@@ -6,6 +6,8 @@ import os
 from app.schemas.chat import MessageSchema
 from dotenv import load_dotenv
 load_dotenv()
+import logging
+log = logging.getLogger("s3")
 
 s3 = boto3.client("s3")
 BUCKET_NAME = os.getenv("BUCKET_NAME", "bucket-general-message-tease-me")
@@ -78,6 +80,46 @@ async def delete_file_from_s3(key: str) -> None:
         import logging
         log = logging.getLogger("s3")
         log.warning(f"Failed to delete S3 file {key}: {e}")
+
+async def save_influencer_audio_to_s3(file_obj, filename: str, content_type: str, influencer_id: str) -> str:
+    ext = filename.split(".")[-1] if "." in filename else "webm"
+    key = f"influencer-audio/{influencer_id}/{uuid.uuid4()}.{ext}"
+    file_obj.seek(0)
+    s3.upload_fileobj(
+        file_obj,
+        BUCKET_NAME,
+        key,
+        ExtraArgs={"ContentType": content_type},
+    )
+    return key
+
+
+async def save_influencer_ia_audio_to_s3(audio_bytes: bytes, influencer_id: str) -> str:
+    key = f"influencer-iaudio/{influencer_id}/{uuid.uuid4()}.mp3"
+    s3.upload_fileobj(
+        io.BytesIO(audio_bytes),
+        BUCKET_NAME,
+        key,
+        ExtraArgs={"ContentType": "audio/mpeg"},
+    )
+    return key
+
+
+def get_influencer_audio_download_url(key: str, expires: int = 3600) -> str:
+    return generate_presigned_url(key, expires)
+
+async def list_influencer_audio_keys(influencer_id: str) -> list[str]:
+    prefix = f"influencer-audio/{influencer_id}/"
+    resp = s3.list_objects_v2(Bucket=BUCKET_NAME, Prefix=prefix)
+
+    contents = resp.get("Contents")
+    if not contents:
+        return []
+
+    return [obj["Key"] for obj in contents]
+
+def generate_presigned_urls_for_keys(keys: list[str], expires: int = 3600) -> list[str]:
+    return [generate_presigned_url(key, expires) for key in keys]
         
 def _influencer_key(influencer_id: str, suffix: str) -> str:
     return f"{INFLUENCER_PREFIX}/{influencer_id}/{suffix}"

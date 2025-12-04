@@ -23,6 +23,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from app.db.session import SessionLocal
 from app.utils.deps import get_current_user
 from app.api.utils import get_embedding
+from app.services.system_prompt_service import get_system_prompt
 
 router = APIRouter(prefix="/elevenlabs", tags=["elevenlabs"])
 log = logging.getLogger(__name__)
@@ -101,31 +102,31 @@ except Exception as exc:
     log.warning("Contextual greeting generator disabled: %s", exc)
 
 
-GREETING_PROMPT = ChatPromptTemplate.from_messages(
-    [
-        (
-            "system",
+DEFAULT_GREETING_SYSTEM_PROMPT = (
+    "You are {influencer_name}, an affectionate AI companion speaking English. "
+    "Craft the very next thing you would say when a live voice call resumes. "
+    "Keep it to one short spoken sentence, 8–14 words. "
+    "Reference the recent conversation naturally, acknowledge the user, and sound warm and spontaneous. "
+    "You are on a live phone call right now—you’re speaking on the line, "
+    "but do not mention the phone or calling explicitly. "
+    "Include a natural pause with punctuation (comma or ellipsis) so it feels like a breath, not rushed. "
+    "Do not mention calling or reconnecting explicitly, and avoid robotic phrasing or obvious filler like 'uh' or 'um'."
+)
+
+async def _get_greeting_prompt(db: AsyncSession) -> ChatPromptTemplate:
+    system_prompt = await get_system_prompt(db, "ELEVENLABS_CALL_GREETING")
+    if not system_prompt:
+        system_prompt = DEFAULT_GREETING_SYSTEM_PROMPT
+    return ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt),
             (
-                "You are {influencer_name}, an affectionate AI companion speaking English. "
-                "Craft the very next thing you would say when a live voice call resumes. "
-                "Keep it to one short spoken sentence, 8–14 words. "
-                "Reference the recent conversation naturally, acknowledge the user, and sound warm and spontaneous. "
-                "You are on a live phone call right now—sound like you’re speaking on the line, "
-                "but do not mention the phone or calling explicitly. "
-                "Include a natural pause with punctuation (comma or ellipsis) so it feels like a breath, not rushed. "
-                "Do not mention calling or reconnecting explicitly, and avoid robotic phrasing or obvious filler like 'uh' or 'um'."
-            ),
-        ),
-        (
-            "human",
-            (
-                "Recent conversation between you and the user:\n"
-                "{transcript}\n\n"
+                "human",
+                "Recent conversation between you and the user:\n{transcript}\n\n"
                 "Respond with your next spoken greeting. Output only the greeting text."
             ),
-        ),
-    ]
-)
+        ]
+    )
 
 
 def _format_history(messages: List[Message]) -> str:
@@ -275,7 +276,8 @@ async def _generate_contextual_greeting(
     )
 
     try:
-        chain = GREETING_PROMPT.partial(influencer_name=persona_name) | GREETING_GENERATOR
+        prompt = await _get_greeting_prompt(db)
+        chain = prompt.partial(influencer_name=persona_name) | GREETING_GENERATOR
         llm_response = await chain.ainvoke({"transcript": transcript})
         greeting = _add_natural_pause((llm_response.content or "").strip())
         if greeting.startswith('"') and greeting.endswith('"'):
@@ -993,6 +995,18 @@ async def get_signed_url_free(
         "greeting_used": greeting,
         "first_message_for_convai": greeting,
         "dynamic_variables": {"first_message": greeting} if greeting else {},
+        "agent_id": agent_id,
+    }
+
+@router.get("/signed-url-free-landing")
+async def get_signed_url_free_landing(db: AsyncSession = Depends(get_db)):
+    agent_id = settings.LANDING_PAGE_AGENT_ID
+
+    async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
+        signed_url = await _get_conversation_signed_url(client, agent_id)
+
+    return {
+        "signed_url": signed_url,
         "agent_id": agent_id,
     }
 
