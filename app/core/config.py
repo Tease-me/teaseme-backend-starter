@@ -47,5 +47,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
     LANDING_PAGE_AGENT_ID: str
+    BUCKET_NAME: str
+    INFLUENCER_PREFIX: str
 
 settings = Settings()
