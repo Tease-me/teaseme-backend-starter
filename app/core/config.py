@@ -46,5 +46,6 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+    LANDING_PAGE_AGENT_ID: str
 
 settings = Settings()
