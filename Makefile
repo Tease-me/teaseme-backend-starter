@@ -1,6 +1,5 @@
-.PHONY: seed-influencers seed-pricing seed-users seed-all
+.PHONY: seed-influencers seed-pricing seed-users seed-all seed-prompts
 
-# Adjust COMPOSE or SERVICE if your setup differs.
 COMPOSE ?= docker compose
 SERVICE ?= backend
 
@@ -13,7 +12,10 @@ seed-pricing:
 seed-users:
 	$(COMPOSE) exec $(SERVICE) poetry run python -m app.scripts.seed_users
 
-seed-all: seed-influencers seed-pricing seed-users
+seed-prompts:
+	$(COMPOSE) exec $(SERVICE) poetry run python -m app.scripts.seed_prompts
+
+seed-all: seed-influencers seed-pricing seed-users seed-prompts
 
 .PHONY: db-wipe-conversations
 db-wipe-conversations:
