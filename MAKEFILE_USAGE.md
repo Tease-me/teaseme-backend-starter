@@ -35,4 +35,10 @@ SERVICE=app COMPOSE="docker-compose" make seed-users
 ## Troubleshooting
 - Ensure the target container is running before invoking `make` (e.g., `docker compose up backend`).
 - If `make` cannot find the container, double-check `SERVICE` matches the Compose service name.
-- If commands fail with “command not found,” verify `poetry` is installed inside the container.***
+- If commands fail with “command not found,” verify `poetry` is installed inside the container.
+- If you hit `ModuleNotFoundError: No module named 'sqlalchemy'` when running `make seed-prompts`, the container virtualenv may be stale. Inside the container:
+  ```sh
+  $(COMPOSE) exec $(SERVICE) rm -rf .venv
+  $(COMPOSE) exec $(SERVICE) poetry install
+  make seed-prompts
+  ```
