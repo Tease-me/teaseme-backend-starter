@@ -1,5 +1,6 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+import io
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 from sqlalchemy.future import select
@@ -9,13 +10,12 @@ from app.db.models import Influencer
 from app.db.session import get_db
 from app.schemas.elevenlabs import UpdatePromptBody
 from app.schemas.influencer import InfluencerCreate, InfluencerOut, InfluencerUpdate
-from app.services.openai_assistants import upsert_influencer_agent
 from app.core.config import settings
+from app.utils.s3 import save_influencer_audio_to_s3, get_influencer_audio_download_url,list_influencer_audio_keys, generate_presigned_url
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/influencer", tags=["influencer"])
-
 
 async def _sync_influencer_integrations(
     *,
@@ -104,3 +104,66 @@ async def delete_influencer(id: str, db: AsyncSession = Depends(get_db)):
     await db.delete(influencer)
     await db.commit()
     return {"ok": True}
+
+@router.post("/influencer-audio/{influencer_id}")
+async def upload_influencer_audio(
+    influencer_id: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(400, "Empty file")
+
+    key = await save_influencer_audio_to_s3(
+        io.BytesIO(file_bytes),
+        file.filename,
+        file.content_type or "audio/webm",
+        influencer_id,
+    )
+
+    url = get_influencer_audio_download_url(key)
+    return {"key": key, "url": url}
+
+
+
+@router.post("/influencer-audio/{influencer_id}")
+async def upload_influencer_audio(
+    influencer_id: str,
+    file: UploadFile = File(...),
+):
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(400, "Empty file")
+
+    key = await save_influencer_audio_to_s3(
+        io.BytesIO(file_bytes),
+        file.filename,
+        file.content_type or "audio/webm",
+        influencer_id,
+    )
+
+    url = generate_presigned_url(key)
+    return {"key": key, "url": url}
+
+
+@router.get("/influencer-audio/{influencer_id}")
+async def list_influencer_audio(influencer_id: str):
+    keys = await list_influencer_audio_keys(influencer_id)
+
+    if not keys:
+        raise HTTPException(status_code=404, detail="Influencer has no audio file stored")
+
+    files = [
+        {
+            "key": key,
+            "download_url": generate_presigned_url(key),
+        }
+        for key in keys
+    ]
+
+    return {
+        "influencer_id": influencer_id,
+        "count": len(files),
+        "files": files,
+    }
