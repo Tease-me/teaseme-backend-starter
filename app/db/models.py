@@ -27,11 +27,16 @@ class Influencer(Base):
     native_language: Mapped[str | None] = mapped_column(String, nullable=True)
     date_of_birth: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     daily_scripts:  Mapped[List[str] | None] = mapped_column(JSON, nullable=True)
-    influencer_agent_id_third_part: Mapped[str | None] = mapped_column(String, nullable=True)  
-    created_at:     Mapped[datetime]     = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     influencer_agent_id_third_part: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at:     Mapped[datetime]     = mapped_column(DateTime, default=datetime.utcnow)
+    created_at:     Mapped[datetime]     = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
     chats:          Mapped[List["Chat"]] = relationship(back_populates="influencer")
+    followers:      Mapped[List["InfluencerFollower"]] = relationship(
+        back_populates="influencer",
+        cascade="all, delete-orphan",
+    )
 
 class User(Base):
     __tablename__ = "users"
@@ -48,7 +53,11 @@ class User(Base):
     password_reset_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     chats = relationship("Chat", back_populates="user")
-
+    following_influencers: Mapped[List["InfluencerFollower"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    
 class Chat(Base):
     __tablename__ = "chats"
 
@@ -149,6 +158,30 @@ class CallRecord(Base):
         Index("idx_calls_user_created", "user_id", "created_at"),
     )
     
+
+class InfluencerFollower(Base):
+    """Join table capturing a follow between a user and an influencer."""
+    __tablename__ = "influencer_followers"
+
+    influencer_id: Mapped[str] = mapped_column(
+        ForeignKey("influencers.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    influencer: Mapped["Influencer"] = relationship(back_populates="followers")
+    user: Mapped["User"] = relationship(back_populates="following_influencers")
+
+    __table_args__ = (
+        Index("ix_influencer_followers_user_id", "user_id"),
+    )
 
 class InfluencerKnowledgeFile(Base):
     """Metadata for uploaded knowledge files (PDF, Word, etc.)"""
