@@ -1,11 +1,11 @@
 import logging,asyncio
 from uuid import uuid4
 from app.core.config import settings
-from app.agents.scoring import get_score, update_score, extract_score, format_score_value
+from app.agents.scoring import get_score, update_score, extract_triad_scores, format_score_value
 from app.agents.memory import find_similar_memories, store_fact
 from app.agents.prompts import MODEL, FACT_EXTRACTOR, CONVO_ANALYZER, get_fact_prompt, get_convo_analyzer_prompt
 from app.db.session import SessionLocal
-from app.agents.prompt_utils import get_global_audio_prompt, get_global_prompt, get_today_script
+from app.agents.prompt_utils import get_global_audio_prompt, get_global_prompt, get_today_script, build_system_prompt, get_relationship_status_block
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import RedisChatMessageHistory
 from app.db.models import Influencer
@@ -76,6 +76,7 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     
     log.info("[%s] START persona=%s chat=%s user=%s", cid, influencer_id, chat_id, user_id)
 
+    # Returns dict {"intimacy": X, "passion": Y, "commitment": Z}
     score = get_score(user_id or chat_id, influencer_id)
 
     history = redis_history(chat_id)
@@ -94,6 +95,8 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
             analyzer_prompt = await get_convo_analyzer_prompt(db)
             analyzer_kwargs = {"msg": message, "ctx": recent_ctx}
             if "lollity_score" in analyzer_prompt.input_variables:
+                # Use helper to format dict as string if prompt expects single value
+                # or we just pass the formatted string.
                 analyzer_kwargs["lollity_score"] = format_score_value(score)
             analysis_resp = await CONVO_ANALYZER.ainvoke(analyzer_prompt.format(**analyzer_kwargs))
             return analysis_resp.content.strip() if analysis_resp.content else analysis_summary
@@ -111,19 +114,68 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     
     if not influencer:
         raise HTTPException(404, "Influencer not found")
-    persona_rules = influencer.prompt_template.format(lollity_score=score)
+        
+    if not influencer:
+        raise HTTPException(404, "Influencer not found")
+        
+    # Compute persona rules locally (mimics build_system_prompt logic)
+    intimacy = score.get("intimacy", 0)
+    passion = score.get("passion", 0)
+    commitment = score.get("commitment", 0)
+    composite = (intimacy + passion + commitment) / 3
 
-    if score > 70:
-        persona_rules += "\nYour affection is high — show more warmth, loving words, and reward the user. Maybe let your guard down."
-    elif score > 40:
-        persona_rules += "\nYou're feeling playful. Mix gentle teasing with affection. Make the user work a bit for your praise."
-    else:
-        persona_rules += "\nYou're in full teasing mode! Challenge the user, play hard to get, and use the name TeaseMe as a game."
+    try:
+        persona_rules = influencer.prompt_template.format(
+            lollity_score=int(composite),
+            intimacy=int(intimacy),
+            passion=int(passion),
+            commitment=int(commitment)
+        )
+    except Exception:
+        persona_rules = influencer.prompt_template.replace("{lollity_score}", str(int(composite)))
 
-    # Get memories (note: find_similar_memories returns tuple if influencer_id provided, list otherwise)
+    # Time/Decay Context
+    # If the score decayed since last time, let the AI know so it can react (e.g. "Where were you?")
+    decay_info = score.get("_last_decay", {})
+    hours_passed = score.get("_hours_since_last_interaction", 0.0)
+    
+    decay_context = ""
+    # We trigger the "Time Context" if significant time passed (> 6 hours) OR if there was decay
+    if hours_passed > 6.0 or decay_info:
+        # Format time string
+        if hours_passed < 24:
+            time_str = f"{int(hours_passed)} hours"
+        else:
+            days = int(hours_passed / 24)
+            time_str = f"{days} days"
+            
+        # e.g. {"passion": -5.0, "intimacy": -1.0}
+        details = []
+        if "passion" in decay_info:
+            details.append(f"Passion cooled by {abs(decay_info['passion']):.1f}")
+        if "intimacy" in decay_info:
+            details.append(f"Intimacy faded by {abs(decay_info['intimacy']):.1f}")
+            
+        decay_msg = ", ".join(details)
+        if decay_msg:
+            decay_msg = f" ({decay_msg})"
+            
+        decay_context = (
+            f"\nIMPORTANT CONTEXT: It has been {time_str} since you last spoke{decay_msg}. "
+            f"You feel a bit distant or neglected. Address this naturally in your tone."
+        )
+            
+    # Hints Logic
+    score_rule = get_relationship_status_block(score)
+    if decay_context:
+        score_rule += decay_context
+        
+    persona_rules += "\n" + score_rule
+
+    # Get memories
     memories_result = await find_similar_memories(db, chat_id, message) if (db and user_id) else []
     if isinstance(memories_result, tuple):
-        memories = memories_result[0]  # Extract chat_memories from tuple
+        memories = memories_result[0]
     else:
         memories = memories_result
     
@@ -131,36 +183,33 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
         s for s in (_norm(m) for m in memories or []) if s
     )
 
-    prompt = prompt_template.partial(
-        lollity_score=format_score_value(score),
-        analysis=analysis_summary,
-        persona_rules=persona_rules,
-        memories=mem_block,
-        daily_context=daily_context,
-        last_user_message=message
+    # Build Chain
+    chain = RunnableWithMessageHistory(
+        prompt_template | MODEL,
+        lambda session_id: redis_history(session_id),
+        input_messages_key="input",
+        history_messages_key="history",
     )
 
-    try:
-        hist_msgs = history.messages
-        rendered = prompt.format_prompt(input=message, history=hist_msgs)
-        full_prompt_text = rendered.to_string()
-        log.info("[%s] ==== FULL PROMPT ====\n%s", cid, full_prompt_text)
-    except Exception as log_ex:
-        log.info("[%s] Prompt logging failed: %s", cid, log_ex)
+    # Invoke
+    response_msg = await chain.ainvoke(
+        {
+            "input": message,
+            "intimacy": int(intimacy),
+            "passion": int(passion),
+            "commitment": int(commitment),
+            "analysis": analysis_summary,
+            "persona_rules": persona_rules,
+            "daily_context": daily_context,
+            "memories": mem_block,
+            "last_user_message": message,
+        },
+        config={"configurable": {"session_id": chat_id}}
+    )
     
-    chain = prompt | MODEL
-
-    runnable = RunnableWithMessageHistory(
-        chain, lambda _: history, input_messages_key="input", history_messages_key="history")
+    reply = response_msg.content
     
-    try:
-        result = await runnable.ainvoke({"input": message}, config={"configurable": {"session_id": chat_id}})
-        reply = result.content
-    except Exception as e:
-        log.error("[%s] LLM error: %s", cid, e, exc_info=True)
-        return "Sorry, something went wrong. 😔"
-    
-    update_score(user_id or chat_id, influencer_id, extract_score(reply, score))
+    update_score(user_id or chat_id, influencer_id, extract_triad_scores(reply, score))
     
     # background task
     try:

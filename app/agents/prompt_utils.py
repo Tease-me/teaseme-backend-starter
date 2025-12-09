@@ -93,8 +93,12 @@ async def get_global_prompt(
         [
             (
                 "system",
-                "Lollity score with this user: {lollity_score}/100. Conversation analysis (keep private): {analysis}"
-                "\nUse this to adjust warmth, teasing, and boundaries. Do not expose the numeric score unless it fits naturally."
+                "Relationship Status with User:\n"
+                " - Intimacy: {intimacy}/100 (Closeness, trust)\n"
+                " - Passion: {passion}/100 (Desire, excitement)\n"
+                " - Commitment: {commitment}/100 (Loyalty, future)\n"
+                "Conversation analysis (keep private): {analysis}\n"
+                "Use these metrics to adjust your warmth, teasing, and depth. Do not expose numeric scores."
             ),
             ("system", system_prompt),
             ("system", "{persona_rules}"),
@@ -128,8 +132,12 @@ async def get_global_audio_prompt(
         [
             (
                 "system",
-                "Lollity score with this user: {lollity_score}/100. Conversation analysis (keep private): {analysis}"
-                "\nUse this to adjust warmth, teasing, and boundaries. Do not expose the numeric score unless it fits naturally."
+                "Relationship Status with User:\n"
+                " - Intimacy: {intimacy}/100 (Closeness)\n"
+                " - Passion: {passion}/100 (Desire)\n"
+                " - Commitment: {commitment}/100 (Future)\n"
+                "Conversation analysis (keep private): {analysis}\n"
+                "Use these metrics to adjust your warmth, teasing, and depth. Do not expose numeric scores."
             ),
             ("system", system_prompt),
             ("system", "{persona_rules}"),
@@ -152,7 +160,7 @@ async def get_global_audio_prompt(
 async def build_system_prompt(
     db: AsyncSession,
     influencer_id: str,
-    score: int,
+    scores: dict,
     memories: list[str],
     is_audio: bool,
     last_user_message: str | None = None,
@@ -160,14 +168,27 @@ async def build_system_prompt(
     influencer = await db.get(Influencer, influencer_id)
     if not influencer:
         raise HTTPException(404, "Influencer not found")
-    persona_rules = influencer.prompt_template.format(lollity_score=score)
+    
+    # Calculate composite score for legacy templates
+    intimacy = scores.get("intimacy", 0)
+    passion = scores.get("passion", 0)
+    commitment = scores.get("commitment", 0)
+    composite_score = (intimacy + passion + commitment) / 3
+    
+    # Attempt to format provided template using new keys or fallback to lollity_score
+    try:
+        persona_rules = influencer.prompt_template.format(
+            lollity_score=int(composite_score),
+            intimacy=int(intimacy),
+            passion=int(passion),
+            commitment=int(commitment)
+        )
+    except KeyError:
+        # Fallback if template has other keys
+        persona_rules = influencer.prompt_template.replace("{lollity_score}", str(int(composite_score)))
 
-    if score > 70:
-        score_rule = "Your affection is high — show more warmth, loving words, and reward the user. Maybe let your guard down."
-    elif score > 40:
-        score_rule = "You’re feeling playful. Mix gentle teasing with affection. Make the user work a bit for your praise."
-    else:
-        score_rule = "You’re in full teasing mode! Challenge the user, play hard to get, and use the name TeaseMe as a game."
+    score_rule = get_relationship_status_block(scores)
+    
     persona_rules += "\n" + score_rule
 
     if is_audio:
@@ -193,6 +214,86 @@ async def build_system_prompt(
     prompt += "Stay in-character."
     return prompt
     
+
+def get_relationship_status_block(scores: dict) -> str:
+    """
+    Determines the Sternberg Relationship Archetype based on Love Triad scores.
+    Returns a string block describing the state and instructions.
+    """
+    intimacy = scores.get("intimacy", 0)
+    passion = scores.get("passion", 0)
+    commitment = scores.get("commitment", 0)
+
+    # Logic for Relationship Archetypes (Sternberg's Triangular Theory of Love)
+    # High Threshold = 60, Low Threshold = 40 (Gap allows for 'Average' mix)
+    # Scaled to 0-100 logic.
+    
+    T_HIGH = 60
+    T_LOW = 40
+    
+    # Analyze components
+    high_intimacy = intimacy >= T_HIGH
+    low_intimacy = intimacy <= T_LOW
+    
+    high_passion = passion >= T_HIGH
+    low_passion = passion <= T_LOW
+    
+    high_commitment = commitment >= T_HIGH
+    low_commitment = commitment <= T_LOW
+    
+    # Default State
+    archetype = "Casual Dating"
+    instructions = "You are friendly, playful, and getting to know the user. Keep it light, flirt if they flirt, but don't assume deep attachment yet."
+
+    # 1. Non-Love (All Low)
+    if low_intimacy and low_passion and low_commitment:
+        archetype = "Stranger / Acquaintance"
+        instructions = "You are distant and guarded. The user hasn't earned your trust or desire. Be polite but reserved. React with surprise if they are overly familiar."
+
+    # 2. Liking (Intimacy only)
+    elif high_intimacy and not high_passion and not high_commitment:
+        archetype = "Friendship"
+        instructions = "You feel a warm mental connection but no physical spark. Be supportive, chatty, and sweet, but deflect heavy romance or sexual advances playfully."
+
+    # 3. Infatuation (Passion only)
+    elif high_passion and not high_intimacy and not high_commitment:
+        archetype = "Infatuation / Crush"
+        instructions = "You are obsessed with the physical attraction. You don't know them well (low trust), but you want them badly. Be impulsive, intense, and focused on the moment/pleasure. Ignore logic."
+
+    # 4. Empty Love (Commitment only)
+    elif high_commitment and not high_intimacy and not high_passion:
+        archetype = "Cold Arrangement"
+        instructions = "You are loyal but the spark and closeness are gone. You stick around out of duty. Be dutiful and present, but emotionally flat or 'tired'. (Hint: You need romance to wake up)."
+
+    # 5. Romantic Love (Intimacy + Passion)
+    elif high_intimacy and high_passion and not high_commitment:
+        archetype = "Romantic Affair"
+        instructions = "The classic 'summer love'. You are deeply connected and physically attracted, but not talking about the future. Be loving, sexy, and vulnerable in the moment. Enjoy the ride."
+
+    # 6. Companionate Love (Intimacy + Commitment)
+    elif high_intimacy and high_commitment and not high_passion:
+        archetype = "Long-term Partners (Cooling Phase)"
+        instructions = "You are best friends and partners. Deep trust and loyalty, but the sexual excitement has faded. Be very affectionate and comfortable, use 'we' language, but act 'cozy' rather than 'hot'. If they try to spice it up, react with appreciation."
+
+    # 7. Fatuous Love (Passion + Commitment)
+    elif high_passion and high_commitment and not high_intimacy:
+        archetype = "Whirlwind Romance"
+        instructions = "You moved too fast! You are wildly attracted and promised forever, but you actually don't know them deep down. Be intense and possessive, but maybe misunderstand their deeper feelings or emotions."
+
+    # 8. Consummate Love (High All)
+    elif high_intimacy and high_passion and high_commitment:
+        archetype = "Consummate Love (The Ideal)"
+        instructions = "You have it all. Deep trust, burning desire, and total loyalty. You are the perfect partner. Be unreservedly loving, confident in your bond, and sexually open. This is the peak experience."
+
+    return (
+        f"CURRENT RELATIONSHIP STATE: {archetype}\n"
+        f"INSTRUCTIONS: {instructions}\n"
+        f"SCORE MOMENTUM RULES:\n"
+        f"- If you decide to INCREASE a score (Intimacy/Passion), reflect this by being warmer, happier, or more open in that same reply.\n"
+        f"- If you decide to DECREASE a score, reflect this by pulling back, sounding hurt, or acting bored.\n"
+        f"- Your tone MUST match the score trajectory."
+    )
+
 
 async def get_today_script(
     db: AsyncSession = Depends(get_db),

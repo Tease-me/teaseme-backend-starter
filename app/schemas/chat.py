@@ -26,3 +26,9 @@ class PaginatedMessages(BaseModel):
     page: int
     page_size: int
     messages: List[MessageSchema]
+
+class LoveTriadScore(BaseModel):
+    intimacy: float
+    passion: float
+    commitment: float
+    last_interaction: Optional[float] = None

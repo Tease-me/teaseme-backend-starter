@@ -16,7 +16,8 @@ from starlette.websockets import WebSocketDisconnect
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.chat_service import get_or_create_chat
-from app.schemas.chat import ChatCreateRequest,PaginatedMessages
+from app.schemas.chat import ChatCreateRequest, PaginatedMessages, LoveTriadScore
+from app.agents.scoring import get_score
 
 from app.core.config import settings
 from app.utils.chat import transcribe_audio, synthesize_audio_with_elevenlabs_V3, synthesize_audio_with_bland_ai, get_ai_reply_via_websocket
@@ -37,6 +38,23 @@ async def start_chat(
 ):
     chat_id = await get_or_create_chat(db, data.user_id, data.influencer_id)
     return {"chat_id": chat_id}
+
+@router.get("/score", response_model=LoveTriadScore)
+async def get_love_triad_score(
+    influencer_id: str = Query(..., description="The ID of the influencer/persona"),
+    user_id: str = Query(..., description="The ID of the user (stringified int)"),
+):
+    """
+    Retrieves the current Love Triad scores (Intimacy, Passion, Commitment) for a user-influencer pair.
+    """
+    scores = get_score(user_id, influencer_id)
+    # Filter out internal metadata e.g. _last_decay
+    return {
+        "intimacy": scores.get("intimacy", 0.0),
+        "passion": scores.get("passion", 0.0),
+        "commitment": scores.get("commitment", 0.0),
+        "last_interaction": scores.get("last_interaction"),
+    }
 
 # TODO: add code in the right place
 # ---------- Buffer state ----------
