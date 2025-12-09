@@ -14,6 +14,7 @@ from app.api.webhooks import router as webhooks_router
 
 from app.api.persona_import import router as persona_import_router
 from app.api.influencer_knowledge import router as influencer_knowledge_router
+from app.api.pre_influencers import router as pre_influencers_router
 
 from app.api import system_prompts as system_prompts_router
 
@@ -39,7 +40,8 @@ origins = [
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,  # tighten for prod
+    allow_origins=["*"],
+    #allow_origins=origins,  # tighten for prod
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -58,3 +60,4 @@ app.include_router(webhooks_router)
 app.include_router(mcp_router)
 app.include_router(influencer_knowledge_router)
 app.include_router(system_prompts_router.router)
+app.include_router(pre_influencers_router)
