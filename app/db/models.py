@@ -22,6 +22,10 @@ class Influencer(Base):
     voice_id:       Mapped[str | None]   = mapped_column(String, nullable=True)        # ElevenLabs, etc.
     prompt_template:Mapped[str]          = mapped_column(Text, nullable=False)
     voice_prompt:   Mapped[str | None] = mapped_column(String, nullable=True)
+    profile_photo_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    profile_video_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    native_language: Mapped[str | None] = mapped_column(String, nullable=True)
+    date_of_birth: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     daily_scripts:  Mapped[List[str] | None] = mapped_column(JSON, nullable=True)
     influencer_agent_id_third_part: Mapped[str | None] = mapped_column(String, nullable=True)  
     created_at:     Mapped[datetime]     = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
@@ -189,6 +193,37 @@ class SystemPrompt(Base):
     key: Mapped[str] = mapped_column(String, primary_key=True)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+class PreInfluencer(Base):
+    """
+    Pre-onboarding record for someone who wants to be an influencer.
+    This is created from the simple signup:
+      full_name, location, username, email
+    """
+    __tablename__ = "pre_influencers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    full_name: Mapped[str] = mapped_column(String, nullable=False)
+    location: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    username: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    password: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    status: Mapped[str] = mapped_column(
+        String, default="pending", nullable=False
+    )  # pending / approved / rejected / converted 
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
