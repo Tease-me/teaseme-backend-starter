@@ -1,7 +1,11 @@
+import logging
 import boto3
 from botocore.exceptions import ClientError
 from app.core.config import settings
 from datetime import datetime
+
+log = logging.getLogger(__name__)
+
 AWS_REGION = settings.AWS_REGION
 SES_SENDER = settings.SES_SENDER
 CONFIRM_BASE_URL = settings.SES_SERVER
@@ -76,24 +80,32 @@ def send_verification_email(to_email: str, token: str):
     return send_email_via_ses(to_email, subject, body_html, body_text)
 
 def send_email_via_ses(to_email, subject, body_html, body_text=None):
-    ses_client = boto3.client(
-        "ses",
-        region_name="us-east-1",
-        aws_access_key_id=AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
-    )
+    try:
+        ses_client = boto3.client(
+            "ses",
+            region_name="us-east-1",
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+        )
 
-    response = ses_client.send_email(
-         Source=SES_SENDER,
-        Destination={"ToAddresses": [to_email]},
-        Message={
-            "Subject": {"Data": subject, "Charset": "UTF-8"},
-            "Body": {
-                "Html": {"Data": body_html, "Charset": "UTF-8"},
-                "Text": {"Data": body_text or subject, "Charset": "UTF-8"},
+        response = ses_client.send_email(
+             Source=SES_SENDER,
+            Destination={"ToAddresses": [to_email]},
+            Message={
+                "Subject": {"Data": subject, "Charset": "UTF-8"},
+                "Body": {
+                    "Html": {"Data": body_html, "Charset": "UTF-8"},
+                    "Text": {"Data": body_text or subject, "Charset": "UTF-8"},
+                },
             },
-        },
-    )
+        )
+        return response
+    except ClientError as e:
+        log.error("Failed to send email via SES to %s: %s", to_email, e)
+        return None
+    except Exception as e:
+        log.error("Unexpected error sending email to %s: %s", to_email, e)
+        return None
 
 def send_password_reset_email(to_email: str, token: str):
     subject = "Redefine your TeaseMe password"
