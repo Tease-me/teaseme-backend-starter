@@ -203,3 +203,34 @@ class SystemPrompt(Base):
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+
+class PreInfluencer(Base):
+    """
+    Pre-onboarding record for someone who wants to be an influencer.
+    This is created from the simple signup:
+      full_name, location, username, email
+    """
+    __tablename__ = "pre_influencers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    full_name: Mapped[str] = mapped_column(String, nullable=False)
+    location: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    username: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    password: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    status: Mapped[str] = mapped_column(
+        String, default="pending", nullable=False
+    )  # pending / approved / rejected / converted 
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
