@@ -1,6 +1,5 @@
 import logging
 import boto3
-from botocore.exceptions import ClientError
 from app.core.config import settings
 from datetime import datetime
 
@@ -77,6 +76,110 @@ def send_verification_email(to_email: str, token: str):
 """
 
     body_text = f"Welcome to TeaseMe!\nPlease confirm your email by clicking this link: {confirm_url}"
+    return send_email_via_ses(to_email, subject, body_html, body_text)
+
+def send_profile_survey_email(to_email: str, token: str, temp_password: str):
+    subject = "Complete Your TeaseMe Profile Survey"
+    survey_url = f"{CONFIRM_BASE_URL}/profile-survey?token={token}"
+    logo_url = (
+        "https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/email_verify_header.png"
+    )
+
+    body_html = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>Complete Your Profile</title>
+    </head>
+    <body style="background:#f7f8fc;padding:0;margin:0;font-family:Arial,sans-serif;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f7f8fc;padding:40px 0;">
+        <tr>
+          <td align="center">
+
+            <!-- Card -->
+            <table width="520" cellpadding="0" cellspacing="0" border="0" style="background:#fff;border-radius:24px;box-shadow:0 10px 32px rgba(50,50,93,0.10),0 2px 4px rgba(0,0,0,0.07);overflow:hidden;">
+
+              <!-- Banner -->
+              <tr>
+                <td align="center" style="background:#23293b;padding:0;">
+                  <img 
+                    src="{logo_url}" 
+                    alt="TeaseMe" 
+                    style="width:100%;max-width:520px;display:block;border-top-left-radius:24px;border-top-right-radius:24px;"
+                  />
+                </td>
+              </tr>
+
+              <!-- Main Content -->
+              <tr>
+                <td align="center" style="padding:32px 30px 8px 30px;">
+                  <h2 style="font-family:'Arial Rounded MT Bold', Arial, sans-serif; font-size:30px; font-weight:bold; margin:0 0 14px 0; color:#444;">
+                    Let's Build Your Perfect AI Persona
+                  </h2>
+
+                  <p style="font-size:16px;color:#666;margin:0 0 24px 0;">
+                    You're all set! Before your AI companion goes live, we just need a
+                    little more information from you.
+                    This short survey helps us personalize your experience and tailor
+                    the persona to your unique style.
+                  </p>
+
+                  <a href="{survey_url}"
+                    style="background:#FF5C74; border-radius:8px; color:#fff; text-decoration:none; display:inline-block;
+                          padding:18px 50px; font-size:22px; font-weight:bold; box-shadow:0 6px 24px #ffb5c7; margin-bottom:20px;">
+                    Start Profile Survey
+                  </a>
+
+                  <p style="font-size:14px;color:#666;margin:12px 0 24px 0;">
+                    Your temporary password to access your creator area:
+                  </p>
+
+                  <div style="display:inline-block;padding:10px 18px;border-radius:8px;background:#f3f4ff;
+                              font-family:monospace;font-size:16px;color:#333;margin-bottom:16px;">
+                    {temp_password}
+                  </div>
+
+                  <p style="margin:24px 0 0 0; font-size:14px; color:#bbb;">
+                    If you didn’t request this, you can safely ignore the email.<br/>
+                    Your persona can't wait to meet you. ❤️
+                  </p>
+                </td>
+              </tr>
+
+              <!-- Footer -->
+              <tr>
+                <td align="center" style="padding:20px 0 12px 0;background:#e5e5e5;color:#bbb;font-size:14px;border-bottom-left-radius:24px;border-bottom-right-radius:24px;">
+                  © {datetime.now().year} TeaseMe. All rights reserved.
+                </td>
+              </tr>
+            </table>
+            <!-- /Card -->
+
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
+    """
+
+    body_text = f"""
+Complete Your TeaseMe Profile
+
+You're all set! Before your AI companion goes live, we just need a little more info.
+
+Start your profile survey here:
+{survey_url}
+
+Your temporary password: {temp_password}
+
+If you didn’t request this, you can safely ignore this email.
+Your persona can't wait to meet you. ❤️
+
+© {datetime.now().year} TeaseMe. All rights reserved.
+    """.strip()
+
+    # Envia via SES (ou qualquer provider que você já usa)
     return send_email_via_ses(to_email, subject, body_html, body_text)
 
 def send_email_via_ses(to_email, subject, body_html, body_text=None):
