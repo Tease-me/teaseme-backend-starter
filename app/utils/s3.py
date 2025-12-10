@@ -53,7 +53,8 @@ def message_to_schema_with_presigned(msg):
         content=msg.content,
         created_at=msg.created_at,
         audio_url=audio_url,
-        channel=msg.channel
+        channel=msg.channel,
+        conversation_id=msg.conversation_id,
     )
 
 # Save knowledge file to S3 and return the S3 key
