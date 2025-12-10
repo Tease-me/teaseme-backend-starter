@@ -745,7 +745,7 @@ async def _wait_until_terminal_status(
     return last
 
 
-def _extract_total_seconds(conversation_json: Dict[str, Any]) -> int:
+def _extract_total_seconds(conversation_json: Dict[str, Any]) -> float:
     """
     Primary: metadata.call_duration_secs
     Fallback: max transcript[*].time_in_call_secs
@@ -753,7 +753,7 @@ def _extract_total_seconds(conversation_json: Dict[str, Any]) -> int:
     md = conversation_json.get("metadata") or {}
     dur = md.get("call_duration_secs")
     if isinstance(dur, (int, float)) and dur >= 0:
-        return int(dur)
+        return float(dur)
     transcript = conversation_json.get("transcript") or []
     try:
         max_sec = (
@@ -761,7 +761,7 @@ def _extract_total_seconds(conversation_json: Dict[str, Any]) -> int:
         )
     except Exception:
         max_sec = 0
-    return max(0, int(max_sec))
+    return float(max_sec) if max_sec else 0.0
 
 
 def _normalize_transcript(conversation_json: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -881,6 +881,7 @@ async def _persist_transcript_to_chat(
                 content=text,
                 created_at=created_at,
                 embedding=embedding,
+                conversation_id=conversation_id,
             )
         )
 
@@ -1238,7 +1239,7 @@ async def finalize_conversation(
 
     # Idempotency: bill only if not already billed AND caller explicitly asked to bill here.
     if body.charge_if_not_billed and not await was_already_billed(db, conversation_id):
-        charge_feature(db, body.user_id, "live_chat", int(total_seconds), meta=meta)
+        charge_feature(db, body.user_id, "live_chat", int(total_seconds) + 1, meta=meta)
         return {
             "ok": True,
             "conversation_id": conversation_id,
