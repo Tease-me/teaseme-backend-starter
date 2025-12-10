@@ -166,10 +166,6 @@ def _format_transcript_entries(transcript: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 def _format_redis_history(chat_id: str, influencer_id: str, limit: int = 12) -> Optional[str]:
-    """
-    Pull recent turns from Redis so a new call can reference the prior session
-    before the transcript finishes persisting to the DB.
-    """
     try:
         history = redis_history(chat_id, influencer_id)
     except Exception as exc:  # pragma: no cover - defensive
@@ -952,7 +948,6 @@ async def get_conversation_token(
     user_id: int = Query(..., description="Numeric user id"),
     db: AsyncSession = Depends(get_db),
 ):
-    cid = uuid4().hex[:8]
     agent_id = await get_agent_id_from_influencer(db, influencer_id)
     influencer, prompt_template = await asyncio.gather(
         db.get(Influencer, influencer_id),
@@ -970,14 +965,19 @@ async def get_conversation_token(
         persona_rules += "\nYou're feeling playful. Mix gentle teasing with affection. Make the user work a bit for your praise."
     else:
         persona_rules += "\nYou're in full teasing mode! Challenge the user, play hard to get, and use the name TeaseMe as a game."
+
     history = redis_history(chat_id)
 
     if len(history.messages) > settings.MAX_HISTORY_WINDOW:
         trimmed = history.messages[-settings.MAX_HISTORY_WINDOW:]
         history.clear()
         history.add_messages(trimmed)
-
+        
     prompt = prompt_template.partial(
+        analysis="",
+        daily_context="",
+        last_user_message="",
+        memories= "",
         lollity_score=format_score_value(score),
         persona_rules=persona_rules,
         history=history.messages,
@@ -991,7 +991,6 @@ async def get_conversation_token(
                 headers=_headers(),
                 timeout=15.0,
             )
-
     except httpx.RequestError as exc:
         log.exception("conversation_token.network_error agent=%s err=%s", agent_id, exc)
         raise HTTPException(status_code=502, detail="Upstream unavailable")
@@ -1022,7 +1021,7 @@ async def get_conversation_token(
         "agent_id": agent_id, 
         "credits_remainder_secs": credits_remainder_secs, 
         "greeting_used": greeting,
-        "prompt": prompt,
+        "prompt": prompt.format(input="message", history=history.messages),
     }
 
 @router.get("/signed-url-free")

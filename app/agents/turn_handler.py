@@ -21,10 +21,8 @@ def redis_history(chat_id: str, influencer_id: str | None = None):
 def _norm(m):
     if m is None:
         return ""
-    # Already a string
     if isinstance(m, str):
         return m.strip()
-    # List or tuple → flatten and join
     if isinstance(m, (list, tuple)):
         parts = []
         for x in m:
@@ -33,13 +31,11 @@ def _norm(m):
             else:
                 parts.append(str(x).strip())
         return " ".join(part for part in parts if part)
-    # Dict → try common content fields
     if isinstance(m, dict):
         for key in ("content", "text", "message", "snippet", "summary"):
             if key in m and isinstance(m[key], str):
                 return m[key].strip()
         return str(m).strip()
-    # Anything else
     return str(m).strip()
 
 
@@ -49,10 +45,6 @@ async def extract_and_store_facts_for_turn(
     chat_id: str,
     cid: str,
 ) -> None:
-    """
-    Runs the fact extraction flow and stores new facts in the DB.
-    Intended to be called from handle_turn (sync or background).
-    """
     async with SessionLocal() as db:
         try:
             fact_prompt = await get_fact_prompt(db)
@@ -120,10 +112,9 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     else:
         persona_rules += "\nYou're in full teasing mode! Challenge the user, play hard to get, and use the name TeaseMe as a game."
 
-    # Get memories (note: find_similar_memories returns tuple if influencer_id provided, list otherwise)
     memories_result = await find_similar_memories(db, chat_id, message) if (db and user_id) else []
     if isinstance(memories_result, tuple):
-        memories = memories_result[0]  # Extract chat_memories from tuple
+        memories = memories_result[0]
     else:
         memories = memories_result
     
