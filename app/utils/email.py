@@ -76,7 +76,7 @@ def send_verification_email(to_email: str, token: str):
 
 def send_profile_survey_email(to_email: str, token: str, temp_password: str):
     subject = "Complete Your TeaseMe Profile Survey"
-    survey_url = f"{CONFIRM_BASE_URL}/profile-survey?token={token}"
+    survey_url = f"{CONFIRM_BASE_URL}/profile-survey-form?token={token}"
     logo_url = (
         "https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/email_verify_header.png"
     )
