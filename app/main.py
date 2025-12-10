@@ -28,20 +28,15 @@ logging.basicConfig(
 )
 
 origins = [
-    "https://localhost:3000",  # frontend dev
-    "https://192.168.68.72:4174",  # frontend dev
-    "https://192.168.68.61:3000",  # frontend dev
-    "https://localhost:4174",
-    "https://teaseme.mxjprod.work",
-    "https://api.teaseme.live",
     "https://teaseme.live",
+    "https://www.teaseme.live",
 ]
 
 app = FastAPI()
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    #allow_origins=origins,  # tighten for prod
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
