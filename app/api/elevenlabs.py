@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import math
 import random
 import httpx
 from datetime import datetime, timedelta
@@ -1235,7 +1236,7 @@ async def finalize_conversation(
         }
 
     if body.charge_if_not_billed and not await was_already_billed(db, conversation_id):
-        charge_feature(db, body.user_id, "live_chat", int(total_seconds) + 1, meta=meta)
+        charge_feature(db, body.user_id, "live_chat", math.ceil(total_seconds), meta=meta)
         return {
             "ok": True,
             "conversation_id": conversation_id,
