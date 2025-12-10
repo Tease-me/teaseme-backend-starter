@@ -18,9 +18,13 @@ class PreInfluencerRegisterResponse(BaseModel):
 
 class SurveyState(BaseModel):
     pre_influencer_id: int
+    username: str;
     survey_answers: Dict[str, Any] | None = None
     survey_step: int
 
 class SurveySaveRequest(BaseModel):
     survey_answers: Dict[str, Any]
     survey_step: int
+
+class InfluencerAudioDeleteRequest(BaseModel):
+    key: str
