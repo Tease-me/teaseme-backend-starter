@@ -1,6 +1,11 @@
 import asyncio
 import logging
+import math
 import random
+from uuid import uuid4
+from app.agents.memory import find_similar_memories
+from app.agents.prompt_utils import get_global_audio_prompt
+from app.agents.scoring import format_score_value, get_score
 import httpx
 from datetime import datetime, timedelta
 
@@ -22,6 +27,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from app.db.session import SessionLocal
 from app.utils.deps import get_current_user
+from langchain_core.runnables.history import RunnableWithMessageHistory
 from app.api.utils import get_embedding
 from app.services.system_prompt_service import get_system_prompt
 
@@ -161,10 +167,6 @@ def _format_transcript_entries(transcript: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 def _format_redis_history(chat_id: str, influencer_id: str, limit: int = 12) -> Optional[str]:
-    """
-    Pull recent turns from Redis so a new call can reference the prior session
-    before the transcript finishes persisting to the DB.
-    """
     try:
         history = redis_history(chat_id, influencer_id)
     except Exception as exc:  # pragma: no cover - defensive
@@ -722,7 +724,7 @@ async def _wait_until_terminal_status(
     return last
 
 
-def _extract_total_seconds(conversation_json: Dict[str, Any]) -> int:
+def _extract_total_seconds(conversation_json: Dict[str, Any]) -> float:
     """
     Primary: metadata.call_duration_secs
     Fallback: max transcript[*].time_in_call_secs
@@ -730,7 +732,7 @@ def _extract_total_seconds(conversation_json: Dict[str, Any]) -> int:
     md = conversation_json.get("metadata") or {}
     dur = md.get("call_duration_secs")
     if isinstance(dur, (int, float)) and dur >= 0:
-        return int(dur)
+        return float(dur)
     transcript = conversation_json.get("transcript") or []
     try:
         max_sec = (
@@ -738,7 +740,7 @@ def _extract_total_seconds(conversation_json: Dict[str, Any]) -> int:
         )
     except Exception:
         max_sec = 0
-    return max(0, int(max_sec))
+    return float(max_sec) if max_sec else 0.0
 
 
 def _normalize_transcript(conversation_json: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -858,6 +860,7 @@ async def _persist_transcript_to_chat(
                 content=text,
                 created_at=created_at,
                 embedding=embedding,
+                conversation_id=conversation_id,
             )
         )
 
@@ -947,11 +950,40 @@ async def get_conversation_token(
     user_id: int = Query(..., description="Numeric user id"),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Fetch a ConvAI conversation token for the given influencer's agent.
-    Keeps the ElevenLabs API key server-side (do not expose to clients).
-    """
     agent_id = await get_agent_id_from_influencer(db, influencer_id)
+    influencer, prompt_template = await asyncio.gather(
+        db.get(Influencer, influencer_id),
+        get_global_audio_prompt(db),
+    )
+    score = get_score(user_id or chat_id, influencer_id)
+    chat_id = await get_or_create_chat(db, user_id, influencer_id)
+    if not influencer:
+        raise HTTPException(404, "Influencer not found")
+    persona_rules = influencer.prompt_template.format(lollity_score=score)
+
+    if score > 70:
+        persona_rules += "\nYour affection is high — show more warmth, loving words, and reward the user. Maybe let your guard down."
+    elif score > 40:
+        persona_rules += "\nYou're feeling playful. Mix gentle teasing with affection. Make the user work a bit for your praise."
+    else:
+        persona_rules += "\nYou're in full teasing mode! Challenge the user, play hard to get, and use the name TeaseMe as a game."
+
+    history = redis_history(chat_id)
+
+    if len(history.messages) > settings.MAX_HISTORY_WINDOW:
+        trimmed = history.messages[-settings.MAX_HISTORY_WINDOW:]
+        history.clear()
+        history.add_messages(trimmed)
+        
+    prompt = prompt_template.partial(
+        analysis="",
+        daily_context="",
+        last_user_message="",
+        memories= "",
+        lollity_score=format_score_value(score),
+        persona_rules=persona_rules,
+        history=history.messages,
+    )
 
     try:
         async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
@@ -977,6 +1009,7 @@ async def get_conversation_token(
     token = (resp.json() or {}).get("token")
     if not token:
         raise HTTPException(status_code=502, detail="Token not returned by ElevenLabs")
+    
     chat_id = await get_or_create_chat(db, user_id, influencer_id)
     credits_remainder_secs = await get_remaining_units(db, user_id, feature="live_chat")
 
@@ -989,8 +1022,9 @@ async def get_conversation_token(
         "token": token, 
         "agent_id": agent_id, 
         "credits_remainder_secs": credits_remainder_secs, 
-        "greeting_used": greeting
-        }
+        "greeting_used": greeting,
+        "prompt": prompt.format(input="message", history=history.messages),
+    }
 
 @router.get("/signed-url-free")
 async def get_signed_url_free(
@@ -1234,7 +1268,7 @@ async def finalize_conversation(
         }
 
     if body.charge_if_not_billed and not await was_already_billed(db, conversation_id):
-        charge_feature(db, body.user_id, "live_chat", int(total_seconds), meta=meta)
+        charge_feature(db, body.user_id, "live_chat", math.ceil(total_seconds), meta=meta)
         return {
             "ok": True,
             "conversation_id": conversation_id,
