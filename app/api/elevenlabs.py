@@ -308,20 +308,13 @@ async def get_agent_id_from_influencer(db: AsyncSession, influencer_id: str) -> 
 
 def _build_agent_patch_payload(
     *,
-    first_message: Optional[str] = None,
     prompt_text: Optional[str] = None,
     llm: Optional[str] = None,
     temperature: Optional[float] = None,
     max_tokens: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """
-    Build a PATCH payload for ElevenLabs agent updates.
-    Only include fields you actually want to update.
-    """
+    
     agent_cfg: Dict[str, Any] = {}
-
-    # if first_message is not None:
-    #     agent_cfg["first_message"] = first_message
 
     if any(v is not None for v in (prompt_text, llm, temperature, max_tokens)):
         prompt_block: Dict[str, Any] = {}
@@ -343,21 +336,15 @@ def _build_agent_create_payload(
     name: Optional[str],
     voice_id: str,
     prompt_text: str,
-    first_message: Optional[str] = None,
     language: str = "en",
     llm: Optional[str] = None,
     temperature: Optional[float] = None,
     max_tokens: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """
-    Build the minimum viable request body for POST /v1/convai/agents/create.
-    ElevenLabs requires the full conversational config, so we include the agent + tts blocks.
-    """
     if not voice_id:
         raise HTTPException(400, "voice_id is required to create an ElevenLabs agent.")
 
     agent_cfg: Dict[str, Any] = {
-        # "first_message": first_message or "",
         "language": language,
         "prompt": {
             "prompt": prompt_text or "",
@@ -385,7 +372,6 @@ async def _patch_agent_config(
     client: httpx.AsyncClient,
     agent_id: str,
     *,
-    first_message: Optional[str] = None,
     prompt_text: Optional[str] = None,
     llm: Optional[str] = None,
     temperature: Optional[float] = None,
@@ -393,7 +379,6 @@ async def _patch_agent_config(
 ) -> None:
     """PATCH /convai/agents/{agent_id} with the minimal update payload."""
     payload = _build_agent_patch_payload(
-        # first_message=first_message,
         prompt_text=prompt_text,
         llm=llm,
         temperature=temperature,
@@ -401,7 +386,7 @@ async def _patch_agent_config(
     )
 
     if not payload["conversation_config"]["agent"]:
-        return  # nothing to update
+        return
 
     try:
         resp = await client.patch(
@@ -415,11 +400,9 @@ async def _patch_agent_config(
         raise HTTPException(status_code=502, detail="Upstream unavailable")
 
     if resp.status_code >= 400:
-        # Consider truncating resp.text to avoid logging PII.
         error_text = resp.text[:500] if resp.text else "No error details"
         log.error("ElevenLabs PATCH failed: %s %s", resp.status_code, error_text)
         
-        # Try to parse error response for more details
         error_detail = f"Failed to update ElevenLabs agent: {resp.status_code}"
         try:
             error_json = resp.json()
@@ -438,15 +421,11 @@ async def _create_agent(
     name: Optional[str],
     voice_id: str,
     prompt_text: str,
-    first_message: Optional[str] = None,
     language: str = "en",
     llm: Optional[str] = None,
     temperature: Optional[float] = None,
     max_tokens: Optional[int] = None,
 ) -> str:
-    """
-    POST /convai/agents/create and return the new agent id.
-    """
     payload = _build_agent_create_payload(
         name=name,
         voice_id=voice_id,
@@ -501,9 +480,7 @@ async def _poll_and_persist_conversation(
     influencer_id: Optional[str],
     chat_id: Optional[str],
 ) -> None:
-    """
-    Background task: poll ElevenLabs until terminal, then persist transcript + call record.
-    """
+
     async with SessionLocal() as db:
         try:
             async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
@@ -925,17 +902,12 @@ async def get_signed_url(
     user_id: int = Query(..., description="Numeric user id"),
     db: AsyncSession = Depends(get_db),
     first_message: Optional[str] = Query(None),
-    # "random" or "rr" (round-robin). Use pattern instead of deprecated regex.
     greeting_mode: str = Query("random", pattern="^(random|rr)$"),
 ):
-    """
-    (1) Check user credits before starting a live chat call.
-    (2) Return a signed_url for the client to open a conversation (no first_message override).
-    """
-    # --- Check credits before starting call ---
     ok, cost_cents, free_left = await can_afford(
         db, user_id=user_id, feature="live_chat", units=10
     )
+
     if not ok:
         raise HTTPException(
             status_code=402,
@@ -945,12 +917,12 @@ async def get_signed_url(
                 "free_left": free_left,
             },
         )
+    
     credits_remainder_secs = await get_remaining_units(db, user_id, feature="live_chat")
 
     agent_id = await get_agent_id_from_influencer(db, influencer_id)
     chat_id = await get_or_create_chat(db, user_id, influencer_id)
 
-    # Do not send or patch a first_message; let ElevenLabs handle the default.
     greeting: Optional[str] = first_message
     if not greeting:
         greeting = await _generate_contextual_greeting(db, chat_id, influencer_id)
@@ -963,7 +935,6 @@ async def get_signed_url(
     return {
         "signed_url": signed_url,
         "greeting_used": greeting,
-        # Send this to ElevenLabs ConvAI as dynamic variable `first_message`
         "first_message_for_convai": greeting,
         "dynamic_variables": {"first_message": greeting} if greeting else {},
         "agent_id": agent_id,
@@ -971,21 +942,63 @@ async def get_signed_url(
         "chat_id": chat_id,
     }
 
+@router.get("/conversation-token")
+async def get_conversation_token(
+    influencer_id: str,
+    user_id: int = Query(..., description="Numeric user id"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Fetch a ConvAI conversation token for the given influencer's agent.
+    Keeps the ElevenLabs API key server-side (do not expose to clients).
+    """
+    agent_id = await get_agent_id_from_influencer(db, influencer_id)
+
+    try:
+        async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
+            resp = await client.get(
+                "/convai/conversation/token",
+                params={"agent_id": agent_id},
+                headers=_headers(),
+                timeout=15.0,
+            )
+    except httpx.RequestError as exc:
+        log.exception("conversation_token.network_error agent=%s err=%s", agent_id, exc)
+        raise HTTPException(status_code=502, detail="Upstream unavailable")
+
+    if resp.status_code >= 400:
+        log.error(
+            "conversation_token.failed agent=%s status=%s body=%s",
+            agent_id,
+            resp.status_code,
+            resp.text[:500] if resp.text else "",
+        )
+        raise HTTPException(status_code=resp.status_code, detail="Failed to get conversation token")
+
+    token = (resp.json() or {}).get("token")
+    if not token:
+        raise HTTPException(status_code=502, detail="Token not returned by ElevenLabs")
+    chat_id = await get_or_create_chat(db, user_id, influencer_id)
+    credits_remainder_secs = await get_remaining_units(db, user_id, feature="live_chat")
+
+    greeting: Optional[str] = await _generate_contextual_greeting(db, chat_id, influencer_id)
+    
+    if not greeting:
+        greeting = _pick_greeting(influencer_id, "random")
+
+    return {
+        "token": token, 
+        "agent_id": agent_id, 
+        "credits_remainder_secs": credits_remainder_secs, 
+        "greeting_used": greeting
+        }
+
 @router.get("/signed-url-free")
 async def get_signed_url_free(
     influencer_id: str,
-    # user_id: int = Query(..., description="Numeric user id"),
     db: AsyncSession = Depends(get_db),
-    first_message: Optional[str] = Query(None),
-    greeting_mode: str = Query("random", pattern="^(random|rr)$"),
 ):
-    """
-    (1) Return a signed_url for the client to open a conversation (no first_message override).
-    """
-    # --- Check credits before starting call ---
-
     agent_id = await get_agent_id_from_influencer(db, influencer_id)
-    # Do not send or patch a first_message; let ElevenLabs handle the default.
     greeting = None
 
     async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
@@ -1011,7 +1024,6 @@ async def get_signed_url_free_landing(db: AsyncSession = Depends(get_db)):
         "agent_id": agent_id,
     }
 
-# ---------- Persistence hooks (stubs) ----------
 async def save_pending_conversation(
     db: AsyncSession,
     conversation_id: str,
@@ -1019,10 +1031,6 @@ async def save_pending_conversation(
     influencer_id: Optional[str],
     sid: Optional[str],
 ) -> Optional[str]:
-    """
-    Upsert a pending conversation mapping (PostgreSQL) and ensure a stable chat_id
-    shared between text and calls.
-    """
     chat_id: Optional[str] = None
     if user_id and influencer_id:
         try:
@@ -1046,7 +1054,7 @@ async def save_pending_conversation(
             sid=sid,
             status="pending",
         )
-        # Use the PK or a unique constraint name here
+
         .on_conflict_do_update(
             index_elements=[CallRecord.conversation_id],
             set_={
@@ -1076,10 +1084,6 @@ async def register_conversation(
     body: RegisterConversationBody,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Call this right after startSession resolves a conversationId.
-    It lets the server bill even if the client goes offline later (webhook path).
-    """
     chat_id = await save_pending_conversation(
         db, conversation_id, body.user_id, body.influencer_id, body.sid
     )
@@ -1092,7 +1096,7 @@ async def register_conversation(
             chat_id = row[0] if row else None
         except Exception:
             pass
-    # Kick off background polling to persist transcript even if webhook/finalize not called.
+
     try:
         asyncio.create_task(
             _poll_and_persist_conversation(
@@ -1113,13 +1117,6 @@ async def finalize_conversation(
     body: FinalizeConversationBody,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Client-side finalize (optional if you rely on webhooks for billing).
-    - Polls ElevenLabs until terminal status.
-    - Extracts total_seconds.
-    - Bills if (status == "done") AND (body.charge_if_not_billed is True) AND (not already billed).
-    Returns a UI-friendly summary either way.
-    """
     async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
         snapshot = await _wait_until_terminal_status(
             client,
@@ -1144,13 +1141,13 @@ async def finalize_conversation(
         if row:
             chat_id = row[0]
             resolved_influencer_id = resolved_influencer_id or row[1]
-    except Exception as exc:  # pragma: no cover - defensive
+    except Exception as exc:
         log.warning("finalize.lookup_call_record_failed conv=%s err=%s", conversation_id, exc)
 
     if not chat_id and resolved_influencer_id:
         try:
             chat_id = await get_or_create_chat(db, body.user_id, resolved_influencer_id)
-        except Exception as exc:  # pragma: no cover
+        except Exception as exc:
             log.warning("finalize.create_chat_failed conv=%s err=%s", conversation_id, exc)
 
     if chat_id:
@@ -1162,7 +1159,7 @@ async def finalize_conversation(
                 conversation_id=conversation_id,
                 influencer_id=resolved_influencer_id,
             )
-        except Exception as exc:  # pragma: no cover - do not break billing
+        except Exception as exc:
             log.warning(
                 "finalize.persist_transcript_failed conv=%s chat=%s err=%s",
                 conversation_id,
@@ -1181,6 +1178,7 @@ async def finalize_conversation(
         "start_time_unix_secs": (snapshot.get("metadata") or {}).get("start_time_unix_secs"),
         "source": "client_finalize",
     }
+
     if resolved_influencer_id:
         meta["influencer_id"] = resolved_influencer_id
 
@@ -1205,7 +1203,7 @@ async def finalize_conversation(
             call_record.chat_id = chat_id
         db.add(call_record)
         await db.commit()
-    except Exception as exc:  # pragma: no cover - keep billing path alive
+    except Exception as exc:
         log.warning(
             "finalize.update_call_record_failed conv=%s err=%s", conversation_id, exc
         )
@@ -1223,7 +1221,6 @@ async def finalize_conversation(
             "refresh_required": transcript_synced,
         }
 
-    # If not yet done, return status only (no billing).
     if status != "done":
         return {
             "ok": True,
@@ -1237,7 +1234,6 @@ async def finalize_conversation(
             "refresh_required": transcript_synced,
         }
 
-    # Idempotency: bill only if not already billed AND caller explicitly asked to bill here.
     if body.charge_if_not_billed and not await was_already_billed(db, conversation_id):
         charge_feature(db, body.user_id, "live_chat", int(total_seconds) + 1, meta=meta)
         return {
@@ -1251,7 +1247,6 @@ async def finalize_conversation(
             "refresh_required": transcript_synced,
         }
 
-    # Default path (webhook will bill; this is UI-only)
     return {
         "ok": True,
         "conversation_id": conversation_id,
@@ -1325,12 +1320,10 @@ async def update_elevenlabs_prompt(
             detail="Could not resolve agent_id. Provide either agent_id or configure a voice_id (global default also missing).",
         )
     
-    # Update ElevenLabs
     try:
         agent_id = await _push_prompt_to_elevenlabs(
             agent_id=agent_id,
             prompt_text=prompt_for_eleven,
-            # first_message=body.first_message,
             voice_id=resolved_voice_id,
             agent_name=agent_name,
         )
@@ -1346,7 +1339,6 @@ async def update_elevenlabs_prompt(
     if influencer:
         influencer.influencer_agent_id_third_part = agent_id
     
-    # Commit database changes if influencer was updated (only if ElevenLabs update succeeded)
     if influencer and auto_commit:
         await db.commit()
     
@@ -1364,10 +1356,6 @@ async def get_call_details(
     user_id: int = Query(..., description="Numeric user id for authz"),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Return stored call details (duration + transcript) for a conversation.
-    Falls back to ElevenLabs snapshot if not stored yet.
-    """
     call = await db.get(CallRecord, conversation_id)
     if not call:
         raise HTTPException(404, "Call not found")
