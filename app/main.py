@@ -34,6 +34,7 @@ origins_str = os.getenv("CORS_ORIGINS", "")
 origins = [origin.strip() for origin in origins_str.split(",") if origin.strip()]
 
 app = FastAPI()
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins if origins else ["*"],  # fallback to * if not set
