@@ -46,5 +46,8 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+    LANDING_PAGE_AGENT_ID: str
+    BUCKET_NAME: str
+    INFLUENCER_PREFIX: str
 
 settings = Settings()

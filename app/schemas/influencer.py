@@ -9,6 +9,8 @@ class InfluencerBase(BaseModel):
     voice_prompt: Optional[str] = None
     influencer_agent_id_third_part: Optional[str] = None
     created_at: Optional[datetime] = None
+    native_language: Optional[str] = None
+    date_of_birth: Optional[datetime] = None
 
     @field_validator("created_at")
     @classmethod
@@ -25,6 +27,14 @@ class InfluencerUpdate(InfluencerBase):
 
 class InfluencerOut(InfluencerBase):
     id: str
+    profile_photo_key: Optional[str] = None
+    profile_video_key: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+class InfluencerDetail(InfluencerOut):
+    about: Optional[str] = None
+    photo_url: Optional[str] = None
+    video_url: Optional[str] = None
+
