@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, ConfigDict
-from typing import Optional
+from typing import Optional, Dict, Any
 from uuid import UUID
 
 class PreInfluencerRegisterRequest(BaseModel):
@@ -15,3 +15,12 @@ class PreInfluencerRegisterResponse(BaseModel):
     user_id: int
     email: EmailStr
     message: str
+
+class SurveyState(BaseModel):
+    pre_influencer_id: int
+    survey_answers: Dict[str, Any] | None = None
+    survey_step: int
+
+class SurveySaveRequest(BaseModel):
+    survey_answers: Dict[str, Any]
+    survey_step: int
