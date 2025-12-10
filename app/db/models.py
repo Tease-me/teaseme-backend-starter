@@ -219,6 +219,10 @@ class PreInfluencer(Base):
     username: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     password: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    
+    survey_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    survey_answers: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    survey_step: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     status: Mapped[str] = mapped_column(
         String, default="pending", nullable=False
@@ -234,3 +238,4 @@ class PreInfluencer(Base):
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+
