@@ -977,11 +977,11 @@ async def get_conversation_token(
     token = (resp.json() or {}).get("token")
     if not token:
         raise HTTPException(status_code=502, detail="Token not returned by ElevenLabs")
-    
+    chat_id = await get_or_create_chat(db, user_id, influencer_id)
     credits_remainder_secs = await get_remaining_units(db, user_id, feature="live_chat")
-    greeting: Optional[str] = "first_message"
-    if not greeting:
-        greeting = await _generate_contextual_greeting(db, chat_id, influencer_id)
+
+    greeting: Optional[str] = await _generate_contextual_greeting(db, chat_id, influencer_id)
+    
     if not greeting:
         greeting = _pick_greeting(influencer_id, "random")
 
