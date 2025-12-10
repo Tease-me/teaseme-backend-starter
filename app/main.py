@@ -1,4 +1,5 @@
 import logging
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,21 +29,14 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s"
 )
 
-origins = [
-    "https://localhost:3000",  # frontend dev
-    "https://192.168.68.72:4174",  # frontend dev
-    "https://192.168.68.61:3000",  # frontend dev
-    "https://localhost:4174",
-    "https://teaseme.mxjprod.work",
-    "https://api.teaseme.live",
-    "https://teaseme.live",
-]
+# Load CORS origins from environment variable
+origins_str = os.getenv("CORS_ORIGINS", "")
+origins = [origin.strip() for origin in origins_str.split(",") if origin.strip()]
 
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    #allow_origins=origins,  # tighten for prod
+    allow_origins=origins if origins else ["*"],  # fallback to * if not set
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

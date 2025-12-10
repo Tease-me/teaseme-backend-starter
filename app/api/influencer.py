@@ -1,10 +1,9 @@
+import io
 import logging
 from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-import io
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -13,14 +12,23 @@ from app.core.config import settings
 from app.db.models import Influencer
 from app.db.session import get_db
 from app.schemas.elevenlabs import UpdatePromptBody
-from app.schemas.influencer import InfluencerCreate, InfluencerOut, InfluencerUpdate
-from app.utils.s3 import save_influencer_audio_to_s3, get_influencer_audio_download_url,list_influencer_audio_keys, generate_presigned_url,save_influencer_photo_to_s3,get_influencer_profile_from_s3,save_influencer_video_to_s3,save_influencer_profile_to_s3,generate_influencer_presigned_url
-
-from app.core.config import settings
+from app.schemas.influencer import InfluencerCreate, InfluencerOut, InfluencerUpdate, InfluencerDetail
+from app.utils.s3 import (
+    generate_influencer_presigned_url,
+    generate_presigned_url,
+    get_influencer_audio_download_url,
+    get_influencer_profile_from_s3,
+    list_influencer_audio_keys,
+    save_influencer_audio_to_s3,
+    save_influencer_photo_to_s3,
+    save_influencer_profile_to_s3,
+    save_influencer_video_to_s3,
+)
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/influencer", tags=["influencer"])
+
 
 async def _sync_influencer_integrations(
     *,
@@ -53,6 +61,8 @@ async def _sync_influencer_integrations(
             "Skipped ElevenLabs sync for influencer %s (missing voice_id and agent id; no default voice configured).",
             getattr(influencer, "id", None),
         )
+
+
 def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
     if not value:
         return None
@@ -60,17 +70,32 @@ def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
         return datetime.fromisoformat(value)
     except Exception:
         return None
+
+
 @router.get("", response_model=List[InfluencerOut])
 async def list_influencers(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Influencer))
     return result.scalars().all()
 
-@router.get("/{id}", response_model=InfluencerOut)
+@router.get("/{id}", response_model=InfluencerDetail)
 async def get_influencer(id: str, db: AsyncSession = Depends(get_db)):
     influencer = await db.get(Influencer, id)
     if not influencer:
         raise HTTPException(404, "Influencer not found")
-    return influencer
+    
+    profile_json = await get_influencer_profile_from_s3(id)
+    photo_url = generate_influencer_presigned_url(influencer.profile_photo_key) if influencer.profile_photo_key else None
+    video_url = generate_influencer_presigned_url(influencer.profile_video_key) if influencer.profile_video_key else None
+    
+    about_text = profile_json.get("about") if isinstance(profile_json, dict) else None
+
+    # Use model_validate to create base object from SQLAlchemy model, then update extra fields
+    detail = InfluencerDetail.model_validate(influencer)
+    detail.about = about_text
+    detail.photo_url = photo_url
+    detail.video_url = video_url
+    
+    return detail
 
 @router.post("", response_model=InfluencerOut, status_code=201)
 async def create_influencer(data: InfluencerCreate, db: AsyncSession = Depends(get_db)):
@@ -196,31 +221,6 @@ async def update_influencer_profile(
     }
 
 
-@router.get("/{influencer_id}/profile")
-async def get_influencer_profile(
-    influencer_id: str,
-    db: AsyncSession = Depends(get_db),
-):
-    influencer = await db.get(Influencer, influencer_id)
-    if not influencer:
-        raise HTTPException(status_code=404, detail="Influencer not found")
-
-    profile_json = await get_influencer_profile_from_s3(influencer_id)
-    photo_url = generate_influencer_presigned_url(influencer.profile_photo_key) if influencer.profile_photo_key else None
-    video_url = generate_influencer_presigned_url(influencer.profile_video_key) if influencer.profile_video_key else None
-
-    return {
-        "profile_photo_key": influencer.profile_photo_key,
-        "profile_video_key": influencer.profile_video_key,
-        "native_language": influencer.native_language,
-        "date_of_birth": influencer.date_of_birth.isoformat() if influencer.date_of_birth else None,
-        "about": profile_json.get("about") if isinstance(profile_json, dict) else None,
-        "photo_url": photo_url,
-        "video_url": video_url,
-    }
-
-
-
 @router.post("/influencer-audio/{influencer_id}")
 async def upload_influencer_audio(
     influencer_id: str,
@@ -240,10 +240,6 @@ async def upload_influencer_audio(
 
     url = get_influencer_audio_download_url(key)
     return {"key": key, "url": url}
-
-
-
-
 
 
 @router.get("/influencer-audio/{influencer_id}")
