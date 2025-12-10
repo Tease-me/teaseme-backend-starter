@@ -901,7 +901,6 @@ async def get_signed_url(
     user_id: int = Query(..., description="Numeric user id"),
     db: AsyncSession = Depends(get_db),
     first_message: Optional[str] = Query(None),
-    # "random" or "rr" (round-robin). Use pattern instead of deprecated regex.
     greeting_mode: str = Query("random", pattern="^(random|rr)$"),
 ):
     ok, cost_cents, free_left = await can_afford(
@@ -945,6 +944,7 @@ async def get_signed_url(
 @router.get("/conversation-token")
 async def get_conversation_token(
     influencer_id: str,
+    user_id: int = Query(..., description="Numeric user id"),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -977,8 +977,20 @@ async def get_conversation_token(
     token = (resp.json() or {}).get("token")
     if not token:
         raise HTTPException(status_code=502, detail="Token not returned by ElevenLabs")
+    
+    credits_remainder_secs = await get_remaining_units(db, user_id, feature="live_chat")
+    greeting: Optional[str] = "first_message"
+    if not greeting:
+        greeting = await _generate_contextual_greeting(db, chat_id, influencer_id)
+    if not greeting:
+        greeting = _pick_greeting(influencer_id, "random")
 
-    return {"token": token, "agent_id": agent_id}
+    return {
+        "token": token, 
+        "agent_id": agent_id, 
+        "credits_remainder_secs": credits_remainder_secs, 
+        "greeting_used": greeting
+        }
 
 @router.get("/signed-url-free")
 async def get_signed_url_free(
