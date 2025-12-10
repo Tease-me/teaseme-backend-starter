@@ -1,5 +1,5 @@
 from sqlalchemy.orm import DeclarativeBase, mapped_column, Mapped, relationship
-from sqlalchemy import Integer, String, Boolean, Text, ForeignKey, DateTime, JSON, Index
+from sqlalchemy import Integer, String, Boolean, Text, ForeignKey, DateTime, JSON, Index, Float
 from typing import Optional, List
 
 from datetime import datetime, timezone
@@ -82,6 +82,7 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     embedding: Mapped[list[float]] = mapped_column(Vector(1536), nullable=True)
     chat = relationship("Chat", back_populates="messages")
+    conversation_id: Mapped[str | None] = mapped_column(ForeignKey("calls.conversation_id"), nullable=True)
 
 class Memory(Base):
     __tablename__ = "memories"
@@ -150,7 +151,7 @@ class CallRecord(Base):
     )
     sid: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="pending")
-    call_duration_secs: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    call_duration_secs: Mapped[float | None] = mapped_column(Float, nullable=True)
     transcript: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
