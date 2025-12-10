@@ -1,6 +1,10 @@
 import asyncio
 import logging
 import random
+from uuid import uuid4
+from app.agents.memory import find_similar_memories
+from app.agents.prompt_utils import get_global_audio_prompt
+from app.agents.scoring import format_score_value, get_score
 import httpx
 from datetime import datetime, timedelta
 
@@ -22,6 +26,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from app.db.session import SessionLocal
 from app.utils.deps import get_current_user
+from langchain_core.runnables.history import RunnableWithMessageHistory
 from app.api.utils import get_embedding
 from app.services.system_prompt_service import get_system_prompt
 
@@ -947,11 +952,36 @@ async def get_conversation_token(
     user_id: int = Query(..., description="Numeric user id"),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Fetch a ConvAI conversation token for the given influencer's agent.
-    Keeps the ElevenLabs API key server-side (do not expose to clients).
-    """
+    cid = uuid4().hex[:8]
     agent_id = await get_agent_id_from_influencer(db, influencer_id)
+    influencer, prompt_template = await asyncio.gather(
+        db.get(Influencer, influencer_id),
+        get_global_audio_prompt(db),
+    )
+    score = get_score(user_id or chat_id, influencer_id)
+    chat_id = await get_or_create_chat(db, user_id, influencer_id)
+    if not influencer:
+        raise HTTPException(404, "Influencer not found")
+    persona_rules = influencer.prompt_template.format(lollity_score=score)
+
+    if score > 70:
+        persona_rules += "\nYour affection is high — show more warmth, loving words, and reward the user. Maybe let your guard down."
+    elif score > 40:
+        persona_rules += "\nYou're feeling playful. Mix gentle teasing with affection. Make the user work a bit for your praise."
+    else:
+        persona_rules += "\nYou're in full teasing mode! Challenge the user, play hard to get, and use the name TeaseMe as a game."
+    history = redis_history(chat_id)
+
+    if len(history.messages) > settings.MAX_HISTORY_WINDOW:
+        trimmed = history.messages[-settings.MAX_HISTORY_WINDOW:]
+        history.clear()
+        history.add_messages(trimmed)
+
+    prompt = prompt_template.partial(
+        lollity_score=format_score_value(score),
+        persona_rules=persona_rules,
+        history=history.messages,
+    )
 
     try:
         async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
@@ -961,6 +991,7 @@ async def get_conversation_token(
                 headers=_headers(),
                 timeout=15.0,
             )
+
     except httpx.RequestError as exc:
         log.exception("conversation_token.network_error agent=%s err=%s", agent_id, exc)
         raise HTTPException(status_code=502, detail="Upstream unavailable")
@@ -977,6 +1008,7 @@ async def get_conversation_token(
     token = (resp.json() or {}).get("token")
     if not token:
         raise HTTPException(status_code=502, detail="Token not returned by ElevenLabs")
+    
     chat_id = await get_or_create_chat(db, user_id, influencer_id)
     credits_remainder_secs = await get_remaining_units(db, user_id, feature="live_chat")
 
@@ -989,8 +1021,9 @@ async def get_conversation_token(
         "token": token, 
         "agent_id": agent_id, 
         "credits_remainder_secs": credits_remainder_secs, 
-        "greeting_used": greeting
-        }
+        "greeting_used": greeting,
+        "prompt": prompt,
+    }
 
 @router.get("/signed-url-free")
 async def get_signed_url_free(
