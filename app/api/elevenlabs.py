@@ -1148,7 +1148,7 @@ async def get_conversation_token(
         "agent_id": agent_id, 
         "credits_remainder_secs": credits_remainder_secs, 
         "greeting_used": greeting,
-        "prompt": prompt.format(input="message", history=history.messages),
+        "prompt": prompt.format(input="", history=history.messages),
         "native_language": influencer.native_language if influencer else "en",
     }
 
