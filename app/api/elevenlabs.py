@@ -261,10 +261,8 @@ def _extract_last_message(db_messages: List[Message], transcript: Optional[str])
 
 
 async def _get_contextual_first_message_prompt(db: AsyncSession) -> ChatPromptTemplate:
-    """Fetch the CONTEXTUAL_FIRST_MESSAGE prompt from DB or use default."""
     system_prompt = await get_system_prompt(db, "CONTEXTUAL_FIRST_MESSAGE")
     if not system_prompt:
-        # Fallback to a simpler default
         system_prompt = (
             "You are {influencer_name}, an affectionate companion. "
             "Generate a warm, natural greeting for a call. Gap category: {gap_category}. "
@@ -394,6 +392,7 @@ async def _generate_contextual_greeting(
         ) | GREETING_GENERATOR
         
         llm_response = await chain.ainvoke({})
+        print(llm_response)
         greeting = _add_natural_pause((llm_response.content or "").strip())
         
         # Clean up quotes if LLM wrapped the response
