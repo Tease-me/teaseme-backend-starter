@@ -1,5 +1,5 @@
 from sqlalchemy.orm import DeclarativeBase, mapped_column, Mapped, relationship
-from sqlalchemy import Integer, String, Boolean, Text, ForeignKey, DateTime, JSON, Index
+from sqlalchemy import Integer, String, Boolean, Text, ForeignKey, DateTime, JSON, Index, Float
 from typing import Optional, List
 
 from datetime import datetime, timezone
@@ -27,11 +27,16 @@ class Influencer(Base):
     native_language: Mapped[str | None] = mapped_column(String, nullable=True)
     date_of_birth: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     daily_scripts:  Mapped[List[str] | None] = mapped_column(JSON, nullable=True)
-    influencer_agent_id_third_part: Mapped[str | None] = mapped_column(String, nullable=True)  
-    created_at:     Mapped[datetime]     = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     influencer_agent_id_third_part: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at:     Mapped[datetime]     = mapped_column(DateTime, default=datetime.utcnow)
+    created_at:     Mapped[datetime]     = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
     chats:          Mapped[List["Chat"]] = relationship(back_populates="influencer")
+    followers:      Mapped[List["InfluencerFollower"]] = relationship(
+        back_populates="influencer",
+        cascade="all, delete-orphan",
+    )
 
 class User(Base):
     __tablename__ = "users"
@@ -48,7 +53,11 @@ class User(Base):
     password_reset_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     chats = relationship("Chat", back_populates="user")
-
+    following_influencers: Mapped[List["InfluencerFollower"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    
 class Chat(Base):
     __tablename__ = "chats"
 
@@ -73,6 +82,7 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     embedding: Mapped[list[float]] = mapped_column(Vector(1536), nullable=True)
     chat = relationship("Chat", back_populates="messages")
+    conversation_id: Mapped[str | None] = mapped_column(ForeignKey("calls.conversation_id"), nullable=True)
 
 class Memory(Base):
     __tablename__ = "memories"
@@ -141,7 +151,7 @@ class CallRecord(Base):
     )
     sid: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="pending")
-    call_duration_secs: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    call_duration_secs: Mapped[float | None] = mapped_column(Float, nullable=True)
     transcript: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
@@ -149,6 +159,30 @@ class CallRecord(Base):
         Index("idx_calls_user_created", "user_id", "created_at"),
     )
     
+
+class InfluencerFollower(Base):
+    """Join table capturing a follow between a user and an influencer."""
+    __tablename__ = "influencer_followers"
+
+    influencer_id: Mapped[str] = mapped_column(
+        ForeignKey("influencers.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    influencer: Mapped["Influencer"] = relationship(back_populates="followers")
+    user: Mapped["User"] = relationship(back_populates="following_influencers")
+
+    __table_args__ = (
+        Index("ix_influencer_followers_user_id", "user_id"),
+    )
 
 class InfluencerKnowledgeFile(Base):
     """Metadata for uploaded knowledge files (PDF, Word, etc.)"""

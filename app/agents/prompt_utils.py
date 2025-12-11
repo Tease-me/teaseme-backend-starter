@@ -141,6 +141,10 @@ async def get_global_audio_prompt(
             ),
             ("system", system_prompt),
             ("system", "{persona_rules}"),
+            ("system", 
+             "This is your voice Prompt, use this to for the conversation:" 
+             "{voice_rules}"
+            ),
             (
                 "system",
                 "Today’s inspiration for you (use ONLY if it fits the current conversation, otherwise ignore): {daily_context}"

@@ -1,4 +1,5 @@
 import logging
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +15,7 @@ from app.api.webhooks import router as webhooks_router
 
 from app.api.persona_import import router as persona_import_router
 from app.api.influencer_knowledge import router as influencer_knowledge_router
+from app.api.follow import router as follow_router
 from app.api.pre_influencers import router as pre_influencers_router
 
 from app.api import system_prompts as system_prompts_router
@@ -27,25 +29,15 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s"
 )
 
-origins = [
-    "https://localhost:3000",  # frontend dev
-    "http://localhost:3000",  # frontend dev (non-TLS)
-    "http://localhost:4174",
-    "https://192.168.68.72:4174",  # frontend dev
-    "https://192.168.68.61:3000",  # frontend dev
-    "https://localhost:4174",
-    "http://192.168.68.72:4174",
-    "http://192.168.68.61:3000",
-    "https://teaseme.mxjprod.work",
-    "https://api.teaseme.live",
-    "https://teaseme.live",
-]
+# Load CORS origins from environment variable
+origins_str = os.getenv("CORS_ORIGINS", "")
+origins = [origin.strip() for origin in origins_str.split(",") if origin.strip()]
 
 app = FastAPI()
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    #allow_origins=origins,  # tighten for prod
+    allow_origins=origins if origins else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -58,6 +50,7 @@ app.include_router(notify_ws_router)
 app.include_router(billing.router)
 app.include_router(influencer_router)
 app.include_router(elevenlabs_router)
+app.include_router(follow_router)
 app.include_router(health_router.router)
 app.include_router(persona_import_router)
 app.include_router(webhooks_router)

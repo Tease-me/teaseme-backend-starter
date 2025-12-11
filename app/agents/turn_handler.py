@@ -21,10 +21,8 @@ def redis_history(chat_id: str, influencer_id: str | None = None):
 def _norm(m):
     if m is None:
         return ""
-    # Already a string
     if isinstance(m, str):
         return m.strip()
-    # List or tuple → flatten and join
     if isinstance(m, (list, tuple)):
         parts = []
         for x in m:
@@ -33,13 +31,11 @@ def _norm(m):
             else:
                 parts.append(str(x).strip())
         return " ".join(part for part in parts if part)
-    # Dict → try common content fields
     if isinstance(m, dict):
         for key in ("content", "text", "message", "snippet", "summary"):
             if key in m and isinstance(m[key], str):
                 return m[key].strip()
         return str(m).strip()
-    # Anything else
     return str(m).strip()
 
 
@@ -49,10 +45,6 @@ async def extract_and_store_facts_for_turn(
     chat_id: str,
     cid: str,
 ) -> None:
-    """
-    Runs the fact extraction flow and stores new facts in the DB.
-    Intended to be called from handle_turn (sync or background).
-    """
     async with SessionLocal() as db:
         try:
             fact_prompt = await get_fact_prompt(db)
@@ -134,45 +126,6 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     except Exception:
         persona_rules = influencer.prompt_template.replace("{lollity_score}", str(int(composite)))
 
-    # Time/Decay Context
-    # If the score decayed since last time, let the AI know so it can react (e.g. "Where were you?")
-    decay_info = score.get("_last_decay", {})
-    hours_passed = score.get("_hours_since_last_interaction", 0.0)
-    
-    decay_context = ""
-    # We trigger the "Time Context" if significant time passed (> 6 hours) OR if there was decay
-    if hours_passed > 6.0 or decay_info:
-        # Format time string
-        if hours_passed < 24:
-            time_str = f"{int(hours_passed)} hours"
-        else:
-            days = int(hours_passed / 24)
-            time_str = f"{days} days"
-            
-        # e.g. {"passion": -5.0, "intimacy": -1.0}
-        details = []
-        if "passion" in decay_info:
-            details.append(f"Passion cooled by {abs(decay_info['passion']):.1f}")
-        if "intimacy" in decay_info:
-            details.append(f"Intimacy faded by {abs(decay_info['intimacy']):.1f}")
-            
-        decay_msg = ", ".join(details)
-        if decay_msg:
-            decay_msg = f" ({decay_msg})"
-            
-        decay_context = (
-            f"\nIMPORTANT CONTEXT: It has been {time_str} since you last spoke{decay_msg}. "
-            f"You feel a bit distant or neglected. Address this naturally in your tone."
-        )
-            
-    # Hints Logic
-    score_rule = get_relationship_status_block(score)
-    if decay_context:
-        score_rule += decay_context
-        
-    persona_rules += "\n" + score_rule
-
-    # Get memories
     memories_result = await find_similar_memories(db, chat_id, message) if (db and user_id) else []
     if isinstance(memories_result, tuple):
         memories = memories_result[0]
