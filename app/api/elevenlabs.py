@@ -1081,6 +1081,7 @@ async def get_conversation_token(
     if not influencer:
         raise HTTPException(404, "Influencer not found")
     persona_rules = influencer.prompt_template.format(lollity_score=score)
+    speaking_rules = influencer.voice_prompt.format()
 
     if score > 70:
         persona_rules += "\nYour affection is high — show more warmth, loving words, and reward the user. Maybe let your guard down."
@@ -1101,6 +1102,7 @@ async def get_conversation_token(
         daily_context="",
         last_user_message="",
         memories= "",
+        voice_rules=speaking_rules,
         lollity_score=format_score_value(score),
         persona_rules=persona_rules,
         history=history.messages,
