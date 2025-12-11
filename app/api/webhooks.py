@@ -224,7 +224,7 @@ async def eleven_webhook_get_memories(
     try:
         payload = await req.json()
     except Exception:
-        return {"text": "Sorry, I didn’t catch that. Could you repeat?"}
+        return {"memories": []}
 
     try:
         log.info("[EL TOOL] payload(head)=%s", str(payload)[:800])
@@ -241,12 +241,12 @@ async def eleven_webhook_get_memories(
     )
     user_text = str(raw_text).strip()
     if not user_text:
-        return {"text": "I didn’t catch that. Could you repeat?"}
+        return {"memories": []}
 
     conversation_id = payload.get("conversation_id")
     if not conversation_id:
         log.warning("[EL TOOL] missing conversation_id in payload=%s", str(payload)[:300])
-        return {"text": "I’m missing the call ID. Please try again."}
+        return {"memories": []}
 
     # 4) Look up CallRecord – must exist (set by /elevenlabs/conversations/{conversation_id}/register)
     try:
@@ -256,15 +256,12 @@ async def eleven_webhook_get_memories(
         call = res.scalar_one_or_none()
     except Exception as e:
         log.exception("[EL TOOL] CallRecord lookup failed: %s", e)
-        return {"text": "I had an internal issue looking up this call. Please try again."}
+        return {"memories": "I had an internal issue looking up this call. Please try again."}
 
     if not call:
         log.warning("[EL TOOL] No CallRecord found for conv=%s", conversation_id)
         return {
-            "text": (
-                "I lost track of this call on my side. "
-                "Please hang up and start a new one."
-            )
+            "memories": []
         }
 
     user_id = call.user_id
@@ -278,10 +275,7 @@ async def eleven_webhook_get_memories(
             conversation_id, user_id, influencer_id, chat_id
         )
         return {
-            "text": (
-                "I’m having trouble with this call’s context. "
-                "Let’s start fresh next time, okay?"
-            )
+            "memories": []
         }
 
     # 6) Ensure Chat exists
@@ -298,16 +292,13 @@ async def eleven_webhook_get_memories(
             conversation_id, chat_id, user_id, influencer_id
         )
         return {
-            "text": (
-                "I can’t find our previous messages right now. "
-                "Let’s start again next time?"
-            )
+            "memories": []
         }
 
     # 7) Generate reply via handle_turn
     started = time.perf_counter()
     try:
-        reply = await asyncio.wait_for(
+        memories = await asyncio.wait_for(
             find_similar_memories(
                 message=user_text,
                 chat_id=chat_id,
@@ -317,10 +308,10 @@ async def eleven_webhook_get_memories(
             timeout=8.5,
         )
     except asyncio.TimeoutError:
-        reply = "One sec… could you say that again?"
+        memories = []
     except Exception as e:
         log.exception("[EL TOOL] handle_turn failed: %s", e)
-        reply = "Sorry, something went wrong."
+        memories = []
     finally:
         ms = int((time.perf_counter() - started) * 1000)
         log.info(
@@ -328,11 +319,7 @@ async def eleven_webhook_get_memories(
             ms, conversation_id, user_id, influencer_id, chat_id
         )
 
-    # 8) Trim for TTS
-    if isinstance(reply, str) and len(reply) > 320:
-        reply = reply[:317] + "…"
-
-    return {"text": reply}
+    return {"memories": memories}
 
 @router.post("/reply")
 async def eleven_webhook_reply(
