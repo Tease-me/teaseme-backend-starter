@@ -256,6 +256,9 @@ class PreInfluencer(Base):
     survey_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     survey_answers: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     survey_step: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    
+    ig_user_id: Mapped[str] = mapped_column(String, nullable=True)
+    ig_access_token: Mapped[str] = mapped_column(String, nullable=True)
 
     status: Mapped[str] = mapped_column(
         String, default="pending", nullable=False

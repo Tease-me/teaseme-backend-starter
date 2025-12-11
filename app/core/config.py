@@ -50,4 +50,8 @@ class Settings(BaseSettings):
     BUCKET_NAME: str
     INFLUENCER_PREFIX: str
 
+    META_APP_ID: str
+    META_APP_SECRET: str
+    INSTAGRAM_REDIRECT_URI: str
+
 settings = Settings()
