@@ -7,7 +7,7 @@ from app.agents.memory import find_similar_memories
 from app.agents.prompt_utils import get_global_audio_prompt
 from app.agents.scoring import format_score_value, get_score
 import httpx
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -332,12 +332,15 @@ async def _generate_contextual_greeting(
             # Update last_interaction from call if more recent
             if last_call and last_call.created_at:
                 call_time = last_call.created_at
-                # Handle timezone-aware vs naive datetimes
-                if call_time.tzinfo is not None:
-                    from datetime import timezone
-                    now = datetime.now(timezone.utc)
-                else:
-                    now = datetime.utcnow()
+                
+                # Ensure call_time is aware (it should be, but just in case)
+                if call_time.tzinfo is None:
+                    call_time = call_time.replace(tzinfo=timezone.utc)
+                
+                # Ensure last_interaction is aware if it exists
+                if last_interaction:
+                    if last_interaction.tzinfo is None:
+                        last_interaction = last_interaction.replace(tzinfo=timezone.utc)
                 
                 if last_interaction is None:
                     last_interaction = call_time
