@@ -6,7 +6,7 @@ from app.services.system_prompt_service import get_system_prompt
 MODEL = ChatOpenAI(
     api_key=settings.OPENAI_API_KEY,
     model_name="gpt-5-nano",
-    temperature=0.8,
+    temperature=1,
     max_tokens=512,
 )
 
