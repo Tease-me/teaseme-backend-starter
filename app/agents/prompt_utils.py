@@ -119,9 +119,6 @@ async def get_global_prompt(
 async def get_global_audio_prompt(
     db: AsyncSession,
 ) -> ChatPromptTemplate:
-    """
-    Version dynamically built from DB BASE_AUDIO_SYSTEM.
-    """
     system_prompt = await get_base_audio_system(db)
 
     return ChatPromptTemplate.from_messages(
@@ -133,10 +130,6 @@ async def get_global_audio_prompt(
             ),
             ("system", system_prompt),
             ("system", "{persona_rules}"),
-            ("system", 
-             "This is your voice Prompt, use this to for the conversation:" 
-             "{voice_rules}"
-            ),
             (
                 "system",
                 "Today’s inspiration for you (use ONLY if it fits the current conversation, otherwise ignore): {daily_context}"
