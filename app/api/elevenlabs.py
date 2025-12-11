@@ -362,7 +362,6 @@ async def _generate_contextual_greeting(
     if last_interaction:
         # Handle timezone-aware vs naive datetimes
         if last_interaction.tzinfo is not None:
-            from datetime import timezone
             now = datetime.now(timezone.utc)
         else:
             now = datetime.utcnow()
