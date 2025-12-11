@@ -1145,6 +1145,7 @@ async def get_conversation_token(
         "credits_remainder_secs": credits_remainder_secs, 
         "greeting_used": greeting,
         "prompt": prompt.format(input="message", history=history.messages),
+        "native_language": influencer.native_language if influencer else "en",
     }
 
 @router.get("/signed-url-free")
