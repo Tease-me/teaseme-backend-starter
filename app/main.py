@@ -10,6 +10,7 @@ from app.api import billing
 
 from app.api.notify_ws import router as notify_ws_router
 from app.api.influencer import router as influencer_router
+from app.api.user import router as user_router
 from app.api.elevenlabs import router as elevenlabs_router
 from app.api.webhooks import router as webhooks_router
 
@@ -49,6 +50,7 @@ app.include_router(push_router)
 app.include_router(notify_ws_router)
 app.include_router(billing.router)
 app.include_router(influencer_router)
+app.include_router(user_router)
 app.include_router(elevenlabs_router)
 app.include_router(follow_router)
 app.include_router(health_router.router)
