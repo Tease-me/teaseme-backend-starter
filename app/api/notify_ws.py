@@ -16,6 +16,18 @@ async def notify_email_verified(email: str):
         except Exception:
             notification_sockets.pop(email, None)
 
+async def notify_low_balance(email: str, balance_cents: int):
+    ws = notification_sockets.get(email)
+    if ws:
+        try:
+            await ws.send_json({
+                "type": "low_balance",
+                "balance_cents": balance_cents,
+                "msg": "Balance is low. Top up to continue chatting."
+            })
+        except Exception:
+            notification_sockets.pop(email, None)
+
 @router.websocket("/ws/notifications")
 async def websocket_notifications(ws: WebSocket):
     await ws.accept()
