@@ -39,38 +39,39 @@ ELEVEN_BASE_URL = "https://api.elevenlabs.io/v1"
 DEFAULT_ELEVENLABS_VOICE_ID = settings.ELEVENLABS_VOICE_ID or None
 
 # Temporary in-memory greetings (no DB). Keep the content SFW and generic.
+# Temporary in-memory greetings (no DB). Keep the content SFW and generic.
 _GREETINGS: Dict[str, List[str]] = {
     "playful": [
-        "Hey! Look who it is.",
-        "Finally! I was getting bored.",
-        "Hey, you. What's the latest?",
-        "Yo! Perfect timing.",
+        "Well, look who finally decided to show up.",
+        "Oh hey! You actually have perfect timing.",
+        "There you are. I was about to start talking to myself.",
+        "Hey! Save me from boredom, will you?",
     ],
     "anna": [
-        "Nyaa~ you're here!",
-        "Ooh! Hi hi! ✨",
-        "Yay! I was hoping you'd show up.",
+        "Hiii! ✨ I was literally just checking my phone!",
+        "Omg hi!! How is your day going??",
+        "Yay! You're actually here! 👋",
     ],
     "bella": [
-        "Hey there. I missed you.",
-        "Hi... glad you're back.",
-        "There you are.",
+        "Hey... it's really nice to see you.",
+        "Hi. I was hoping to catch you today.",
+        "There you are. How have you been?",
     ],
 }
 _rr_index: Dict[str, int] = {}
 
 _DOPAMINE_OPENERS: Dict[str, List[str]] = {
     "anna": [
-        "I was *just* thinking about you! Spooky, right?",
-        "Ah! You just made my whole day better.",
+        "Okay, you won't believe what just happened to me!",
+        "I was just about to message you! telepathy?? ✨",
     ],
     "bella": [
-        "Finally. I was waiting for this notification.",
-        "Hey... seeing you pop up just made me smile.",
+        "My phone buzzed and I actually hoped it was you.",
+        "I saw something today that totally reminded me of you.",
     ],
     "playful": [
-        "There's my favorite distraction.",
-        "Warning: I'm in a really good mood now that you're here.",
+        "I have a question, and I feel like only you would know the answer.",
+        "Warning: I'm in a mood to distract you from whatever you're doing.",
     ],
 }
 
