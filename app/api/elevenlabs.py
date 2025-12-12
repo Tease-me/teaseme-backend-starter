@@ -127,22 +127,6 @@ DEFAULT_GREETING_SYSTEM_PROMPT = (
     "Do not mention calling or reconnecting explicitly, and avoid robotic phrasing or obvious filler like 'uh' or 'um'."
 )
 
-async def _get_greeting_prompt(db: AsyncSession) -> ChatPromptTemplate:
-    system_prompt = await get_system_prompt(db, "ELEVENLABS_CALL_GREETING")
-    if not system_prompt:
-        system_prompt = DEFAULT_GREETING_SYSTEM_PROMPT
-    return ChatPromptTemplate.from_messages(
-        [
-            ("system", system_prompt),
-            (
-                "human",
-                "Recent conversation between you and the user:\n{transcript}\n\n"
-                "Respond with your next spoken greeting. Output only the greeting text."
-            ),
-        ]
-    )
-
-
 def _format_history(messages: List[Message]) -> str:
     lines: List[str] = []
     for msg in messages:
@@ -236,14 +220,10 @@ def _classify_call_ending(call: Optional[CallRecord]) -> str:
     """Classify how the last call ended based on duration and patterns."""
     if not call:
         return "normal"
-    
     duration = call.call_duration_secs or 0
-    
-    # Very short call suggests abrupt ending
     if duration < 30:
         return "abrupt"
-    # Long call suggests deep conversation
-    elif duration > 300:  # 5+ minutes
+    elif duration > 300:
         return "lengthy"
     else:
         return "normal"
@@ -276,6 +256,7 @@ async def _get_contextual_first_message_prompt(db: AsyncSession) -> ChatPromptTe
             "Generate a warm, natural greeting for a call. Gap category: {gap_category}. "
             "Last message: {last_message}. Keep it to 8-14 words with a natural pause."
         )
+    
     return ChatPromptTemplate.from_messages([
         ("system", system_prompt),
         ("human", "Generate the greeting now. Output only the greeting text."),
@@ -397,8 +378,16 @@ async def _generate_contextual_greeting(
             call_ending_type=call_ending_type,
             last_call_duration_secs=str(int(last_call_duration or 0)),
             last_message=last_message or "(no recent message)",
+            history=transcript or "(no recent history)",
         ) | GREETING_GENERATOR
-        
+
+        print("==== Contextual Greeting Prompt ====\n%s", prompt.format_prompt(  influencer_name=persona_name,
+            gap_category=gap_category,
+            gap_minutes=str(round(gap_minutes, 1)),
+            call_ending_type=call_ending_type,
+            last_call_duration_secs=str(int(last_call_duration or 0)),
+            last_message=last_message or "(no recent message)",
+            history=transcript or "(no recent history)",))
         llm_response = await chain.ainvoke({})
         print(llm_response)
         greeting = _add_natural_pause((llm_response.content or "").strip())
