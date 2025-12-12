@@ -10,7 +10,7 @@ from app.db.session import get_db
 router = APIRouter(prefix="/admin", tags=["admin"])
 log = logging.getLogger("admin")
 
-@router.delete("/chats/{chat_id}/history")
+@router.delete("/chats/history/{chat_id}")
 async def clear_chat_history_admin(
     chat_id: str,
     db: AsyncSession = Depends(get_db),
