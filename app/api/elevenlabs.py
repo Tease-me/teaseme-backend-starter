@@ -39,7 +39,6 @@ ELEVEN_BASE_URL = "https://api.elevenlabs.io/v1"
 DEFAULT_ELEVENLABS_VOICE_ID = settings.ELEVENLABS_VOICE_ID or None
 
 # Temporary in-memory greetings (no DB). Keep the content SFW and generic.
-# Temporary in-memory greetings (no DB). Keep the content SFW and generic.
 _GREETINGS: Dict[str, List[str]] = {
     "playful": [
         "Well, look who finally decided to show up.",
@@ -58,6 +57,7 @@ _GREETINGS: Dict[str, List[str]] = {
         "There you are. How have you been?",
     ],
 }
+
 _rr_index: Dict[str, int] = {}
 
 _DOPAMINE_OPENERS: Dict[str, List[str]] = {
@@ -74,6 +74,13 @@ _DOPAMINE_OPENERS: Dict[str, List[str]] = {
         "Warning: I'm in a mood to distract you from whatever you're doing.",
     ],
 }
+
+_RANDOM_FIRST_GREETINGS: List[str] = [
+    "Hello?",
+    "Hi?",
+    "Hello, this is {persona_name}. Who’s calling?",
+    "Hi, who am I speaking with?",
+]
 
 def _headers() -> Dict[str, str]:
     """Return ElevenLabs auth headers. Fail fast when misconfigured."""
@@ -371,15 +378,15 @@ async def _generate_contextual_greeting(
     last_call_duration = last_call.call_duration_secs if last_call else 0
     last_message = _extract_last_message(db_messages, transcript)
 
-    # If no history at all, use dopamine greeting
-    if not transcript and not last_message:
-        return _pick_dopamine_greeting(influencer_id)
-
     # Get influencer name
     influencer = await db.get(Influencer, influencer_id)
     persona_name = (
         influencer.display_name if influencer and influencer.display_name else influencer_id
     )
+
+    # If no history at all, use dopamine greeting
+    if not transcript and not last_message:
+        return _pick_random_first_greeting(persona_name)
 
     try:
         prompt = await _get_contextual_first_message_prompt(db)
@@ -419,6 +426,9 @@ def _pick_dopamine_greeting(influencer_id: str) -> Optional[str]:
         return None
     return _add_natural_pause(random.choice(options))
 
+def _pick_random_first_greeting(persona_name: str) -> str:
+    choice = random.choice(_RANDOM_FIRST_GREETINGS) if _RANDOM_FIRST_GREETINGS else None
+    return choice.format(persona_name=persona_name)
 
 async def get_agent_id_from_influencer(db: AsyncSession, influencer_id: str) -> str:
     """
