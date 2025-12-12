@@ -41,38 +41,46 @@ DEFAULT_ELEVENLABS_VOICE_ID = settings.ELEVENLABS_VOICE_ID or None
 # Temporary in-memory greetings (no DB). Keep the content SFW and generic.
 _GREETINGS: Dict[str, List[str]] = {
     "playful": [
-        "Hey! Look who it is.",
-        "Finally! I was getting bored.",
-        "Hey, you. What's the latest?",
-        "Yo! Perfect timing.",
+        "Well, look who finally decided to show up.",
+        "Oh hey! You actually have perfect timing.",
+        "There you are. I was about to start talking to myself.",
+        "Hey! Save me from boredom, will you?",
     ],
     "anna": [
-        "Nyaa~ you're here!",
-        "Ooh! Hi hi! ✨",
-        "Yay! I was hoping you'd show up.",
+        "Hiii! ✨ I was literally just checking my phone!",
+        "Omg hi!! How is your day going??",
+        "Yay! You're actually here! 👋",
     ],
     "bella": [
-        "Hey there. I missed you.",
-        "Hi... glad you're back.",
-        "There you are.",
+        "Hey... it's really nice to see you.",
+        "Hi. I was hoping to catch you today.",
+        "There you are. How have you been?",
     ],
 }
+
 _rr_index: Dict[str, int] = {}
 
 _DOPAMINE_OPENERS: Dict[str, List[str]] = {
     "anna": [
-        "I was *just* thinking about you! Spooky, right?",
-        "Ah! You just made my whole day better.",
+        "Okay, you won't believe what just happened to me!",
+        "I was just about to message you! telepathy?? ✨",
     ],
     "bella": [
-        "Finally. I was waiting for this notification.",
-        "Hey... seeing you pop up just made me smile.",
+        "My phone buzzed and I actually hoped it was you.",
+        "I saw something today that totally reminded me of you.",
     ],
     "playful": [
-        "There's my favorite distraction.",
-        "Warning: I'm in a really good mood now that you're here.",
+        "I have a question, and I feel like only you would know the answer.",
+        "Warning: I'm in a mood to distract you from whatever you're doing.",
     ],
 }
+
+_RANDOM_FIRST_GREETINGS: List[str] = [
+    "Hello?",
+    "Hi?",
+    "Hello, this is {persona_name}. Who’s calling?",
+    "Hi, who am I speaking with?",
+]
 
 def _headers() -> Dict[str, str]:
     """Return ElevenLabs auth headers. Fail fast when misconfigured."""
@@ -370,15 +378,15 @@ async def _generate_contextual_greeting(
     last_call_duration = last_call.call_duration_secs if last_call else 0
     last_message = _extract_last_message(db_messages, transcript)
 
-    # If no history at all, use dopamine greeting
-    if not transcript and not last_message:
-        return _pick_dopamine_greeting(influencer_id)
-
     # Get influencer name
     influencer = await db.get(Influencer, influencer_id)
     persona_name = (
         influencer.display_name if influencer and influencer.display_name else influencer_id
     )
+
+    # If no history at all, use dopamine greeting
+    if not transcript and not last_message:
+        return _pick_random_first_greeting(persona_name)
 
     try:
         prompt = await _get_contextual_first_message_prompt(db)
@@ -418,6 +426,9 @@ def _pick_dopamine_greeting(influencer_id: str) -> Optional[str]:
         return None
     return _add_natural_pause(random.choice(options))
 
+def _pick_random_first_greeting(persona_name: str) -> str:
+    choice = random.choice(_RANDOM_FIRST_GREETINGS) if _RANDOM_FIRST_GREETINGS else None
+    return choice.format(persona_name=persona_name)
 
 async def get_agent_id_from_influencer(db: AsyncSession, influencer_id: str) -> str:
     """
