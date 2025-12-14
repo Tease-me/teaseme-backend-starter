@@ -335,41 +335,6 @@ def _build_assistant_payload(
     return ""
 
 
-async def _analyze_conversation(
-    recent_ctx: str,
-    older_ctx: str,
-    user_message: str,
-    call_ctx: str | None,
-    lollity_score: int | float,
-) -> str:
-    """LLM snapshot to summarize intent/emotion and suggest channel with recency weighting."""
-    if not user_message:
-        return ""
-    recent_block = (recent_ctx or "").strip()
-    older_block = (older_ctx or "").strip()
-    call_block = (call_ctx or "").strip()
-    if call_block:
-        if recent_block:
-            recent_block = f"{recent_block}\n\n[recent_call]\n{call_block}"
-        else:
-            recent_block = f"[recent_call]\n{call_block}"
-    try:
-        resp = await CONVERSATION_ANALYZER.ainvoke(
-            CONVERSATION_ANALYZER_PROMPT.format(
-                recent=recent_block[-3000:],
-                older=older_block[-2000:],
-                message=user_message,
-                lollity_score=lollity_score,
-            )
-        )
-        content = getattr(resp, "content", "") or ""
-        if content.strip():
-            return f"[analysis]\n{content.strip()}\n[/analysis]"
-    except Exception as exc:  # pragma: no cover - defensive
-        log.warning("conversation_analysis.failed err=%s", exc)
-    return ""
-
-
 def _extract_channel_choice(analysis_block: str) -> Optional[str]:
     """
     Pull the suggested channel from the analysis JSON so we can hard-enforce call/voice when requested.
@@ -408,7 +373,6 @@ __all__ = [
     "MessageSignals",
     "_analyze_user_message",
     "_build_assistant_payload",
-    "_analyze_conversation",
     "_extract_channel_choice",
     "_coerce_channel_from_message",
     "_polish_reply",

@@ -12,6 +12,13 @@ from app.db.models import Influencer
 from fastapi import HTTPException
 from app.utils.tts_sanitizer import sanitize_tts_text
 
+from datetime import datetime, timezone
+from app.relationship.repo import get_or_create_relationship
+from app.relationship.inactivity import apply_inactivity_decay
+from app.relationship.signals import classify_signals
+from app.relationship.engine import Signals, update_relationship
+from app.relationship.dtr import plan_dtr_goal
+
 log = logging.getLogger("teaseme-turn")
 
 def redis_history(chat_id: str, influencer_id: str | None = None):
@@ -68,8 +75,6 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     
     log.info("[%s] START persona=%s chat=%s user=%s", cid, influencer_id, chat_id, user_id)
 
-    score = get_score(user_id or chat_id, influencer_id)
-
     history = redis_history(chat_id)
 
     if len(history.messages) > settings.MAX_HISTORY_WINDOW:
@@ -80,38 +85,101 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
     analysis_summary = "Intent: unknown\nMeaning: unknown\nEmotion: unknown\nUrgency/Risk: none noted"
 
-    # Parallelize independent DB/LLM queries
-    async def _run_analysis():
-        try:
-            analyzer_prompt = await get_convo_analyzer_prompt(db)
-            analyzer_kwargs = {"msg": message, "ctx": recent_ctx}
-            if "lollity_score" in analyzer_prompt.input_variables:
-                analyzer_kwargs["lollity_score"] = format_score_value(score)
-            analysis_resp = await CONVO_ANALYZER.ainvoke(analyzer_prompt.format(**analyzer_kwargs))
-            return analysis_resp.content.strip() if analysis_resp.content else analysis_summary
-        except Exception as ex:
-            log.error("[%s] Conversation analysis failed: %s", cid, ex, exc_info=True)
-            return analysis_summary
-
     # Gather all independent async operations
-    influencer, analysis_summary, prompt_template, daily_context = await asyncio.gather(
+    influencer, prompt_template, daily_context = await asyncio.gather(
         db.get(Influencer, influencer_id),
-        _run_analysis(),
         get_global_audio_prompt(db) if is_audio else get_global_prompt(db),
-        get_today_script(db, influencer_id),
+        get_today_script(db=db, influencer_id=influencer_id),
     )
     
     if not influencer:
         raise HTTPException(404, "Influencer not found")
-    persona_rules = influencer.prompt_template.format(lollity_score=score)
+    
+    if not user_id:
+        raise HTTPException(400, "user_id is required for relationship persistence")
+    
+    now = datetime.now(timezone.utc)
 
-    if score > 70:
-        persona_rules += "\nYour affection is high — show more warmth, loving words, and reward the user. Maybe let your guard down."
-    elif score > 40:
-        persona_rules += "\nYou're feeling playful. Mix gentle teasing with affection. Make the user work a bit for your praise."
-    else:
-        persona_rules += "\nYou're in full teasing mode! Challenge the user, play hard to get, and use the name TeaseMe as a game."
+    # 1) Load relationship row from DB
+    rel = await get_or_create_relationship(db, int(user_id), influencer_id)
 
+    # 2) Inactivity decay (if user disappeared for days)
+    days_idle = apply_inactivity_decay(rel, now)
+
+    # 3) Classify user message -> relationship signals
+    sig_dict = await classify_signals(message, recent_ctx, CONVO_ANALYZER)
+    sig = Signals(**sig_dict)
+
+    # 4) Update dimensions + state
+    out = update_relationship(
+        trust=rel.trust,
+        closeness=rel.closeness,
+        attraction=rel.attraction,
+        safety=rel.safety,
+        prev_state=rel.state,
+        sig=sig,
+    )
+
+    rel.trust = out.trust
+    rel.closeness = out.closeness
+    rel.attraction = out.attraction
+    rel.safety = out.safety
+    rel.state = out.state
+
+    # 5) Apply accepts from user
+    if sig.accepted_exclusive and rel.state in ("DATING", "GIRLFRIEND"):
+        rel.exclusive_agreed = True
+
+    if sig.accepted_girlfriend and out.can_ask_gf:
+        rel.girlfriend_confirmed = True
+        rel.exclusive_agreed = True
+        rel.state = "GIRLFRIEND"
+
+    # 6) Plan gradual DTR goal (no button)
+    dtr_goal = plan_dtr_goal(rel, out.can_ask_gf)
+
+    # 7) Update last interaction
+    rel.last_interaction_at = now
+    rel.updated_at = now
+
+    db.add(rel)
+    await db.commit()
+    await db.refresh(rel)
+
+    persona_rules = influencer.prompt_template.format(
+        relationship_state=rel.state,
+        trust=int(rel.trust),
+        closeness=int(rel.closeness),
+        attraction=int(rel.attraction),
+        safety=int(rel.safety),
+    )
+
+    persona_rules += f"""
+    RELATIONSHIP:
+    - phase: {rel.state}
+    - trust: {rel.trust:.0f}/100
+    - closeness: {rel.closeness:.0f}/100
+    - attraction: {rel.attraction:.0f}/100
+    - safety: {rel.safety:.0f}/100
+    - exclusive_agreed: {rel.exclusive_agreed}
+    - girlfriend_confirmed: {rel.girlfriend_confirmed}
+    - days_idle_before_message: {days_idle:.1f}
+    - dtr_goal: {dtr_goal}
+
+    DTR rules:
+    - hint_closer: subtle romantic closeness, 'we' language, no pressure.
+    - ask_exclusive: gently ask if user wants exclusivity (only us).
+    - ask_girlfriend: ask clearly (romantic) if you can be their girlfriend.
+    - If safety is low or user is upset: do NOT push DTR.
+
+    Behavior by phase:
+    - STRANGERS/TALKING: light, curious, build trust.
+    - FLIRTING: playful flirting, teasing, no pressure.
+    - DATING: affectionate, can discuss exclusivity.
+    - GIRLFRIEND: consistent girlfriend vibe, affectionate, supportive, 'we' language.
+    - STRAINED: boundaries first, reduce romance, repair needed.
+    """
+    
     memories_result = await find_similar_memories(db, chat_id, message) if (db and user_id) else []
     if isinstance(memories_result, tuple):
         memories = memories_result[0]
@@ -123,12 +191,22 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     )
 
     prompt = prompt_template.partial(
-        lollity_score=format_score_value(score),
         analysis=analysis_summary,
+
+        relationship_state=rel.state,
+        trust=int(rel.trust),
+        closeness=int(rel.closeness),
+        attraction=int(rel.attraction),
+        safety=int(rel.safety),
+        exclusive_agreed=rel.exclusive_agreed,
+        girlfriend_confirmed=rel.girlfriend_confirmed,
+        days_idle_before_message=round(days_idle, 1),
+        dtr_goal=dtr_goal,
+
         persona_rules=persona_rules,
         memories=mem_block,
         daily_context=daily_context,
-        last_user_message=message
+        last_user_message=message,
     )
 
     try:
@@ -150,9 +228,7 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     except Exception as e:
         log.error("[%s] LLM error: %s", cid, e, exc_info=True)
         return "Sorry, something went wrong. 😔"
-    
-    update_score(user_id or chat_id, influencer_id, extract_score(reply, score))
-    
+        
     # background task
     try:
         asyncio.create_task(

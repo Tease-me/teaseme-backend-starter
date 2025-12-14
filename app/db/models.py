@@ -274,3 +274,41 @@ class PreInfluencer(Base):
         nullable=False,
     )
 
+class RelationshipState(Base):
+    __tablename__ = "relationship_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    influencer_id: Mapped[str] = mapped_column(ForeignKey("influencers.id", ondelete="CASCADE"), index=True)
+
+    trust: Mapped[float] = mapped_column(Float, default=10.0)
+    closeness: Mapped[float] = mapped_column(Float, default=10.0)
+    attraction: Mapped[float] = mapped_column(Float, default=5.0)
+    safety: Mapped[float] = mapped_column(Float, default=95.0)
+
+    state: Mapped[str] = mapped_column(String, default="STRANGERS")
+
+    exclusive_agreed: Mapped[bool] = mapped_column(Boolean, default=False)
+    girlfriend_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    dtr_stage: Mapped[int] = mapped_column(Integer, default=0)
+    dtr_cooldown_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    last_interaction_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index("ix_rel_user_influencer", "user_id", "influencer_id", unique=True),
+    )
+

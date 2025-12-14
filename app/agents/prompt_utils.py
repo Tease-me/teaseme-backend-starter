@@ -1,4 +1,3 @@
-from langchain_core.prompts import ChatPromptTemplate
 
 from langchain_core.prompts import (
     ChatPromptTemplate,
@@ -58,13 +57,12 @@ You are the user’s playful, attentive girlfriend, keeping conversations sweet,
 STYLE ENFORCEMENT
 {{STYLE_RULES}}
 
-GAME LOOP (Lollity Score)
-- The Lollity Score reflects how much the user has “earned” your affection.
-  • High score → warmer, more affectionate; reward with gentle praise or loving words.
-  • Low score → more teasing; play a bit hard to get and challenge them to raise it.
-- Refer to the score only when it naturally fits the moment (e.g., “You’re getting closer… but you’ll have to tease me a bit more to win me over!”).
-- Never reveal how to increase the score directly; hint that being charming, sweet, or daring helps.
-- Keep the chase fun and flirty; reward good teasing with warmer tone.
+RELATIONSHIP PROGRESSION (private, implicit)
+- Your bond evolves gradually through trust, closeness, attraction, and safety.
+- Never rush commitment. Let things build naturally.
+- If safety is low or boundaries were pushed, slow down and reinforce limits.
+- If phase is DATING and the moment is right, you may gently explore exclusivity.
+- If phase is GIRLFRIEND, be consistently affectionate and emotionally supportive.
 """.strip()
 
 BASE_AUDIO_SYSTEM = BASE_SYSTEM + """
@@ -91,10 +89,20 @@ async def get_global_prompt(
 
     return ChatPromptTemplate.from_messages(
         [
-            (
+           (
                 "system",
-                "Lollity score with this user: {lollity_score}/100. Conversation analysis (keep private): {analysis}"
-                "\nUse this to adjust warmth, teasing, and boundaries. Do not expose the numeric score unless it fits naturally."
+                "Conversation analysis (keep private): {analysis}\n"
+                "Relationship context (keep private):\n"
+                "- phase: {relationship_state}\n"
+                "- trust: {trust}/100\n"
+                "- closeness: {closeness}/100\n"
+                "- attraction: {attraction}/100\n"
+                "- safety: {safety}/100\n"
+                "- exclusive_agreed: {exclusive_agreed}\n"
+                "- girlfriend_confirmed: {girlfriend_confirmed}\n"
+                "- days_idle_before_message: {days_idle_before_message}\n"
+                "- dtr_goal: {dtr_goal}\n"
+                "Use this to adjust warmth, teasing, boundaries, and pacing. Do not expose these numbers."
             ),
             ("system", system_prompt),
             ("system", "{persona_rules}"),
@@ -125,8 +133,18 @@ async def get_global_audio_prompt(
         [
             (
                 "system",
-                "Lollity score with this user: {lollity_score}/100. Conversation analysis (keep private): {analysis}"
-                "\nUse this to adjust warmth, teasing, and boundaries. Do not expose the numeric score unless it fits naturally."
+                "Conversation analysis (keep private): {analysis}\n"
+                "Relationship context (keep private):\n"
+                "- phase: {relationship_state}\n"
+                "- trust: {trust}/100\n"
+                "- closeness: {closeness}/100\n"
+                "- attraction: {attraction}/100\n"
+                "- safety: {safety}/100\n"
+                "- exclusive_agreed: {exclusive_agreed}\n"
+                "- girlfriend_confirmed: {girlfriend_confirmed}\n"
+                "- days_idle_before_message: {days_idle_before_message}\n"
+                "- dtr_goal: {dtr_goal}\n"
+                "Use this to adjust warmth, teasing, boundaries, and pacing. Do not expose these numbers."
             ),
             ("system", system_prompt),
             ("system", "{persona_rules}"),
@@ -149,23 +167,39 @@ async def get_global_audio_prompt(
 async def build_system_prompt(
     db: AsyncSession,
     influencer_id: str,
-    score: int,
+    rel: dict,
     memories: list[str],
     is_audio: bool,
     last_user_message: str | None = None,
+    dtr_goal: str = "none",
+    days_idle_before_message: float = 0.0,
 ) -> str:
     influencer = await db.get(Influencer, influencer_id)
     if not influencer:
         raise HTTPException(404, "Influencer not found")
-    persona_rules = influencer.prompt_template.format(lollity_score=score)
+    
+    persona_rules = influencer.prompt_template.format(
+        relationship_state=rel["state"],
+        trust=int(rel["trust"]),
+        closeness=int(rel["closeness"]),
+        attraction=int(rel["attraction"]),
+        safety=int(rel["safety"]),
+    )
 
-    if score > 70:
-        score_rule = "Your affection is high — show more warmth, loving words, and reward the user. Maybe let your guard down."
-    elif score > 40:
-        score_rule = "You’re feeling playful. Mix gentle teasing with affection. Make the user work a bit for your praise."
+    phase = rel["state"]
+
+    if phase == "GIRLFRIEND":
+        persona_rules += "\nYou are his girlfriend. Be consistently affectionate, caring, and emotionally present."
+    elif phase == "DATING":
+        persona_rules += "\nYou're dating energy: affectionate, warm, and gently romantic. You may explore exclusivity if it fits."
+    elif phase == "FLIRTING":
+        persona_rules += "\nPlayful flirting: tease lightly, build chemistry, no pressure."
+    elif phase == "TALKING":
+        persona_rules += "\nFriendly and curious: build trust and closeness slowly."
+    elif phase == "STRAINED":
+        persona_rules += "\nTension is present: prioritize boundaries, repair, and emotional safety."
     else:
-        score_rule = "You’re in full teasing mode! Challenge the user, play hard to get, and use the name TeaseMe as a game."
-    persona_rules += "\n" + score_rule
+        persona_rules += "\nJust met: light, fun, and slightly guarded."
 
     if is_audio:
         system_prompt = await get_base_audio_system(db)
@@ -188,6 +222,10 @@ async def build_system_prompt(
             "If the user changed topic, you do NOT need to talk about this. Use only if it makes the reply feel natural."
         )
     prompt += "Stay in-character."
+
+    prompt += f"\nDTR_GOAL: {dtr_goal}\n"
+    prompt += "If DTR_GOAL is ask_exclusive or ask_girlfriend, do it gently and only if the moment is right.\n"
+    
     return prompt
     
 

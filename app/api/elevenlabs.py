@@ -3,7 +3,6 @@ import logging
 import math
 import random
 from uuid import uuid4
-from app.agents.memory import find_similar_memories
 from app.agents.prompt_utils import get_global_audio_prompt
 from app.agents.scoring import format_score_value, get_score
 import httpx
@@ -26,8 +25,6 @@ from app.agents.turn_handler import redis_history
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from app.db.session import SessionLocal
-from app.utils.deps import get_current_user
-from langchain_core.runnables.history import RunnableWithMessageHistory
 from app.api.utils import get_embedding
 from app.services.system_prompt_service import get_system_prompt
 
