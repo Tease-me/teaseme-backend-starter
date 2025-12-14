@@ -119,9 +119,6 @@ async def get_global_prompt(
 async def get_global_audio_prompt(
     db: AsyncSession,
 ) -> ChatPromptTemplate:
-    """
-    Version dynamically built from DB BASE_AUDIO_SYSTEM.
-    """
     system_prompt = await get_base_audio_system(db)
 
     return ChatPromptTemplate.from_messages(

@@ -12,6 +12,7 @@ class MessageSchema(BaseModel):
     chat_id: str
     sender: str
     content: str
+    conversation_id: Optional[str] = None
     audio_url: Optional[str] = None
     created_at: datetime  
     channel: Optional[str] = None

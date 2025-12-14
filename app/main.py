@@ -1,4 +1,5 @@
 import logging
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,7 +15,9 @@ from app.api.webhooks import router as webhooks_router
 
 from app.api.persona_import import router as persona_import_router
 from app.api.influencer_knowledge import router as influencer_knowledge_router
+from app.api.follow import router as follow_router
 from app.api.pre_influencers import router as pre_influencers_router
+from app.api.admin import router as admin_router
 
 from app.api import system_prompts as system_prompts_router
 
@@ -27,16 +30,15 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s"
 )
 
-origins = [
-    "https://teaseme.live",
-    "https://www.teaseme.live",
-]
+# Load CORS origins from environment variable
+origins_str = os.getenv("CORS_ORIGINS", "")
+origins = [origin.strip() for origin in origins_str.split(",") if origin.strip()]
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=origins if origins else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -49,6 +51,7 @@ app.include_router(notify_ws_router)
 app.include_router(billing.router)
 app.include_router(influencer_router)
 app.include_router(elevenlabs_router)
+app.include_router(follow_router)
 app.include_router(health_router.router)
 app.include_router(persona_import_router)
 app.include_router(webhooks_router)
@@ -56,3 +59,4 @@ app.include_router(mcp_router)
 app.include_router(influencer_knowledge_router)
 app.include_router(system_prompts_router.router)
 app.include_router(pre_influencers_router)
+app.include_router(admin_router)

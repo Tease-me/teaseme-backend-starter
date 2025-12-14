@@ -2,9 +2,12 @@ import boto3
 import uuid
 import io
 import json
-from app.schemas.chat import MessageSchema
 import logging
+import botocore.exceptions
+
 from app.core.config import settings
+from app.schemas.chat import MessageSchema
+
 
 log = logging.getLogger("s3")
 
@@ -50,7 +53,8 @@ def message_to_schema_with_presigned(msg):
         content=msg.content,
         created_at=msg.created_at,
         audio_url=audio_url,
-        channel=msg.channel
+        channel=msg.channel,
+        conversation_id=msg.conversation_id,
     )
 
 # Save knowledge file to S3 and return the S3 key
@@ -72,11 +76,23 @@ async def delete_file_from_s3(key: str) -> None:
     """Delete a file from S3"""
     try:
         s3.delete_object(Bucket=settings.BUCKET_NAME, Key=key)
+    except botocore.exceptions.ClientError as e:
+        error = e.response.get("Error", {})
+        code = error.get("Code")
+        msg = error.get("Message")
+
+        # se for só arquivo que já não existe, tudo bem
+        if code == "NoSuchKey":
+            log.info(f"S3 key {key} not found when deleting, ignoring.")
+            return
+
+        # qualquer outro erro (AccessDenied, etc.) a gente loga forte e relança
+        log.error(f"Failed to delete S3 file {key}: {code} - {msg}")
+        raise
     except Exception as e:
-        # Log error but don't fail if file doesn't exist
-        import logging
-        log = logging.getLogger("s3")
-        log.warning(f"Failed to delete S3 file {key}: {e}")
+        # fallback pra erros inesperados
+        log.error(f"Unexpected error deleting S3 file {key}: {e}", exc_info=True)
+        raise
 
 async def save_influencer_audio_to_s3(file_obj, filename: str, content_type: str, influencer_id: str) -> str:
     ext = filename.split(".")[-1] if "." in filename else "webm"
