@@ -18,13 +18,13 @@ class InfluencerBase(BaseModel):
         if value is None or value.tzinfo is None:
             return value
         return value.astimezone(timezone.utc).replace(tzinfo=None)
-
+ 
 class InfluencerCreate(InfluencerBase):
     id: str 
 
 class InfluencerUpdate(InfluencerBase):
     pass
-
+ 
 class InfluencerOut(InfluencerBase):
     id: str
     profile_photo_key: Optional[str] = None

@@ -10,6 +10,7 @@ from app.api import billing
 
 from app.api.notify_ws import router as notify_ws_router
 from app.api.influencer import router as influencer_router
+from app.api.user import router as user_router
 from app.api.elevenlabs import router as elevenlabs_router
 from app.api.webhooks import router as webhooks_router
 
@@ -18,6 +19,7 @@ from app.api.influencer_knowledge import router as influencer_knowledge_router
 from app.api.follow import router as follow_router
 from app.api.pre_influencers import router as pre_influencers_router
 from app.api.social import router as social_router
+from app.api.admin import router as admin_router
 
 from app.api import system_prompts as system_prompts_router
 
@@ -35,9 +37,10 @@ origins_str = os.getenv("CORS_ORIGINS", "")
 origins = [origin.strip() for origin in origins_str.split(",") if origin.strip()]
 
 app = FastAPI()
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins if origins else ["*"],  # fallback to * if not set
+    allow_origins=origins if origins else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -49,6 +52,7 @@ app.include_router(push_router)
 app.include_router(notify_ws_router)
 app.include_router(billing.router)
 app.include_router(influencer_router)
+app.include_router(user_router)
 app.include_router(elevenlabs_router)
 app.include_router(follow_router)
 app.include_router(health_router.router)
@@ -59,3 +63,4 @@ app.include_router(influencer_knowledge_router)
 app.include_router(system_prompts_router.router)
 app.include_router(pre_influencers_router)
 app.include_router(social_router)
+app.include_router(admin_router)

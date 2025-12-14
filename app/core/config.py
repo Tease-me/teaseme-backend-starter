@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     LANDING_PAGE_AGENT_ID: str
     BUCKET_NAME: str
     INFLUENCER_PREFIX: str
+    USER_PREFIX: str = "user-content"  # Default fallback if missing in .env
 
     TWITTER_BEARER_TOKEN: str
 

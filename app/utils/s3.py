@@ -8,7 +8,7 @@ import botocore.exceptions
 from app.core.config import settings
 from app.schemas.chat import MessageSchema
 
-
+ 
 log = logging.getLogger("s3")
 
 s3 = boto3.client("s3")
@@ -53,7 +53,8 @@ def message_to_schema_with_presigned(msg):
         content=msg.content,
         created_at=msg.created_at,
         audio_url=audio_url,
-        channel=msg.channel
+        channel=msg.channel,
+        conversation_id=msg.conversation_id,
     )
 
 # Save knowledge file to S3 and return the S3 key
@@ -174,3 +175,18 @@ async def get_influencer_profile_from_s3(influencer_id: str) -> dict:
         return json.loads(obj["Body"].read().decode("utf-8"))
     except Exception:
         return {}
+
+
+async def save_user_photo_to_s3(file_obj, filename: str, content_type: str, user_id: int) -> str:
+    """Save user profile photo to S3"""
+    ext = (filename.rsplit(".", 1)[-1] if "." in filename else "jpg").lower()
+    key = f"{settings.USER_PREFIX}/{user_id}/photo.{ext}"
+    file_obj.seek(0)
+    s3.upload_fileobj(file_obj, settings.BUCKET_NAME, key, ExtraArgs={"ContentType": content_type})
+    return key
+
+
+def generate_user_presigned_url(key: str, expires: int = 3600) -> str:
+    """Generate presigned URL for user content (photos)"""
+    return generate_presigned_url(key, expires)
+

@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date
 from fastapi import HTTPException
-from app.db.models import CreditWallet, CreditTransaction, DailyUsage, Pricing
+from app.db.models import CreditWallet, CreditTransaction, DailyUsage, Pricing, User
 
 async def charge_feature(db, *, user_id: int, feature: str, units: int, meta: dict | None = None):
     today = date.today()
@@ -43,10 +43,25 @@ async def charge_feature(db, *, user_id: int, feature: str, units: int, meta: di
     # Debit wallet
     if cost:
         wallet = await db.get(CreditWallet, user_id) or CreditWallet(user_id=user_id)
-        if (wallet.balance_cents or 0) < cost:
+        old_balance = wallet.balance_cents or 0
+        if old_balance < cost:
             raise HTTPException(402, "Insufficient credits")
-        wallet.balance_cents = (wallet.balance_cents or 0) - cost
+        
+        wallet.balance_cents = old_balance - cost
         db.add(wallet)
+
+        # Trigger if we dip below $10.00 (1000 cents)
+        new_balance = wallet.balance_cents
+        THRESHOLD = 1000
+        if old_balance >= THRESHOLD and new_balance < THRESHOLD:
+            # Retrieve user email
+            user_obj = await db.get(User, user_id)
+            if user_obj and user_obj.email:
+                try:
+                    from app.api.notify_ws import notify_low_balance
+                    await notify_low_balance(user_obj.email, new_balance)
+                except Exception as e:
+                    print(f"Error sending low balance notification: {e}")
 
     db.add(CreditTransaction(
         user_id=user_id,
