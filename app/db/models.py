@@ -51,6 +51,7 @@ class User(Base):
     email_token: Mapped[str] = mapped_column(String, nullable=True)
     password_reset_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     password_reset_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    profile_photo_key: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     chats = relationship("Chat", back_populates="user")
     following_influencers: Mapped[List["InfluencerFollower"]] = relationship(
@@ -257,6 +258,9 @@ class PreInfluencer(Base):
     survey_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     survey_answers: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     survey_step: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    
+    ig_user_id: Mapped[str] = mapped_column(String, nullable=True)
+    ig_access_token: Mapped[str] = mapped_column(String, nullable=True)
 
     status: Mapped[str] = mapped_column(
         String, default="pending", nullable=False

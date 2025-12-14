@@ -119,6 +119,7 @@ async def upload_pre_influencer_picture(
     pre_influencer_id: int = Form(...),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    
 ):
     result = await db.execute(
         select(PreInfluencer).where(PreInfluencer.id == pre_influencer_id)
