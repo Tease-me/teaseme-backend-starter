@@ -102,11 +102,11 @@ async def create_influencer(data: InfluencerCreate, db: AsyncSession = Depends(g
     influencer = Influencer(**data.model_dump())
     db.add(influencer)
     await db.flush()  # ensure PK row exists before syncing external systems
-    await _sync_influencer_integrations(
-        influencer=influencer,
-        db=db,
-        voice_prompt_changed=bool(influencer.voice_prompt),
-    )
+    # await _sync_influencer_integrations(
+    #     influencer=influencer,
+    #     db=db,
+    #     voice_prompt_changed=bool(influencer.voice_prompt),
+    # )
     await db.commit()
     await db.refresh(influencer)
     return influencer
@@ -117,15 +117,15 @@ async def update_influencer(id: str, data: InfluencerUpdate, db: AsyncSession = 
     if not influencer:
         raise HTTPException(404, "Influencer not found")
     update_payload = data.model_dump(exclude_unset=True)
-    voice_prompt_changed = "voice_prompt" in update_payload
+    # voice_prompt_changed = "voice_prompt" in update_payload
     for key, value in update_payload.items():
         setattr(influencer, key, value)
     db.add(influencer)
-    await _sync_influencer_integrations(
-        influencer=influencer,
-        db=db,
-        voice_prompt_changed=voice_prompt_changed,
-    )
+    # await _sync_influencer_integrations(
+    #     influencer=influencer,
+    #     db=db,
+    #     voice_prompt_changed=voice_prompt_changed,
+    # )
     await db.commit()
     await db.refresh(influencer)
     return influencer
