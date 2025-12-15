@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 # revision identifiers, used by Alembic.
@@ -17,6 +18,12 @@ down_revision: Union[str, Sequence[str], None] = 'ddf98c515af1'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
+def column_exists(table_name, column_name):
+    """Check if a column exists in a table."""
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    columns = [col['name'] for col in inspector.get_columns(table_name)]
+    return column_name in columns
 
 def upgrade() -> None:
     """Upgrade schema."""
@@ -25,13 +32,17 @@ def upgrade() -> None:
                existing_type=sa.INTEGER(),
                type_=sa.Float(),
                existing_nullable=True)
-    op.add_column('messages', sa.Column('conversation_id', sa.String(), nullable=True))
+    if not column_exists('messages', 'conversation_id'):
+        op.add_column('messages', sa.Column('conversation_id', sa.String(), nullable=True))
     op.create_foreign_key(None, 'messages', 'calls', ['conversation_id'], ['conversation_id'])
-    op.drop_column('pre_influencers', 'ig_user_id')
-    op.drop_column('pre_influencers', 'ig_access_token')
+    if column_exists('pre_influencers', 'ig_user_id'):
+        op.drop_column('pre_influencers', 'ig_user_id')
+    if column_exists('pre_influencers', 'ig_access_token'):
+        op.drop_column('pre_influencers', 'ig_access_token')
     op.create_index(op.f('ix_relationship_state_influencer_id'), 'relationship_state', ['influencer_id'], unique=False)
     op.create_index(op.f('ix_relationship_state_user_id'), 'relationship_state', ['user_id'], unique=False)
-    op.add_column('users', sa.Column('profile_photo_key', sa.String(), nullable=True))
+    if not column_exists('messages', 'conversation_id'):
+        op.add_column('users', sa.Column('profile_photo_key', sa.String(), nullable=True))
     # ### end Alembic commands ###
 
 
