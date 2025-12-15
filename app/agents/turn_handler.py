@@ -1,7 +1,6 @@
 import logging,asyncio
 from uuid import uuid4
 from app.core.config import settings
-from app.agents.scoring import get_score, update_score, extract_score, format_score_value
 from app.agents.memory import find_similar_memories, store_fact
 from app.agents.prompts import MODEL, FACT_EXTRACTOR, CONVO_ANALYZER, get_fact_prompt, get_convo_analyzer_prompt
 from app.db.session import SessionLocal
@@ -124,19 +123,66 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     rel.closeness = out.closeness
     rel.attraction = out.attraction
     rel.safety = out.safety
-    rel.state = out.state
 
     # 5) Apply accepts from user
+    # --- stage points update (controls state progression) ---
+    delta = (
+        2.0 * sig.support +
+        1.6 * sig.affection +
+        1.6 * sig.respect +
+        1.4 * sig.flirt -
+        5.0 * sig.boundary_push -
+        3.5 * sig.rude
+    )
+
+    # baseline so it doesn't stall at 0 for normal messages
+    baseline = 0.25 if (sig.rude < 0.1 and sig.boundary_push < 0.1) else 0.0
+    delta += baseline
+
+    delta = max(-5.0, min(3.0, delta))
+    rel.stage_points = max(0.0, min(100.0, (rel.stage_points or 0.0) + delta))
+
+    # derive state from points (no skipping)
+    p = rel.stage_points
+    if p < 20:
+        rel.state = "STRANGERS"
+    elif p < 45:
+        rel.state = "TALKING"
+    elif p < 65:
+        rel.state = "FLIRTING"
+    elif p < 85:
+        rel.state = "DATING"
+    else:
+        rel.state = "DATING"  # girlfriend still requires explicit yes
+
+    # eligibility based on final state + dimensions
+    can_ask = (
+        rel.state == "DATING"
+        and rel.safety >= 70
+        and rel.trust >= 75
+        and rel.closeness >= 70
+        and rel.attraction >= 65
+    )
+
+    # Apply accepts AFTER state is derived
     if sig.accepted_exclusive and rel.state in ("DATING", "GIRLFRIEND"):
         rel.exclusive_agreed = True
 
-    if sig.accepted_girlfriend and out.can_ask_gf:
+    if sig.accepted_girlfriend and can_ask:
         rel.girlfriend_confirmed = True
         rel.exclusive_agreed = True
         rel.state = "GIRLFRIEND"
 
+    # keep girlfriend sticky
+    if rel.girlfriend_confirmed:
+        rel.state = "GIRLFRIEND"
+
+    # Plan gradual DTR goal (no button)
+    dtr_goal = plan_dtr_goal(rel, can_ask)
+
     # 6) Plan gradual DTR goal (no button)
-    dtr_goal = plan_dtr_goal(rel, out.can_ask_gf)
+    can_ask = (rel.state == "DATING" and rel.safety >= 70 and rel.trust >= 75 and rel.closeness >= 70 and rel.attraction >= 65)
+    dtr_goal = plan_dtr_goal(rel, can_ask)
 
     # 7) Update last interaction
     rel.last_interaction_at = now
