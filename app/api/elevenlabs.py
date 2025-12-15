@@ -678,29 +678,6 @@ async def _poll_and_persist_conversation(
                 exc,
             )
 
-        # Extract and store facts from the transcript
-        if chat_id and normalized_transcript:
-            try:
-                from app.agents.turn_handler import extract_and_store_facts_for_transcript
-                asyncio.create_task(
-                    extract_and_store_facts_for_transcript(
-                        transcript=normalized_transcript,
-                        chat_id=chat_id,
-                        cid=conversation_id,
-                    )
-                )
-                log.info(
-                    "background.fact_extraction_scheduled conv=%s chat=%s",
-                    conversation_id,
-                    chat_id,
-                )
-            except Exception as exc:
-                log.warning(
-                    "background.fact_extraction_schedule_failed conv=%s err=%s",
-                    conversation_id,
-                    exc,
-                )
-
 
 # === DO NOT RENAME: you said you call this elsewhere ===
 async def _push_prompt_to_elevenlabs(
