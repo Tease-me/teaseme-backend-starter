@@ -1,9 +1,10 @@
 import logging,asyncio
+from langchain_core.prompts import ChatPromptTemplate
 from uuid import uuid4
 from app.core.config import settings
 from app.agents.scoring import get_score, update_score, extract_score, format_score_value
 from app.agents.memory import find_similar_memories, store_fact
-from app.agents.prompts import MODEL, FACT_EXTRACTOR, CONVO_ANALYZER, get_fact_prompt, get_convo_analyzer_prompt
+from app.agents.prompts import MODEL, FACT_EXTRACTOR, CONVO_ANALYZER, get_fact_prompt, get_convo_analyzer_prompt, get_transcript_fact_prompt
 from app.db.session import SessionLocal
 from app.agents.prompt_utils import get_global_audio_prompt, get_global_prompt, get_today_script
 from langchain_core.runnables.history import RunnableWithMessageHistory
@@ -62,6 +63,60 @@ async def extract_and_store_facts_for_turn(
                 await store_fact(db, chat_id, line)
         except Exception as ex:
             log.error("[%s] Fact extraction failed: %s", cid, ex, exc_info=True)
+
+async def extract_and_store_facts_for_transcript(
+    transcript: list[dict],
+    chat_id: str,
+    cid: str,
+) -> None:
+    """
+    Process a full call transcript to extract and store facts.
+    """
+    log.info("[%s] Starting transcript fact extraction for chat=%s items=%d", cid, chat_id, len(transcript))
+    
+    if not transcript:
+        return
+
+    # Convert transcript to readable text
+    lines = []
+    for turn in transcript:
+        role = turn.get("role", "unknown")
+        msg = turn.get("message") or turn.get("text") or ""
+        lines.append(f"{role}: {msg}")
+    
+    full_text = "\n".join(lines)
+    
+    
+    async with SessionLocal() as db:
+        try:
+            # Load prompt from DB
+            transcript_prompt = await get_transcript_fact_prompt(db)
+            
+            # Invoke model with dedicated prompt
+            facts_resp = await FACT_EXTRACTOR.ainvoke(
+                transcript_prompt.format(transcript=full_text)
+            )
+
+            facts_txt = facts_resp.content or ""
+            
+            if "NO_FACTS" in facts_txt:
+                log.info("[%s] Transcript extraction: No new facts found.", cid)
+                return
+
+            extracted_lines = [ln.strip("- ").strip() for ln in facts_txt.split("\n") if ln.strip()]
+
+            count = 0
+            for line in extracted_lines:
+                if not line or line.lower() == "no_facts":
+                    continue
+                # Optional: You could check similarity here to avoid strict duplicates from the call turns
+                await store_fact(db, chat_id, line)
+                count += 1
+            
+            log.info("[%s] Transcript extraction done. Stored %d facts.", cid, count)
+
+        except Exception as ex:
+            log.error("[%s] Transcript fact extraction failed: %s", cid, ex, exc_info=True)
 
 async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: str | None = None, db=None, is_audio: bool = False) -> str:
     cid = uuid4().hex[:8]
@@ -163,6 +218,7 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
                 cid=cid,
             )
         )
+        
     except Exception as ex:
         log.error("[%s] Failed to schedule fact extraction: %s", cid, ex, exc_info=True)
 
