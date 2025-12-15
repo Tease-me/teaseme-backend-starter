@@ -74,7 +74,6 @@ _DOPAMINE_OPENERS: Dict[str, List[str]] = {
 
 _RANDOM_FIRST_GREETINGS: List[str] = [
     "Hello?",
-    "Hi?",
     "Hello, this is {persona_name}. Who’s calling?",
     "Hi, who am I speaking with?",
 ]
@@ -435,7 +434,7 @@ def _build_agent_patch_payload(
     max_tokens: Optional[int] = None,
 ) -> Dict[str, Any]:
     
-    agent_cfg: Dict[str, Any] = {}
+    agent_cfg: Dict[str, Any] = {} 
 
     if any(v is not None for v in (prompt_text, llm, temperature, max_tokens)):
         prompt_block: Dict[str, Any] = {}
@@ -1074,8 +1073,8 @@ async def get_conversation_token(
         db.get(Influencer, influencer_id),
         get_global_audio_prompt(db),
     )
-    score = get_score(user_id or chat_id, influencer_id)
     chat_id = await get_or_create_chat(db, user_id, influencer_id)
+    score = get_score(str(user_id), influencer_id)
     if not influencer:
         raise HTTPException(404, "Influencer not found")
     persona_rules = influencer.prompt_template.format(lollity_score=score)

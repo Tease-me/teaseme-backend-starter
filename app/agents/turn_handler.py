@@ -205,32 +205,32 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
         attraction=int(rel.attraction),
         safety=int(rel.safety),
     )
+    print(persona_rules)
+    # persona_rules += f"""
+    # RELATIONSHIP:
+    # - phase: {rel.state}
+    # - trust: {rel.trust:.0f}/100
+    # - closeness: {rel.closeness:.0f}/100
+    # - attraction: {rel.attraction:.0f}/100
+    # - safety: {rel.safety:.0f}/100
+    # - exclusive_agreed: {rel.exclusive_agreed}
+    # - girlfriend_confirmed: {rel.girlfriend_confirmed}
+    # - days_idle_before_message: {days_idle:.1f}
+    # - dtr_goal: {dtr_goal}
 
-    persona_rules += f"""
-    RELATIONSHIP:
-    - phase: {rel.state}
-    - trust: {rel.trust:.0f}/100
-    - closeness: {rel.closeness:.0f}/100
-    - attraction: {rel.attraction:.0f}/100
-    - safety: {rel.safety:.0f}/100
-    - exclusive_agreed: {rel.exclusive_agreed}
-    - girlfriend_confirmed: {rel.girlfriend_confirmed}
-    - days_idle_before_message: {days_idle:.1f}
-    - dtr_goal: {dtr_goal}
+    # DTR rules:
+    # - hint_closer: subtle romantic closeness, 'we' language, no pressure.
+    # - ask_exclusive: gently ask if user wants exclusivity (only us).
+    # - ask_girlfriend: ask clearly (romantic) if you can be their girlfriend.
+    # - If safety is low or user is upset: do NOT push DTR.
 
-    DTR rules:
-    - hint_closer: subtle romantic closeness, 'we' language, no pressure.
-    - ask_exclusive: gently ask if user wants exclusivity (only us).
-    - ask_girlfriend: ask clearly (romantic) if you can be their girlfriend.
-    - If safety is low or user is upset: do NOT push DTR.
-
-    Behavior by phase:
-    - STRANGERS/TALKING: light, curious, build trust.
-    - FLIRTING: playful flirting, teasing, no pressure.
-    - DATING: affectionate, can discuss exclusivity.
-    - GIRLFRIEND: consistent girlfriend vibe, affectionate, supportive, 'we' language.
-    - STRAINED: boundaries first, reduce romance, repair needed.
-    """
+    # Behavior by phase:
+    # - STRANGERS/TALKING: light, curious, build trust.
+    # - FLIRTING: playful flirting, teasing, no pressure.
+    # - DATING: affectionate, can discuss exclusivity.
+    # - GIRLFRIEND: consistent girlfriend vibe, affectionate, supportive, 'we' language.
+    # - STRAINED: boundaries first, reduce romance, repair needed.
+    # """
     
     memories_result = await find_similar_memories(db, chat_id, message) if (db and user_id) else []
     if isinstance(memories_result, tuple):
