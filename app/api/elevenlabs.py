@@ -1122,6 +1122,7 @@ async def get_conversation_token(
         last_user_message="",
         memories= "",
         persona_rules=persona_rules,
+        relationship_state=rel.state,
         history=history.messages,
         trust=rel.trust,
         closeness=rel.closeness,
