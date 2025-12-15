@@ -55,19 +55,3 @@ async def get_convo_analyzer_prompt(db) -> ChatPromptTemplate:
         template_str = DEFAULT_CONVO_ANALYZER_PROMPT
     return ChatPromptTemplate.from_template(template_str)
 
-DEFAULT_TRANSCRIPT_FACT_PROMPT = """You are a memory extractor. Analyze the conversation transcript below and extract NEW permanent facts about the USER (preferences, life details, name, hobbies).
-Ignore the AGENT's messages except for context.
-Ignore transient context (e.g. "I'm walking now", "Can you hear me?").
-Extract only enduring facts.
-Output each fact on a new line start with "- ".
-If no new facts are found, output "NO_FACTS".
-
-Transcript:
-{transcript}"""
-
-
-async def get_transcript_fact_prompt(db) -> ChatPromptTemplate:
-    template_str = await get_system_prompt(db, "TRANSCRIPT_FACT_PROMPT")
-    if not template_str:
-        template_str = DEFAULT_TRANSCRIPT_FACT_PROMPT
-    return ChatPromptTemplate.from_template(template_str)

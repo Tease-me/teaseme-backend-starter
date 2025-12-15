@@ -11,7 +11,7 @@ from app.services.billing import charge_feature
 from app.api.elevenlabs import _extract_total_seconds
 from sqlalchemy import select
 from app.db.models import CallRecord, Chat
-from app.agents.turn_handler import handle_turn, extract_and_store_facts_for_transcript
+from app.agents.turn_handler import handle_turn
 from app.agents.memory import find_similar_memories
 
 log = logging.getLogger(__name__)
@@ -184,33 +184,6 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
                 _redact(user_id), _redact(conversation_id), repr(e)
             )
             raise
-
-    # Handle transcription for memory extraction
-    if event_type == "post_call_transcription" and status == "done":
-        transcript = data.get("transcript")
-        
-        if transcript:            
-            try:
-                res = await db.execute(
-                    select(CallRecord.chat_id).where(CallRecord.conversation_id == conversation_id)
-                )
-                chat_id_val = res.scalar_one_or_none()
-                
-                if chat_id_val:
-                    asyncio.create_task(
-                        extract_and_store_facts_for_transcript(
-                            transcript=transcript,
-                            chat_id=chat_id_val,
-                            cid=conversation_id,
-                        )
-                    )
-                    log.info("webhook.transcription.extraction_scheduled conv_id=%s chat_id=%s", 
-                             _redact(conversation_id), chat_id_val)
-                else:
-                    log.warning("webhook.transcription.no_chat_id conv_id=%s", _redact(conversation_id))
-            except Exception as e:
-                log.error("webhook.transcription.lookup_error conv_id=%s err=%s", 
-                          _redact(conversation_id), e)
 
     else:
         # Not billing: either not done or no user mapping
