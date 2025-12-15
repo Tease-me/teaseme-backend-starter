@@ -166,6 +166,19 @@ These are the recent History which might help: {history}
 Output ONLY the greeting text, nothing else.
 """.strip(),
     },
+    {
+        "key": "TRANSCRIPT_FACT_PROMPT",
+        "description": "Extract permanent facts from full call transcripts.",
+        "prompt": """You are a memory extractor. Analyze the conversation transcript below and extract NEW permanent facts about the USER (preferences, life details, name, hobbies).
+Ignore the AGENT's messages except for context.
+Ignore transient context (e.g. "I'm walking now", "Can you hear me?").
+Extract only enduring facts.
+Output each fact on a new line start with "- ".
+If no new facts are found, output "NO_FACTS".
+
+Transcript:
+{transcript}""".strip(),
+    },
 ]
 
 
