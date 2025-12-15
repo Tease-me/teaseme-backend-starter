@@ -74,6 +74,7 @@ async def list_relationships(user_id: int, db: AsyncSession = Depends(get_db)):
             "attraction": r.attraction,
             "safety": r.safety,
             "state": r.state,
+            "stage_points": r.stage_points,
             "exclusive_agreed": r.exclusive_agreed,
             "girlfriend_confirmed": r.girlfriend_confirmed,
             "updated_at": r.updated_at.isoformat() if r.updated_at else None,
