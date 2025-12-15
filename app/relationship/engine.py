@@ -7,7 +7,7 @@ def sat_up(x: float, delta: float, k: float = 0.025) -> float:
     if delta <= 0: return x
     return x + (100 - x) * (1 - math.exp(-k * delta))
 
-def sat_down(x: float, delta: float, k: float = 0.08) -> float:
+def sat_down(x: float, delta: float, k: float = 0.05) -> float:
     if delta <= 0: return x
     return x - x * (1 - math.exp(-k * delta))
 
@@ -62,11 +62,11 @@ def update_relationship(trust, closeness, attraction, safety, prev_state, sig: S
     close_pos = 7*sig.affection + 6*sig.support
     close_neg = 8*sig.rude
 
-    attr_pos = 10*sig.flirt*sig.respect + 4*sig.affection
+    attr_pos = 8*sig.flirt*sig.respect + 2*sig.flirt + 3*sig.affection
     attr_neg = 16*sig.boundary_push + 10*sig.rude
 
     safety_pos = 10*sig.respect + 6*sig.apology
-    safety_neg = 22*sig.boundary_push + 14*sig.rude
+    safety_neg = 16*sig.boundary_push + 12*sig.rude
 
     def cap(x, max_val): return min(x, max_val)
 

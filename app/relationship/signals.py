@@ -16,25 +16,16 @@ def _clampf(x):
 
 async def classify_signals(message: str, recent_ctx: str, llm) -> dict:
     prompt = f"""
-    You are a strict relationship signal classifier.
+Return ONLY valid JSON with keys:
+support, affection, flirt, respect, rude, boundary_push, apology, commitment_talk,
+accepted_exclusive, accepted_girlfriend.
 
-    Return ONLY valid JSON with keys:
-    support, affection, flirt, respect, rude, boundary_push, apology, commitment_talk (floats 0..1),
-    accepted_exclusive, accepted_girlfriend (booleans).
+Context:
+{recent_ctx}
 
-    IMPORTANT RULES:
-    - boundary_push MUST be 0 unless the user is pressuring, ignoring consent, threatening, manipulating,
-    or pushing sexual content without invitation.
-    - A romantic request like "I want to be your boyfriend/girlfriend" is NOT boundary_push.
-    - rude MUST be 0 unless there is an insult, profanity, hostility, or disrespect.
-    - Very short messages (e.g. "hey") should have values near 0.
-
-    Context:
-    {recent_ctx}
-
-    User message:
-    {message}
-    """
+User message:
+{message}
+"""
     try:
         r = await llm.ainvoke(prompt)
         data = json.loads((r.content or "").strip())

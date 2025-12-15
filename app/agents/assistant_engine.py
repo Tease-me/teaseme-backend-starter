@@ -2,11 +2,8 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import Optional
-
-from fastapi import HTTPException
 from langchain_community.chat_message_histories import RedisChatMessageHistory
 
-from app.agents.prompts import CONVERSATION_ANALYZER, CONVERSATION_ANALYZER_PROMPT
 from app.agents.scoring import format_score_value
 
 log = logging.getLogger("teaseme-agent-turn")

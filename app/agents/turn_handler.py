@@ -2,7 +2,7 @@ import logging,asyncio
 from uuid import uuid4
 from app.core.config import settings
 from app.agents.memory import find_similar_memories, store_fact
-from app.agents.prompts import MODEL, FACT_EXTRACTOR, CONVO_ANALYZER, get_fact_prompt, get_convo_analyzer_prompt
+from app.agents.prompts import MODEL, FACT_EXTRACTOR, CONVO_ANALYZER, get_fact_prompt
 from app.db.session import SessionLocal
 from app.agents.prompt_utils import get_global_audio_prompt, get_global_prompt, get_today_script
 from langchain_core.runnables.history import RunnableWithMessageHistory
@@ -107,9 +107,10 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
 
     # 3) Classify user message -> relationship signals
     sig_dict = await classify_signals(message, recent_ctx, CONVO_ANALYZER)
+    log.info("[%s] SIG_DICT=%s", cid, sig_dict)
     sig = Signals(**sig_dict)
 
-    # 4) Update dimensions + state
+    # 4) Update dimensions (trust/closeness/attraction/safety)
     out = update_relationship(
         trust=rel.trust,
         closeness=rel.closeness,
@@ -119,13 +120,23 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
         sig=sig,
     )
 
+    log.info(
+    "[%s] DIM before->after | t %.4f->%.4f c %.4f->%.4f a %.4f->%.4f s %.4f->%.4f",
+    cid,
+    rel.trust, out.trust,
+    rel.closeness, out.closeness,
+    rel.attraction, out.attraction,
+    rel.safety, out.safety,
+    )
+
     rel.trust = out.trust
     rel.closeness = out.closeness
     rel.attraction = out.attraction
     rel.safety = out.safety
 
-    # 5) Apply accepts from user
     # --- stage points update (controls state progression) ---
+    prev_sp = float(rel.stage_points or 0.0)
+
     delta = (
         2.0 * sig.support +
         1.6 * sig.affection +
@@ -135,14 +146,12 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
         3.5 * sig.rude
     )
 
-    # baseline so it doesn't stall at 0 for normal messages
     baseline = 0.25 if (sig.rude < 0.1 and sig.boundary_push < 0.1) else 0.0
     delta += baseline
-
     delta = max(-5.0, min(3.0, delta))
-    rel.stage_points = max(0.0, min(100.0, (rel.stage_points or 0.0) + delta))
 
-    # derive state from points (no skipping)
+    rel.stage_points = max(0.0, min(100.0, prev_sp + delta))
+
     p = rel.stage_points
     if p < 20:
         rel.state = "STRANGERS"
@@ -153,7 +162,7 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     elif p < 85:
         rel.state = "DATING"
     else:
-        rel.state = "DATING"  # girlfriend still requires explicit yes
+        rel.state = "DATING"
 
     # eligibility based on final state + dimensions
     can_ask = (
@@ -177,13 +186,10 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     if rel.girlfriend_confirmed:
         rel.state = "GIRLFRIEND"
 
-    # Plan gradual DTR goal (no button)
     dtr_goal = plan_dtr_goal(rel, can_ask)
 
-    # 6) Plan gradual DTR goal (no button)
-    can_ask = (rel.state == "DATING" and rel.safety >= 70 and rel.trust >= 75 and rel.closeness >= 70 and rel.attraction >= 65)
-    dtr_goal = plan_dtr_goal(rel, can_ask)
-
+    log.info("[%s] STAGE prev=%.2f delta=%.2f new=%.2f state=%s can_ask=%s",
+            cid, prev_sp, delta, rel.stage_points, rel.state, can_ask)
     # 7) Update last interaction
     rel.last_interaction_at = now
     rel.updated_at = now
