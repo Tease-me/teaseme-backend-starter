@@ -16,16 +16,16 @@ def _clampf(x):
 
 async def classify_signals(message: str, recent_ctx: str, llm) -> dict:
     prompt = f"""
-Return ONLY valid JSON with keys:
-support, affection, flirt, respect, rude, boundary_push, apology, commitment_talk,
-accepted_exclusive, accepted_girlfriend.
+        Return ONLY valid JSON with keys:
+        support, affection, flirt, respect, rude, boundary_push, apology, commitment_talk,
+        accepted_exclusive, accepted_girlfriend.
 
-Context:
-{recent_ctx}
+        Context:
+        {recent_ctx}
 
-User message:
-{message}
-"""
+        User message:
+        {message}
+        """
     try:
         r = await llm.ainvoke(prompt)
         data = json.loads((r.content or "").strip())
@@ -40,12 +40,12 @@ User message:
 
     msg_len = len(message.strip())
 
-    if msg_len <= 4:        # "hey", "oi", "yo"
+    if msg_len <= 4:
         scale = 0.15
-    elif msg_len <= 12:     # "how are you"
+    elif msg_len <= 12:
         scale = 0.35
     elif msg_len <= 30:
-        scale = 0.6
+        scale = 0.85
     else:
         scale = 1.0
 

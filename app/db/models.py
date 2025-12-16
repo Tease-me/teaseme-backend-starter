@@ -299,6 +299,7 @@ class RelationshipState(Base):
     dtr_cooldown_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     
     stage_points: Mapped[float] = mapped_column(Float, default=0.0)
+    sentiment_score: Mapped[float] = mapped_column(Float, default=0.0)
 
     last_interaction_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

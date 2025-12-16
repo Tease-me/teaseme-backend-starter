@@ -140,6 +140,8 @@ async def build_system_prompt(
         closeness=int(rel["closeness"]),
         attraction=int(rel["attraction"]),
         safety=int(rel["safety"]),
+        stage_points=float(rel.stage_points or 0.0),
+        sentiment_score=float(rel.sentiment_score or 0.0),
     )
 
     phase = rel["state"]

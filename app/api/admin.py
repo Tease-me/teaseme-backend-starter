@@ -59,6 +59,20 @@ async def clear_chat_history_admin(
         "call_records_deleted": len(deleted_call_ids),
     }
 
+def sentiment_label(score: float) -> str:
+    if score <= -60:
+        return "HATE"
+    elif score <= -20:
+        return "DISLIKE"
+    elif score < 20:
+        return "NEUTRAL"
+    elif score < 50:
+        return "FRIENDLY"
+    elif score < 75:
+        return "FLIRTY"
+    else:
+        return "IN_LOVE"
+    
 @router.get("/relationships")
 async def list_relationships(user_id: int, db: AsyncSession = Depends(get_db)):
     q = select(RelationshipState).where(RelationshipState.user_id == user_id)
@@ -75,8 +89,11 @@ async def list_relationships(user_id: int, db: AsyncSession = Depends(get_db)):
             "safety": r.safety,
             "state": r.state,
             "stage_points": r.stage_points,
+            "sentiment_score": r.sentiment_score,
+            "sentiment": sentiment_label(r.sentiment_score),
             "exclusive_agreed": r.exclusive_agreed,
             "girlfriend_confirmed": r.girlfriend_confirmed,
+            "sentiment_score": r.sentiment_score,
             "updated_at": r.updated_at.isoformat() if r.updated_at else None,
         }
         for r in rows
