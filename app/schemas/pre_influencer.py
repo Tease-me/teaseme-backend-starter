@@ -31,3 +31,22 @@ class InfluencerAudioDeleteRequest(BaseModel):
 
 class SurveyQuestionsResponse(BaseModel):
     sections: List[Dict[str, Any]]
+
+class SurveyPromptRequest(BaseModel):
+    additional_prompt: Optional[str] = None
+
+class SurveyStages(BaseModel):
+    hate: str
+    dislike: str
+    strangers: str
+    talking: str
+    flirting: str
+    dating: str
+
+class SurveyPromptResponse(BaseModel):
+    likes: List[str]
+    dislikes: List[str]
+    mbti_rules: str
+    personality_rules: str
+    tone: str
+    stages: SurveyStages
