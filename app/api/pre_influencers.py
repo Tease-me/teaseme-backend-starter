@@ -2,7 +2,16 @@ import json
 import secrets
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    UploadFile,
+    File,
+    Form,
+    Response,
+    status,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
 
@@ -45,6 +54,31 @@ def _load_survey_questions():
             "Survey questions file is malformed",
         )
     return data
+
+
+def _format_survey_markdown(sections, answers, username: str | None = None) -> str:
+    """Build a simple markdown report of questions and answers."""
+    lines = []
+    if username:
+        lines.append(f"# {username}'s Survey")
+        lines.append("")
+    for section in sections:
+        lines.append(f"## {section.get('title', section.get('id', ''))}")
+        for q in section.get("questions", []):
+            qid = q.get("id")
+            label = q.get("label", qid)
+            val = answers.get(qid) if isinstance(answers, dict) else None
+            if val is None or val == "":
+                ans_text = "_Not answered_"
+            elif isinstance(val, list):
+                ans_text = ", ".join(str(v) for v in val)
+            elif isinstance(val, dict):
+                ans_text = json.dumps(val, ensure_ascii=False)
+            else:
+                ans_text = str(val)
+            lines.append(f"- **{label}**: {ans_text}")
+        lines.append("")
+    return "\n".join(lines).strip() + "\n"
 
 @router.post("/register", response_model=PreInfluencerRegisterResponse)
 async def register_pre_influencer(
@@ -117,6 +151,23 @@ async def open_survey(token: str, db: AsyncSession = Depends(get_db)):
 @router.get("/survey/questions", response_model=SurveyQuestionsResponse)
 async def get_survey_questions():
     return SurveyQuestionsResponse(sections=_load_survey_questions())
+
+@router.get("/{pre_id}/survey/markdown")
+async def get_survey_markdown(
+    pre_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(PreInfluencer).where(PreInfluencer.id == pre_id)
+    )
+    pre = result.scalar_one_or_none()
+
+    if not pre:
+        raise HTTPException(status_code=404, detail="Pre-influencer not found")
+
+    sections = _load_survey_questions()
+    markdown = _format_survey_markdown(sections, pre.survey_answers or {}, pre.username)
+    return Response(content=markdown, media_type="text/markdown")
 
 @router.put("/{pre_id}/survey", response_model=SurveyState)
 async def save_survey_state(
