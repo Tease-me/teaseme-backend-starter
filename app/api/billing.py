@@ -1,15 +1,15 @@
-from app.services.airwallex import create_billing_checkout
+from uuid import uuid4
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.session import get_db
-from app.services.billing import topup_wallet
+
 from app.db.models import CreditWallet
-from app.schemas.billing import TopUpRequest,BillingCheckoutRequest
 from app.db.session import get_db
+from app.schemas.billing import BillingCheckoutRequest, TopUpRequest
+from app.services.airwallex import create_billing_checkout
+from app.services.billing import topup_wallet
 from app.utils.deps import get_current_user
-from app.core.config import settings
-import http.client, json
-from uuid import uuid4
+
 router = APIRouter(prefix="/billing", tags=["billing"])
 
 @router.get("/balance")
@@ -23,8 +23,12 @@ async def topup(req: TopUpRequest, db: AsyncSession = Depends(get_db), user=Depe
     return {"ok": True, "new_balance_cents": new_balance}
 
 @router.post("/billing-checkout")
-async def billing_checkout(req: BillingCheckoutRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    paylod = {
+async def billing_checkout(
+    req: BillingCheckoutRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    payload = {
         "request_id": str(uuid4()),
         "mode": req.mode,
         "currency": req.currency,
@@ -33,15 +37,13 @@ async def billing_checkout(req: BillingCheckoutRequest, db: AsyncSession = Depen
         "back_url": req.cancel_url,
         "customer_data": {
             "email": user.email,
-            "name": user.fullname or user.email,
+            "name": user.full_name or user.email,
             "type": "INDIVIDUAL",
         },
-        
     }
-    checkout = await create_billing_checkout(paylod)
+    checkout = await create_billing_checkout(payload)
     return {
         "checkout_id": checkout.get("id"),
         "status": checkout.get("status"),
         "next_action": checkout.get("next_action"),
     }
-    pass
