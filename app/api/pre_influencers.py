@@ -104,33 +104,17 @@ def _unwrap_json(raw: str) -> str:
 
 
 async def _generate_prompt_from_markdown(markdown: str, additional_prompt: str | None) -> str:
-    if not settings.OPENAI_API_KEY:
-        log.warning("survey_prompt.missing_api_key")
-        return {
-            "likes": [],
-            "dislikes": [],
-            "mbti_rules": "",
-            "personality_rules": "",
-            "tone": "",
-            "stages": {
-                "hate": "",
-                "dislike": "",
-                "strangers": "",
-                "talking": "",
-                "flirting": "",
-                "dating": "",
-            },
-        }
 
     sys_msg = (
         "You are a prompt engineer. Read the survey markdown and output only JSON matching this schema exactly: "
-        "{ likes: string[], dislikes: string[], mbti_rules: string, personality_rules: string, tone: string, "
-        "stages: { hate: string, dislike: string, strangers: string, talking: string, flirting: string, dating: string } }."
+        "{ likes: string[], dislikes: string[], mbti_architype: string, mbti_rules: string, personality_rules: string, tone: string, "
+        "stages: { hate: string, dislike: string, strangers: string, talking: string, flirting: string, dating: string, in_love: string } }."
         "Fill likes/dislikes from foods, hobbies, entertainment, routines, and anything the user enjoys or hates. "
-        "mbti_rules should summarize decision style, social energy, planning habits. "
-        "personality_rules should summarize overall personality, humor, boundaries, relationship vibe. "
-        "tone should describe speaking style in a short sentence. "
-        "Each stage string should describe how the persona behaves toward the user at that relationship stage. "
+        "mbti_architype should select one of: ISTJ, ISFJ, INFJ, INTJ, ISTP, ISFP, INFP, INTP, ESTP, ESFP, ENFP, ENTP, ESTJ, ESFJ, ENFJ, ENTJ. "
+        "mbti_rules should use mbti_architype to summarize decision style, social energy, planning habits. "
+        "personality_rules should use mbti_architype to summarize overall personality, humor, boundaries, relationship vibe. "
+        "tone should use mbti_architype to describe speaking style in a short sentence. "
+        "Each stage string should describe how the persona behaves toward the user at that relationship stage. These should be influenced by mbti_architype."
         "Keep strings concise (1-2 sentences). If unclear, use an empty string. No extra keys, no prose."
     )
     user_msg = f"Survey markdown:\n{markdown}\n\nExtra instructions for style/tone:\n{additional_prompt or '(none)'}"
@@ -146,24 +130,6 @@ async def _generate_prompt_from_markdown(markdown: str, additional_prompt: str |
     except Exception as exc:
         log.warning("survey_prompt.llm_failed err=%s", exc)
         raw = ""
-    print(resp)
-    if not raw:
-        return {
-            "likes": [],
-            "dislikes": [],
-            "mbti_rules": "",
-            "personality_rules": "",
-            "tone": "",
-            "stages": {
-                "hate": "",
-                "dislike": "",
-                "strangers": "",
-                "talking": "",
-                "flirting": "",
-                "dating": "",
-            },
-        }
-
     try:
         parsed = json.loads(_unwrap_json(raw))
         log.info("survey_prompt.parsed ok keys=%s", list(parsed.keys()))
@@ -177,6 +143,7 @@ async def _generate_prompt_from_markdown(markdown: str, additional_prompt: str |
     # Basic normalization/defaults
     parsed.setdefault("likes", [])
     parsed.setdefault("dislikes", [])
+    parsed.setdefault("mbti_architype", "")
     parsed.setdefault("mbti_rules", "")
     parsed.setdefault("personality_rules", "")
     parsed.setdefault("tone", "")
@@ -188,6 +155,7 @@ async def _generate_prompt_from_markdown(markdown: str, additional_prompt: str |
         "talking": stages.get("talking", ""),
         "flirting": stages.get("flirting", ""),
         "dating": stages.get("dating", ""),
+        "in_love": stages.get("in_love", ""),
     }
 
     # Ensure lists are lists of strings

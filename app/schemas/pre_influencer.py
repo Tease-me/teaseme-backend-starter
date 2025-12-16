@@ -42,10 +42,12 @@ class SurveyStages(BaseModel):
     talking: str
     flirting: str
     dating: str
+    in_love: str
 
 class SurveyPromptResponse(BaseModel):
     likes: List[str]
     dislikes: List[str]
+    mbti_architype: str
     mbti_rules: str
     personality_rules: str
     tone: str
