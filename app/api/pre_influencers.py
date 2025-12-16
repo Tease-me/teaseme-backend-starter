@@ -2,6 +2,7 @@ import json
 import logging
 import secrets
 from pathlib import Path
+from typing import Any
 
 from fastapi import (
     APIRouter,
@@ -73,6 +74,14 @@ def _format_survey_markdown(sections, answers, username: str | None = None) -> s
     if username:
         lines.append(f"# {username}'s Survey")
         lines.append("")
+    def _format_answer(question: dict, value: Any) -> str:
+        options = question.get("options") or []
+        label_map = {str(opt.get("value")): opt.get("label", opt.get("value")) for opt in options if isinstance(opt, dict)}
+        if isinstance(value, list):
+            mapped = [str(label_map.get(str(v), v)) for v in value]
+            return ", ".join(mapped)
+        return str(label_map.get(str(value), value))
+
     for section in sections:
         lines.append(f"## {section.get('title', section.get('id', ''))}")
         for q in section.get("questions", []):
@@ -82,11 +91,11 @@ def _format_survey_markdown(sections, answers, username: str | None = None) -> s
             if val is None or val == "":
                 ans_text = "_Not answered_"
             elif isinstance(val, list):
-                ans_text = ", ".join(str(v) for v in val)
+                ans_text = _format_answer(q, val)
             elif isinstance(val, dict):
                 ans_text = json.dumps(val, ensure_ascii=False)
             else:
-                ans_text = str(val)
+                ans_text = _format_answer(q, val)
             lines.append(f"- **{label}**: {ans_text}")
         lines.append("")
     return "\n".join(lines).strip() + "\n"
