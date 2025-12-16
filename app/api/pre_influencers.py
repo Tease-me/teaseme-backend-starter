@@ -1,6 +1,8 @@
+import json
 import secrets
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
 
@@ -9,15 +11,40 @@ from app.db.models import PreInfluencer
 from app.schemas.pre_influencer import (
     PreInfluencerRegisterRequest,
     PreInfluencerRegisterResponse,
+    SurveyQuestionsResponse,
     SurveyState,
     SurveySaveRequest,
-    InfluencerAudioDeleteRequest
+    InfluencerAudioDeleteRequest,
 )
 from app.utils.email import send_profile_survey_email
 from app.utils.s3 import save_influencer_photo_to_s3, generate_presigned_url, delete_file_from_s3
 
 
 router = APIRouter(prefix="/pre-influencers", tags=["pre-influencers"])
+SURVEY_QUESTIONS_PATH = Path(__file__).resolve().parent.parent / "raw" / "survey-questions.json"
+
+
+def _load_survey_questions():
+    try:
+        with SURVEY_QUESTIONS_PATH.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "Survey questions file missing",
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Failed to load survey questions: {exc}",
+        )
+
+    if not isinstance(data, list):
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "Survey questions file is malformed",
+        )
+    return data
 
 @router.post("/register", response_model=PreInfluencerRegisterResponse)
 async def register_pre_influencer(
@@ -86,6 +113,10 @@ async def open_survey(token: str, db: AsyncSession = Depends(get_db)):
         survey_answers=pre.survey_answers or {},
         survey_step=pre.survey_step or 0,
     )
+
+@router.get("/survey/questions", response_model=SurveyQuestionsResponse)
+async def get_survey_questions():
+    return SurveyQuestionsResponse(sections=_load_survey_questions())
 
 @router.put("/{pre_id}/survey", response_model=SurveyState)
 async def save_survey_state(
