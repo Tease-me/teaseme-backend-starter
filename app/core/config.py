@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -50,7 +51,10 @@ class Settings(BaseSettings):
     BUCKET_NAME: str
     INFLUENCER_PREFIX: str
     USER_PREFIX: str = "user-content"  # Default fallback if missing in .env
-    AIRWALLEX_BASE_URL: str | None = None
+    AIRWALLEX_BASE_URL: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AIRWALLEX_BASE_URL", "AIRWALLAX_BASE_URL"),
+    )
     AIRWALLEX_CLIENT_ID: str | None = None
     AIRWALLEX_API_KEY: str | None = None
     TWITTER_BEARER_TOKEN: str | None = None

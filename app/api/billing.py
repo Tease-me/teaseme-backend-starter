@@ -1,7 +1,7 @@
 from uuid import uuid4
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.models import CreditWallet
+from app.db.models import AirwallexBillingCheckout, CreditWallet
 from app.db.session import get_db
 from app.schemas.billing import AutoTopupCheckRequest, BillingCheckoutRequest, TopUpRequest
 from app.services.airwallex import create_billing_checkout
@@ -77,6 +77,24 @@ async def billing_checkout(
             wallet.low_balance_threshold_cents = req.low_balance_threshold_cents
         db.add(wallet)
         await db.commit()
+
+    db.add(
+        AirwallexBillingCheckout(
+            user_id=user.id,
+            request_id=payload["request_id"],
+            airwallex_checkout_id=checkout.get("id"),
+            mode=mode,
+            status=checkout.get("status"),
+            currency=req.currency,
+            billing_customer_id=new_cust_id,
+            purpose="billing_checkout",
+            success_url=str(req.success_url),
+            back_url=str(req.cancel_url),
+            request_payload=payload,
+            response_payload=checkout,
+        )
+    )
+    await db.commit()
         
     return {
         "checkout_id": checkout.get("id"),

@@ -52,6 +52,8 @@ async def create_auto_topup_payment_intent(
     amount_cents: int,
     currency: str = "USD",
     description: str | None = None,
+    request_id: str | None = None,
+    merchant_order_id: str | None = None,
 ) -> dict:
     """
     Charge a saved payment method for the given customer to top up their wallet.
@@ -62,8 +64,8 @@ async def create_auto_topup_payment_intent(
 
     token = await _get_token()
     payload = {
-        "request_id": str(uuid4()),
-        "merchant_order_id": f"wallet-topup-{uuid4()}",
+        "request_id": request_id or str(uuid4()),
+        "merchant_order_id": merchant_order_id or f"wallet-topup-{uuid4()}",
         "customer_id": customer_id,
         "amount": amount_cents,
         "currency": currency,
