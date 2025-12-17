@@ -22,7 +22,10 @@ async def _get_token() -> str:
     async with httpx.AsyncClient(base_url=settings.AIRWALLEX_BASE_URL, timeout=15) as client:
         resp = await client.post(
             "/api/v1/authentication/login",
-            json={"client_id": settings.AIRWALLEX_CLIENT_ID, "api_key": settings.AIRWALLEX_API_KEY},
+            headers={
+                "x-client-id": settings.AIRWALLEX_CLIENT_ID,
+                "x-api-key": settings.AIRWALLEX_API_KEY,
+            },
         )
         resp.raise_for_status()
         data = resp.json()
@@ -42,6 +45,8 @@ async def create_billing_checkout(payload: dict) -> dict:
             json=payload,
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         )
+        if resp.status_code >= 400:
+            print(f"[Airwallex ERROR] Status: {resp.status_code}, Body: {resp.text}")
         resp.raise_for_status()
         return resp.json()
 
@@ -79,6 +84,58 @@ async def create_auto_topup_payment_intent(
             json=payload,
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         )
+        if resp.status_code >= 400:
+            print(f"[Airwallex AutoTopup ERROR] Status: {resp.status_code}, Body: {resp.text}")
         resp.raise_for_status()
         return resp.json()
     
+
+async def create_customer(
+    *,
+    email: str,
+    name: str,
+    reference_id: str | None = None,
+) -> dict:
+    """
+    Create a Customer in Airwallex.
+    """
+    token = await _get_token()
+    payload = {
+        "request_id": str(uuid4()),
+        "merchant_customer_id": reference_id or str(uuid4()),
+        "email": email,
+        "first_name": name.split(" ")[0],
+        "last_name": " ".join(name.split(" ")[1:]) if " " in name else "User",
+        "additional_info": {"registered_via": "teaseme_backend"},
+    }
+    
+    async with httpx.AsyncClient(base_url=settings.AIRWALLEX_BASE_URL, timeout=15) as client:
+        resp = await client.post(
+            "/api/v1/pa/customers/create",
+            json=payload,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        )
+        if resp.status_code >= 400:
+            print(f"[Airwallex Customer ERROR] Status: {resp.status_code}, Body: {resp.text}")
+        resp.raise_for_status()
+        data = resp.json()
+        print(f"[Airwallex Customer SUCCESS] Body: {data}")
+        return data
+
+
+async def create_payment_link(payload: dict) -> dict:
+    """
+    Create a Payment Link (PA) in Airwallex.
+    Use this to replace billing_checkouts for consistent cus_ ID usage.
+    """
+    token = await _get_token()
+    async with httpx.AsyncClient(base_url=settings.AIRWALLEX_BASE_URL, timeout=15) as client:
+        resp = await client.post(
+            "/api/v1/pa/payment_links/create",
+            json=payload,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        )
+        if resp.status_code >= 400:
+            print(f"[Airwallex PaymentLink ERROR] Status: {resp.status_code}, Body: {resp.text}")
+        resp.raise_for_status()
+        return resp.json()

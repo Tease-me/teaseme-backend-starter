@@ -130,89 +130,31 @@ class CreditTransaction(Base):
     ts: Mapped[datetime]     = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
-class AirwallexBillingCheckout(Base):
-    __tablename__ = "airwallex_billing_checkouts"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-
-    request_id: Mapped[str] = mapped_column(String, unique=True, index=True)
-    airwallex_checkout_id: Mapped[str | None] = mapped_column(String, unique=True, nullable=True, index=True)
-
-    mode: Mapped[str] = mapped_column(String)  # PAYMENT / SETUP
-    status: Mapped[str | None] = mapped_column(String, nullable=True)
-    currency: Mapped[str | None] = mapped_column(String, nullable=True)
-    billing_customer_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
-    purpose: Mapped[str | None] = mapped_column(String, nullable=True)
-
-    success_url: Mapped[str | None] = mapped_column(String, nullable=True)
-    back_url: Mapped[str | None] = mapped_column(String, nullable=True)
-
-    request_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    response_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-    )
-
-
-class AirwallexPaymentIntent(Base):
-    __tablename__ = "airwallex_payment_intents"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-
-    request_id: Mapped[str] = mapped_column(String, unique=True, index=True)
-    merchant_order_id: Mapped[str] = mapped_column(String, unique=True, index=True)
-    airwallex_payment_intent_id: Mapped[str | None] = mapped_column(String, unique=True, nullable=True, index=True)
-
-    amount_cents: Mapped[int] = mapped_column(Integer)
-    currency: Mapped[str] = mapped_column(String, default="USD")
-    status: Mapped[str | None] = mapped_column(String, nullable=True)
-    purpose: Mapped[str | None] = mapped_column(String, nullable=True)
-    billing_customer_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
-
-    request_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    response_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-    )
-
-
 class WalletTopup(Base):
+    """
+    Unified table for all wallet top-ups (manual or auto).
+    Stores both the internal ledger status and the external Airwallex transaction data.
+    """
     __tablename__ = "wallet_topups"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
 
+    # Transaction Details
     amount_cents: Mapped[int] = mapped_column(Integer)
     currency: Mapped[str] = mapped_column(String, default="USD")
     source: Mapped[str] = mapped_column(String, default="manual")  # manual / auto
     status: Mapped[str] = mapped_column(String, default="pending")  # pending / succeeded / failed / requires_action
+    
+    # Airwallex External Data
+    ext_transaction_id: Mapped[str | None] = mapped_column(String, unique=True, nullable=True, index=True) # checkout_id or payment_intent_id
+    ext_request_id: Mapped[str | None] = mapped_column(String, unique=True, index=True)
+    billing_customer_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    
+    # Payloads for debugging/audit
+    request_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    response_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
-    airwallex_payment_intent_row_id: Mapped[int | None] = mapped_column(
-        ForeignKey("airwallex_payment_intents.id"),
-        nullable=True,
-        index=True,
-    )
-    airwallex_billing_checkout_row_id: Mapped[int | None] = mapped_column(
-        ForeignKey("airwallex_billing_checkouts.id"),
-        nullable=True,
-        index=True,
-    )
     credit_transaction_id: Mapped[int | None] = mapped_column(
         ForeignKey("credit_transactions.id"),
         nullable=True,

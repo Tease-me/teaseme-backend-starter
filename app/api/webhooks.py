@@ -535,36 +535,51 @@ async def airwallex_webhook(
         or data.get("object_id")
     )
     request_id = data.get("request_id")
+    if not request_id:
+        request_id = data.get("metadata", {}).get("request_id")
     status = (data.get("status") or "").upper()
 
     from sqlalchemy import select
-    from app.db.models import AirwallexBillingCheckout, CreditTransaction, CreditWallet, WalletTopup
+    from app.db.models import CreditTransaction, CreditWallet, WalletTopup, User
 
-    checkout_row = None
+    # Find the single unified transaction record
+    wallet_topup = None
     if checkout_id:
-        checkout_row = await db.scalar(
-            select(AirwallexBillingCheckout).where(AirwallexBillingCheckout.airwallex_checkout_id == checkout_id)
+        wallet_topup = await db.scalar(
+            select(WalletTopup).where(WalletTopup.ext_transaction_id == checkout_id)
         )
-    if not checkout_row and request_id:
-        checkout_row = await db.scalar(
-            select(AirwallexBillingCheckout).where(AirwallexBillingCheckout.request_id == request_id)
+    if not wallet_topup and request_id:
+        wallet_topup = await db.scalar(
+            select(WalletTopup).where(WalletTopup.ext_request_id == request_id)
         )
 
-    if not checkout_row:
+    if not wallet_topup:
         return {"ok": True, "ignored": True}
 
-    checkout_row.status = status or checkout_row.status
-    checkout_row.response_payload = payload
-    db.add(checkout_row)
+    # Updating the transaction record
+    wallet_topup.response_payload = payload
+    if status:
+        # Map Airwallex status to internal status roughly if needed, 
+        # or just store "succeeded" / "failed" based on event type
+        pass # We handle specific success statuses below
+    
+    # Extract billing_customer_id from webhook data
+    billing_customer_id = data.get("billing_customer_id")
+    if billing_customer_id:
+        wallet_topup.billing_customer_id = billing_customer_id
 
-    topup = await db.scalar(
-        select(WalletTopup)
-        .where(WalletTopup.airwallex_billing_checkout_row_id == checkout_row.id)
-        .with_for_update()
-    )
-    if not topup:
-        await db.commit()
-        return {"ok": True, "updated_checkout": True}
+    db.add(wallet_topup)
+
+    # Save billing_customer_id to users table for future auto-topup
+    if billing_customer_id and wallet_topup.user_id:
+        user = await db.get(User, wallet_topup.user_id)
+        if user and not user.billing_customer_id:
+            user.billing_customer_id = billing_customer_id
+            db.add(user)
+            log.info(
+                "webhook.saved_billing_customer user_id=%s billing_customer_id=%s",
+                wallet_topup.user_id, billing_customer_id[:8] + "..."
+            )
 
     success_statuses = {"SUCCEEDED", "CAPTURE_SUCCEEDED", "CAPTURED", "SUCCESS", "COMPLETED", "PAID"}
     failure_statuses = {"FAILED", "CANCELLED", "CANCELED", "EXPIRED"}
@@ -572,32 +587,32 @@ async def airwallex_webhook(
     is_refundish = "refund" in str(event_type).lower() or "chargeback" in str(event_type).lower()
 
     if not is_refundish and status in success_statuses:
-        if topup.credit_transaction_id is None and topup.status != "succeeded":
-            wallet = await db.get(CreditWallet, topup.user_id) or CreditWallet(user_id=topup.user_id)
-            wallet.balance_cents = (wallet.balance_cents or 0) + (topup.amount_cents or 0)
+        if wallet_topup.credit_transaction_id is None and wallet_topup.status != "succeeded":
+            wallet = await db.get(CreditWallet, wallet_topup.user_id) or CreditWallet(user_id=wallet_topup.user_id)
+            wallet.balance_cents = (wallet.balance_cents or 0) + (wallet_topup.amount_cents or 0)
             tx = CreditTransaction(
-                user_id=topup.user_id,
+                user_id=wallet_topup.user_id,
                 feature="topup",
-                units=topup.amount_cents,
-                amount_cents=topup.amount_cents,
+                units=wallet_topup.amount_cents,
+                amount_cents=wallet_topup.amount_cents,
                 meta={
                     "source": "manual_topup_airwallex",
-                    "wallet_topup_id": topup.id,
-                    "airwallex_checkout_id": checkout_row.airwallex_checkout_id,
+                    "wallet_topup_id": wallet_topup.id,
+                    "ext_transaction_id": wallet_topup.ext_transaction_id,
                     "event_type": event_type,
                 },
             )
             db.add_all([wallet, tx])
             await db.flush()
-            topup.status = "succeeded"
-            topup.credit_transaction_id = tx.id
-            db.add(topup)
+            wallet_topup.status = "succeeded"
+            wallet_topup.credit_transaction_id = tx.id
+            db.add(wallet_topup)
 
     elif not is_refundish and status in failure_statuses:
-        if topup.status not in {"succeeded", "refunded"}:
-            topup.status = "failed"
-            topup.error_message = f"checkout_status={status}"
-            db.add(topup)
+        if wallet_topup.status not in {"succeeded", "refunded"}:
+            wallet_topup.status = "failed"
+            wallet_topup.error_message = f"checkout_status={status}"
+            db.add(wallet_topup)
 
     elif is_refundish:
         amount_cents = data.get("amount") or data.get("amount_cents") or topup.amount_cents
