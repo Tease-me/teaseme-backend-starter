@@ -154,7 +154,6 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
         history.add_messages(trimmed)
 
     recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
-    analysis_summary = "Intent: unknown\nMeaning: unknown\nEmotion: unknown\nUrgency/Risk: none noted"
 
     # Gather all independent async operations
     influencer, prompt_template, daily_context = await asyncio.gather(
@@ -280,8 +279,21 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
         s for s in (_norm(m) for m in memories or []) if s
     )
 
+    stages = bio.get("stages", {})
+
+    dating_stage = stages["dating"]
+    dislike_stage = stages["dislike"]
+    talking_stage = stages["talking"]
+    flirting_stage = stages["flirting"]
+    hate_stage = stages["hate"]
+    strangers_stage = stages["strangers"]
+    in_love_stage = stages["in_love"]
+
+    mbti_rules = bio.get("mbti_rules", "")
+    personality_rules = bio.get("personality_rules", "")
+    tone=bio.get("tone", "")
+
     prompt = prompt_template.partial(
-        analysis=analysis_summary,
         relationship_state=rel.state,
         trust=int(rel.trust),
         closeness=int(rel.closeness),
@@ -291,10 +303,21 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
         girlfriend_confirmed=rel.girlfriend_confirmed,
         days_idle_before_message=round(days_idle, 1),
         dtr_goal=dtr_goal,
-        persona_rules=influencer.prompt_template,
+        personality_rules=personality_rules,
+        dating_stage=dating_stage,
+        dislike_stage=dislike_stage,
+        talking_stage=talking_stage,
+        flirting_stage=flirting_stage,
+        hate_stage=hate_stage,
+        strangers_stage=strangers_stage,
+        in_love_stage=in_love_stage,
+        likes=", ".join(map(str, persona_likes or [])),
+        dislikes=", ".join(map(str, persona_dislikes or [])),
+        mbti_rules=mbti_rules,
         memories=mem_block,
         daily_context=daily_context,
         last_user_message=message,
+        tone=tone,
     )
 
     try:
