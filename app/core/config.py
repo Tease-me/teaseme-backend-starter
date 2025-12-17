@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     )
     AIRWALLEX_CLIENT_ID: str | None = None
     AIRWALLEX_API_KEY: str | None = None
+    AIRWALLEX_WEBHOOK_TOKEN: str | None = None
+    AIRWALLEX_WEBHOOK_SECRET: str | None = None
+    AIRWALLEX_WEBHOOK_TOLERANCE_MS: int = 5 * 60 * 1000
     TWITTER_BEARER_TOKEN: str | None = None
 
 settings = Settings()

@@ -2,7 +2,12 @@ import io
 import logging
 from typing import List, Dict
 from PyPDF2 import PdfReader
-from docx import Document
+try:
+    # python-docx provides the `docx` module; a separate `docx` PyPI package can conflict and break imports.
+    from docx import Document  # type: ignore
+except Exception as e:
+    Document = None  # type: ignore[assignment]
+    _DOCX_IMPORT_ERROR = e
 
 log = logging.getLogger("document_parser")
 
@@ -21,6 +26,11 @@ async def extract_text_from_pdf(file_obj: io.BytesIO) -> str:
 
 async def extract_text_from_docx(file_obj: io.BytesIO) -> str:
     """Extract text from Word document, including tables"""
+    if Document is None:
+        raise ValueError(
+            "DOCX parsing is unavailable (python-docx import failed). "
+            "If you installed the 'docx' package by mistake, uninstall it and install 'python-docx'."
+        )
     try:
         file_obj.seek(0)
         doc = Document(file_obj)
@@ -97,4 +107,3 @@ def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> List[Di
     
     log.info(f"Chunked text into {len(chunks)} chunks (chunk_size={chunk_size}, overlap={overlap})")
     return chunks
-

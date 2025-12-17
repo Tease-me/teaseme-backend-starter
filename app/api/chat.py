@@ -347,9 +347,9 @@ async def chat_audio(
      # 🔒 PRE-CHECK: deny if cannot afford 'seconds' of voice
     ok, cost, free_left = await can_afford(db, user_id=user_id, feature="voice", units=int(seconds))
     if not ok:
-        # 402 Payment Required with structured detail
+        # Conflicting state: insufficient credits
         raise HTTPException(
-            status_code=402,
+            status_code=409,
             detail={
                 "error": "INSUFFICIENT_CREDITS",
                 "message": "You’re out of free voice and credits. Please top up to continue.",

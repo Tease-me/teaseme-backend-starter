@@ -46,3 +46,17 @@ class AutoTopupCheckRequest(BaseModel):
     success_url: HttpUrl | None = None
     cancel_url: HttpUrl | None = None
     currency: str = "USD"
+
+
+class TopUpCheckoutRequest(BaseModel):
+    amount_cents: int
+    currency: str = "USD"
+    success_url: HttpUrl
+    cancel_url: HttpUrl
+
+    @model_validator(mode="after")
+    def validate_amount(self):
+        if self.amount_cents <= 0:
+            raise ValueError("amount_cents must be positive.")
+        self.currency = (self.currency or "USD").upper()
+        return self

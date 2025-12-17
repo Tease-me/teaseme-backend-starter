@@ -1,7 +1,10 @@
 import logging
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.chat import router
 from app.api.auth import router as auth_router
@@ -36,6 +39,19 @@ origins_str = os.getenv("CORS_ORIGINS", "")
 origins = [origin.strip() for origin in origins_str.split(",") if origin.strip()]
 
 app = FastAPI()
+
+@app.exception_handler(RequestValidationError)
+async def billing_validation_exception_handler(request: Request, exc: RequestValidationError):
+    if request.url.path.startswith("/billing"):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "BAD_REQUEST",
+                "message": "The request failed validation.",
+                "detail": exc.errors(),
+            },
+        )
+    return await request_validation_exception_handler(request, exc)
 
 app.add_middleware(
     CORSMiddleware,

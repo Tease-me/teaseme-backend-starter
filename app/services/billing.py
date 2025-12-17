@@ -56,9 +56,16 @@ async def charge_feature(db, *, user_id: int, feature: str, units: int, meta: di
             should_topup = threshold is not None and post_balance_without_topup < threshold
             if should_topup:
                 if auto_amount <= 0:
-                    raise HTTPException(402, "Auto top-up amount is not configured.")
+                    raise HTTPException(400, "Auto top-up amount is not configured.")
                 if not user_obj or not user_obj.billing_customer_id:
-                    raise HTTPException(402, "Auto top-up requires a saved payment method.")
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "error": "ACTION_REQUIRED",
+                            "message": "Auto top-up requires a saved payment method.",
+                            "action": "SETUP_PAYMENT_METHOD",
+                        },
+                    )
                 topup_result = await _perform_auto_topup(
                     db,
                     user=user_obj,
@@ -67,10 +74,11 @@ async def charge_feature(db, *, user_id: int, feature: str, units: int, meta: di
                 )
                 if topup_result.get("requires_action"):
                     raise HTTPException(
-                        status_code=402,
+                        status_code=409,
                         detail={
-                            "error": "AUTO_TOPUP_ACTION_REQUIRED",
+                            "error": "ACTION_REQUIRED",
                             "message": "Auto top-up requires user action.",
+                            "action": "SETUP_PAYMENT_METHOD",
                             **topup_result,
                         },
                     )
@@ -78,7 +86,15 @@ async def charge_feature(db, *, user_id: int, feature: str, units: int, meta: di
                 current_balance = wallet.balance_cents or 0
 
         if current_balance < cost:
-            raise HTTPException(402, "Insufficient credits")
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "INSUFFICIENT_CREDITS",
+                    "message": "Insufficient credits",
+                    "needed_cents": cost,
+                    "balance_cents": current_balance,
+                },
+            )
         
         wallet.balance_cents = current_balance - cost
         db.add(wallet)
@@ -153,7 +169,14 @@ async def _perform_auto_topup(
     if amount_cents <= 0:
         return {"topped_up": False, "topped_up_cents": 0}
     if not user or not user.billing_customer_id:
-        raise HTTPException(402, "Auto top-up requires a saved payment method.")
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "ACTION_REQUIRED",
+                "message": "Auto top-up requires a saved payment method.",
+                "action": "SETUP_PAYMENT_METHOD",
+            },
+        )
 
     request_id = str(uuid4())
     merchant_order_id = f"wallet-topup-{uuid4()}"
@@ -252,7 +275,13 @@ async def _perform_auto_topup(
         wallet_topup_row.error_message = f"status={status or 'unknown'}"
         db.add_all([payment_intent_row, wallet_topup_row])
         await db.commit()
-        raise HTTPException(402, f"Auto top-up failed (status={status or 'unknown'}).")
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "PAYMENT_FAILED",
+                "message": f"Auto top-up failed (status={status or 'unknown'}).",
+            },
+        )
 
     payment_intent_row.airwallex_payment_intent_id = payment.get("id")
     payment_intent_row.status = status or "REQUIRES_ACTION"
@@ -321,7 +350,14 @@ async def auto_topup_if_below_threshold(
                 "wallet_topup_id": wallet_topup_id,
             }
         if not user or not user.billing_customer_id:
-            raise HTTPException(402, "Auto top-up requires a saved payment method.")
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "ACTION_REQUIRED",
+                    "message": "Auto top-up requires a saved payment method.",
+                    "action": "SETUP_PAYMENT_METHOD",
+                },
+            )
         checkout_payload = {
             "request_id": str(uuid4()),
             "mode": "SETUP",

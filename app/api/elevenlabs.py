@@ -1067,7 +1067,7 @@ async def get_signed_url(
 
     if not ok:
         raise HTTPException(
-            status_code=402,
+            status_code=409,
             detail={
                 "error": "INSUFFICIENT_CREDITS",
                 "needed_cents": cost_cents,

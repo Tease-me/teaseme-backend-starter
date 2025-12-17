@@ -210,6 +210,43 @@ def _verify_token(shared: str, token: str | None) -> None:
     # constant-time compare (avoid timing attacks)
     if not hmac.compare_digest(shared, token):
         raise HTTPException(status_code=403, detail="Invalid webhook token")
+
+
+def _verify_airwallex_signature(
+    *,
+    secret: str | None,
+    timestamp_ms: str | None,
+    signature: str | None,
+    body_bytes: bytes,
+    tolerance_ms: int,
+) -> None:
+    """
+    Airwallex webhook verification.
+    expected_signature = HMAC_SHA256(secret, f"{timestamp}{raw_body}")
+    """
+    if not secret:
+        return
+    if not timestamp_ms or not signature:
+        raise HTTPException(status_code=401, detail="Missing Airwallex webhook signature headers")
+
+    try:
+        received_ts = int(timestamp_ms)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid x-timestamp header")
+
+    now_ms = int(time.time() * 1000)
+    if abs(now_ms - received_ts) > int(tolerance_ms):
+        raise HTTPException(status_code=401, detail="Stale Airwallex webhook timestamp")
+
+    sig = signature.strip()
+    if sig.lower().startswith("sha256="):
+        sig = sig.split("=", 1)[1].strip()
+
+    raw_body = body_bytes.decode("utf-8")
+    value_to_digest = f"{timestamp_ms}{raw_body}"
+    expected = hmac.new(secret.encode("utf-8"), value_to_digest.encode("utf-8"), sha256).hexdigest()
+    if not hmac.compare_digest(sig.lower(), expected.lower()):
+        raise HTTPException(status_code=401, detail="Invalid Airwallex webhook signature")
     
 @router.post("/memories")
 async def eleven_webhook_get_memories(
@@ -454,3 +491,145 @@ async def eleven_webhook_reply(
         reply = reply[:317] + "…"
 
     return {"text": reply}
+
+
+@router.post("/airwallex")
+async def airwallex_webhook(
+    req: Request,
+    db: AsyncSession = Depends(get_db),
+    x_timestamp: str | None = Header(default=None, alias="x-timestamp"),
+    x_signature: str | None = Header(default=None, alias="x-signature"),
+):
+    """
+    Airwallex webhook handler (minimal).
+    - Updates stored checkout/payment records
+    - Finalizes wallet top-ups (credits) when a PAYMENT checkout succeeds
+    - Attempts to reverse wallet credits on refund/chargeback events when possible
+    """
+    body_bytes = await req.body()
+    _verify_airwallex_signature(
+        secret=(settings.AIRWALLEX_WEBHOOK_SECRET or settings.AIRWALLEX_WEBHOOK_TOKEN),
+        timestamp_ms=x_timestamp,
+        signature=x_signature,
+        body_bytes=body_bytes,
+        tolerance_ms=settings.AIRWALLEX_WEBHOOK_TOLERANCE_MS,
+    )
+    try:
+        payload = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    event_type = (
+        payload.get("type")
+        or payload.get("name")
+        or payload.get("event_type")
+        or payload.get("event")
+        or ""
+    )
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+
+    checkout_id = (
+        data.get("id")
+        or data.get("billing_checkout_id")
+        or data.get("checkout_id")
+        or data.get("object_id")
+    )
+    request_id = data.get("request_id")
+    status = (data.get("status") or "").upper()
+
+    from sqlalchemy import select
+    from app.db.models import AirwallexBillingCheckout, CreditTransaction, CreditWallet, WalletTopup
+
+    checkout_row = None
+    if checkout_id:
+        checkout_row = await db.scalar(
+            select(AirwallexBillingCheckout).where(AirwallexBillingCheckout.airwallex_checkout_id == checkout_id)
+        )
+    if not checkout_row and request_id:
+        checkout_row = await db.scalar(
+            select(AirwallexBillingCheckout).where(AirwallexBillingCheckout.request_id == request_id)
+        )
+
+    if not checkout_row:
+        return {"ok": True, "ignored": True}
+
+    checkout_row.status = status or checkout_row.status
+    checkout_row.response_payload = payload
+    db.add(checkout_row)
+
+    topup = await db.scalar(
+        select(WalletTopup)
+        .where(WalletTopup.airwallex_billing_checkout_row_id == checkout_row.id)
+        .with_for_update()
+    )
+    if not topup:
+        await db.commit()
+        return {"ok": True, "updated_checkout": True}
+
+    success_statuses = {"SUCCEEDED", "CAPTURE_SUCCEEDED", "CAPTURED", "SUCCESS", "COMPLETED", "PAID"}
+    failure_statuses = {"FAILED", "CANCELLED", "CANCELED", "EXPIRED"}
+
+    is_refundish = "refund" in str(event_type).lower() or "chargeback" in str(event_type).lower()
+
+    if not is_refundish and status in success_statuses:
+        if topup.credit_transaction_id is None and topup.status != "succeeded":
+            wallet = await db.get(CreditWallet, topup.user_id) or CreditWallet(user_id=topup.user_id)
+            wallet.balance_cents = (wallet.balance_cents or 0) + (topup.amount_cents or 0)
+            tx = CreditTransaction(
+                user_id=topup.user_id,
+                feature="topup",
+                units=topup.amount_cents,
+                amount_cents=topup.amount_cents,
+                meta={
+                    "source": "manual_topup_airwallex",
+                    "wallet_topup_id": topup.id,
+                    "airwallex_checkout_id": checkout_row.airwallex_checkout_id,
+                    "event_type": event_type,
+                },
+            )
+            db.add_all([wallet, tx])
+            await db.flush()
+            topup.status = "succeeded"
+            topup.credit_transaction_id = tx.id
+            db.add(topup)
+
+    elif not is_refundish and status in failure_statuses:
+        if topup.status not in {"succeeded", "refunded"}:
+            topup.status = "failed"
+            topup.error_message = f"checkout_status={status}"
+            db.add(topup)
+
+    elif is_refundish:
+        amount_cents = data.get("amount") or data.get("amount_cents") or topup.amount_cents
+        try:
+            amount_cents = int(amount_cents)
+        except Exception:
+            amount_cents = topup.amount_cents
+
+        if topup.status == "succeeded" and amount_cents and amount_cents > 0:
+            wallet = await db.get(CreditWallet, topup.user_id) or CreditWallet(user_id=topup.user_id)
+            balance = wallet.balance_cents or 0
+            if balance >= amount_cents:
+                wallet.balance_cents = balance - amount_cents
+                tx = CreditTransaction(
+                    user_id=topup.user_id,
+                    feature="refund",
+                    units=-amount_cents,
+                    amount_cents=-amount_cents,
+                    meta={
+                        "source": "airwallex_refund",
+                        "wallet_topup_id": topup.id,
+                        "airwallex_checkout_id": checkout_row.airwallex_checkout_id,
+                        "event_type": event_type,
+                    },
+                )
+                db.add_all([wallet, tx])
+                topup.status = "refunded"
+                db.add(topup)
+            else:
+                topup.status = "refund_failed_insufficient_balance"
+                topup.error_message = f"refund_amount={amount_cents} balance={balance}"
+                db.add(topup)
+
+    await db.commit()
+    return {"ok": True}
