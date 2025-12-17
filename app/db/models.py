@@ -1,6 +1,7 @@
 from sqlalchemy.orm import DeclarativeBase, mapped_column, Mapped, relationship
 from sqlalchemy import Integer, String, Boolean, Text, ForeignKey, DateTime, JSON, Index, Float
 from typing import Optional, List
+from sqlalchemy.dialects.postgresql import JSONB
 
 from datetime import datetime, timezone
 from pgvector.sqlalchemy import Vector
@@ -21,7 +22,8 @@ class Influencer(Base):
     owner_id:       Mapped[int | None]   = mapped_column(ForeignKey("users.id"), nullable=True)
     voice_id:       Mapped[str | None]   = mapped_column(String, nullable=True)        # ElevenLabs, etc.
     prompt_template:Mapped[str]          = mapped_column(Text, nullable=False)
-    voice_prompt:   Mapped[str | None] = mapped_column(String, nullable=True)
+
+    bio_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     profile_photo_key: Mapped[str | None] = mapped_column(String, nullable=True)
     profile_video_key: Mapped[str | None] = mapped_column(String, nullable=True)
     native_language: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -51,6 +53,7 @@ class User(Base):
     email_token: Mapped[str] = mapped_column(String, nullable=True)
     password_reset_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     password_reset_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    profile_photo_key: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     chats = relationship("Chat", back_populates="user")
     following_influencers: Mapped[List["InfluencerFollower"]] = relationship(
@@ -257,6 +260,9 @@ class PreInfluencer(Base):
     survey_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     survey_answers: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     survey_step: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    
+    ig_user_id: Mapped[str] = mapped_column(String, nullable=True)
+    ig_access_token: Mapped[str] = mapped_column(String, nullable=True)
 
     status: Mapped[str] = mapped_column(
         String, default="pending", nullable=False
@@ -271,5 +277,46 @@ class PreInfluencer(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
+    )
+
+class RelationshipState(Base):
+    __tablename__ = "relationship_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    influencer_id: Mapped[str] = mapped_column(ForeignKey("influencers.id", ondelete="CASCADE"), index=True)
+
+    trust: Mapped[float] = mapped_column(Float, default=10.0)
+    closeness: Mapped[float] = mapped_column(Float, default=10.0)
+    attraction: Mapped[float] = mapped_column(Float, default=5.0)
+    safety: Mapped[float] = mapped_column(Float, default=95.0)
+
+    state: Mapped[str] = mapped_column(String, default="STRANGERS")
+
+    exclusive_agreed: Mapped[bool] = mapped_column(Boolean, default=False)
+    girlfriend_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    dtr_stage: Mapped[int] = mapped_column(Integer, default=0)
+    dtr_cooldown_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    
+    stage_points: Mapped[float] = mapped_column(Float, default=0.0)
+    sentiment_score: Mapped[float] = mapped_column(Float, default=0.0)
+
+    last_interaction_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index("ix_rel_user_influencer", "user_id", "influencer_id", unique=True),
     )
 

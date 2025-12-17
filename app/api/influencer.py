@@ -2,16 +2,11 @@ import io
 import logging
 from datetime import datetime
 from typing import List, Optional
-
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-
-from app.api.elevenlabs import update_elevenlabs_prompt
-from app.core.config import settings
 from app.db.models import Influencer
 from app.db.session import get_db
-from app.schemas.elevenlabs import UpdatePromptBody
 from app.schemas.influencer import InfluencerCreate, InfluencerOut, InfluencerUpdate, InfluencerDetail
 from app.utils.s3 import (
     generate_influencer_presigned_url,
@@ -28,40 +23,6 @@ from app.utils.s3 import (
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/influencer", tags=["influencer"])
-
-
-async def _sync_influencer_integrations(
-    *,
-    influencer: Influencer,
-    db: AsyncSession,
-    voice_prompt_changed: bool,
-) -> None:
-    """Ensure GPT + ElevenLabs agents stay in sync before committing."""
-    instructions = getattr(influencer, "prompt_template", None)
-
-    if instructions is None:
-        raise HTTPException(400, "prompt_template is required to sync influencer assistants.")
-
-    if not getattr(influencer, "voice_id", None) and settings.ELEVENLABS_VOICE_ID:
-        influencer.voice_id = settings.ELEVENLABS_VOICE_ID
-
-    voice_prompt_value = getattr(influencer, "voice_prompt", None)
-    agent_id = getattr(influencer, "influencer_agent_id_third_part", None)
-    resolved_voice_id = getattr(influencer, "voice_id", None) or settings.ELEVENLABS_VOICE_ID
-    has_agent_or_voice = bool(agent_id or resolved_voice_id)
-    if voice_prompt_changed and voice_prompt_value and has_agent_or_voice:
-        body = UpdatePromptBody(
-            agent_id=agent_id,
-            influencer_id=influencer.id if influencer.id else None,
-            voice_prompt=voice_prompt_value,
-        )
-        await update_elevenlabs_prompt(body=body, db=db, auto_commit=False)
-    elif voice_prompt_changed and voice_prompt_value and not has_agent_or_voice:
-        log.info(
-            "Skipped ElevenLabs sync for influencer %s (missing voice_id and agent id; no default voice configured).",
-            getattr(influencer, "id", None),
-        )
-
 
 def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
     if not value:
@@ -88,8 +49,6 @@ async def get_influencer(id: str, db: AsyncSession = Depends(get_db)):
     video_url = generate_influencer_presigned_url(influencer.profile_video_key) if influencer.profile_video_key else None
     
     about_text = profile_json.get("about") if isinstance(profile_json, dict) else None
-
-    # Use model_validate to create base object from SQLAlchemy model, then update extra fields
     detail = InfluencerDetail.model_validate(influencer)
     detail.about = about_text
     detail.photo_url = photo_url
@@ -103,12 +62,7 @@ async def create_influencer(data: InfluencerCreate, db: AsyncSession = Depends(g
         raise HTTPException(400, "Influencer with this id already exists")
     influencer = Influencer(**data.model_dump())
     db.add(influencer)
-    await db.flush()  # ensure PK row exists before syncing external systems
-    # await _sync_influencer_integrations(
-    #     influencer=influencer,
-    #     db=db,
-    #     voice_prompt_changed=bool(influencer.voice_prompt),
-    # )
+    await db.flush()
     await db.commit()
     await db.refresh(influencer)
     return influencer
@@ -119,15 +73,9 @@ async def update_influencer(id: str, data: InfluencerUpdate, db: AsyncSession = 
     if not influencer:
         raise HTTPException(404, "Influencer not found")
     update_payload = data.model_dump(exclude_unset=True)
-    # voice_prompt_changed = "voice_prompt" in update_payload
     for key, value in update_payload.items():
         setattr(influencer, key, value)
     db.add(influencer)
-    # await _sync_influencer_integrations(
-    #     influencer=influencer,
-    #     db=db,
-    #     voice_prompt_changed=voice_prompt_changed,
-    # )
     await db.commit()
     await db.refresh(influencer)
     return influencer

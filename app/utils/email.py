@@ -1,5 +1,6 @@
 import logging
 import boto3
+from botocore.exceptions import ClientError
 from app.core.config import settings
 from datetime import datetime
 
@@ -186,7 +187,7 @@ def send_email_via_ses(to_email, subject, body_html, body_text=None):
     try:
         ses_client = boto3.client(
             "ses",
-            region_name="us-east-1",
+            region_name=AWS_REGION,
             aws_access_key_id=AWS_ACCESS_KEY_ID,
             aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
         )
