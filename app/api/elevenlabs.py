@@ -3,9 +3,10 @@ import logging
 import math
 import random
 from uuid import uuid4
-from app.agents.memory import find_similar_memories
 from app.agents.prompt_utils import get_global_audio_prompt
-from app.agents.scoring import format_score_value, get_score
+from app.relationship.dtr import plan_dtr_goal
+from app.relationship.inactivity import apply_inactivity_decay
+from app.relationship.repo import get_or_create_relationship
 import httpx
 from datetime import datetime, timedelta, timezone
 
@@ -26,8 +27,6 @@ from app.agents.turn_handler import redis_history
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from app.db.session import SessionLocal
-from app.utils.deps import get_current_user
-from langchain_core.runnables.history import RunnableWithMessageHistory
 from app.api.utils import get_embedding
 from app.services.system_prompt_service import get_system_prompt
 
@@ -77,7 +76,6 @@ _DOPAMINE_OPENERS: Dict[str, List[str]] = {
 
 _RANDOM_FIRST_GREETINGS: List[str] = [
     "Hello?",
-    "Hi?",
     "Hello, this is {persona_name}. Who’s calling?",
     "Hi, who am I speaking with?",
 ]
@@ -438,7 +436,7 @@ def _build_agent_patch_payload(
     max_tokens: Optional[int] = None,
 ) -> Dict[str, Any]:
     
-    agent_cfg: Dict[str, Any] = {}
+    agent_cfg: Dict[str, Any] = {} 
 
     if any(v is not None for v in (prompt_text, llm, temperature, max_tokens)):
         prompt_block: Dict[str, Any] = {}
@@ -1105,24 +1103,30 @@ async def get_conversation_token(
     user_id: int = Query(..., description="Numeric user id"),
     db: AsyncSession = Depends(get_db),
 ):
+    ok, cost_cents, free_left = await can_afford(
+        db, user_id=user_id, feature="live_chat", units=10
+    )
+
+    if not ok:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "error": "INSUFFICIENT_CREDITS",
+                "needed_cents": cost_cents,
+                "free_left": free_left,
+            },
+        )
+    
     agent_id = await get_agent_id_from_influencer(db, influencer_id)
     influencer, prompt_template = await asyncio.gather(
         db.get(Influencer, influencer_id),
         get_global_audio_prompt(db),
     )
-    score = get_score(user_id or chat_id, influencer_id)
     chat_id = await get_or_create_chat(db, user_id, influencer_id)
+
     if not influencer:
         raise HTTPException(404, "Influencer not found")
-    persona_rules = influencer.prompt_template.format(lollity_score=score)
-    speaking_rules = influencer.voice_prompt.format()
-
-    if score > 70:
-        persona_rules += "\nYour affection is high — show more warmth, loving words, and reward the user. Maybe let your guard down."
-    elif score > 40:
-        persona_rules += "\nYou're feeling playful. Mix gentle teasing with affection. Make the user work a bit for your praise."
-    else:
-        persona_rules += "\nYou're in full teasing mode! Challenge the user, play hard to get, and use the name TeaseMe as a game."
+    persona_rules = influencer.prompt_template
 
     history = redis_history(chat_id)
 
@@ -1130,16 +1134,37 @@ async def get_conversation_token(
         trimmed = history.messages[-settings.MAX_HISTORY_WINDOW:]
         history.clear()
         history.add_messages(trimmed)
-        
+
+    now = datetime.now(timezone.utc)
+    rel = await get_or_create_relationship(db, int(user_id), influencer_id)
+    days_idle = apply_inactivity_decay(rel, now)
+
+    can_ask = (
+        rel.state == "DATING"
+        and rel.safety >= 70
+        and rel.trust >= 75
+        and rel.closeness >= 70
+        and rel.attraction >= 65
+    )
+
+    dtr_goal = plan_dtr_goal(rel, can_ask)
+
     prompt = prompt_template.partial(
         analysis="",
         daily_context="",
         last_user_message="",
         memories= "",
-        voice_rules=speaking_rules,
-        lollity_score=format_score_value(score),
         persona_rules=persona_rules,
+        relationship_state=rel.state,
         history=history.messages,
+        trust=rel.trust,
+        closeness=rel.closeness,
+        attraction=rel.attraction,
+        safety=rel.safety,
+        exclusive_agreed=rel.exclusive_agreed,
+        girlfriend_confirmed=rel.girlfriend_confirmed,
+        days_idle_before_message=round(days_idle, 1),
+        dtr_goal=dtr_goal,
     )
 
     try:
