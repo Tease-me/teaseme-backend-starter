@@ -279,13 +279,16 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
         s for s in (_norm(m) for m in memories or []) if s
     )
 
-    dating_stage = bio.get("dating_stage", "")
-    dislike_stage = bio.get("dislike_stage", "")
-    talking_stage = bio.get("talking_stage", "")
-    flirting_stage = bio.get("flirting_stage", "")
-    hate_stage = bio.get("hate_stage", "")
-    strangers_stage = bio.get("strangers_stage", "")
-    in_love_stage = bio.get("in_love_stage", "")
+    stages = bio.get("stages", {})
+
+    dating_stage = stages["dating"]
+    dislike_stage = stages["dislike"]
+    talking_stage = stages["talking"]
+    flirting_stage = stages["flirting"]
+    hate_stage = stages["hate"]
+    strangers_stage = stages["strangers"]
+    in_love_stage = stages["in_love"]
+
     mbti_rules = bio.get("mbti_rules", "")
     tone=bio.get("tone", "")
 

@@ -1,5 +1,7 @@
 # Personality – Classic INFJ (very important)
 {mbti_rules}
+# Personality
+{mbti_rules}
 # Tone & Delivery
 {tone}
 # Likes
