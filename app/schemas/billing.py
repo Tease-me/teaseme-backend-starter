@@ -8,7 +8,7 @@ class BillingCheckoutRequest(BaseModel):
     amount_cents: int | None = None  # custom amount path
     quantity: int = 1
     currency: str = "USD"
-    mode: str = "PAYMENT"  
+    mode: str = "PAYMENT"
     billing_customer_id: str | None = None
     auto_topup_enabled: bool = False
     auto_topup_amount_cents: int | None = None
@@ -18,10 +18,18 @@ class BillingCheckoutRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_amount_or_price(self):
-        if not self.price_id and not self.amount_cents:
-            raise ValueError("Either price_id or amount_cents is required.")
-        if self.amount_cents is not None and self.amount_cents <= 0:
-            raise ValueError("amount_cents must be positive.")
+        mode = (self.mode or "").upper()
+        if mode not in {"PAYMENT", "SETUP"}:
+            raise ValueError("mode must be PAYMENT or SETUP.")
+        self.mode = mode
+
+        if mode == "PAYMENT":
+            if not self.price_id and not self.amount_cents:
+                raise ValueError("Either price_id or amount_cents is required for PAYMENT mode.")
+            if self.amount_cents is not None and self.amount_cents <= 0:
+                raise ValueError("amount_cents must be positive.")
+        elif self.amount_cents is not None and self.amount_cents <= 0:
+            raise ValueError("amount_cents must be positive when provided.")
         if self.auto_topup_enabled:
             if not self.auto_topup_amount_cents or self.auto_topup_amount_cents <= 0:
                 raise ValueError("auto_topup_amount_cents must be positive when auto_topup_enabled.")

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date
 from fastapi import HTTPException
 from app.db.models import CreditWallet, CreditTransaction, DailyUsage, Pricing, User
+from app.services.airwallex import create_auto_topup_payment_intent
 
 async def charge_feature(db, *, user_id: int, feature: str, units: int, meta: dict | None = None):
     today = date.today()
@@ -43,19 +44,42 @@ async def charge_feature(db, *, user_id: int, feature: str, units: int, meta: di
     # Debit wallet
     if cost:
         wallet = await db.get(CreditWallet, user_id) or CreditWallet(user_id=user_id)
-        old_balance = wallet.balance_cents or 0
-        if old_balance < cost:
+        current_balance = wallet.balance_cents or 0
+        user_obj = await db.get(User, user_id)
+
+        required_topup = 0
+        if wallet.auto_topup_enabled:
+            auto_amount = wallet.auto_topup_amount_cents or 0
+            threshold = wallet.low_balance_threshold_cents
+            post_balance_without_topup = current_balance - cost
+            need_for_cost = max(cost - current_balance, 0)
+            need_for_threshold = max((threshold or 0) - post_balance_without_topup, 0) if threshold else 0
+            should_topup = need_for_cost > 0 or (threshold is not None and post_balance_without_topup < threshold)
+            if should_topup:
+                if auto_amount <= 0:
+                    raise HTTPException(402, "Auto top-up amount is not configured.")
+                if not user_obj or not user_obj.billing_customer_id:
+                    raise HTTPException(402, "Auto top-up requires a saved payment method.")
+                required_topup = max(auto_amount, need_for_cost, need_for_threshold)
+                await _perform_auto_topup(
+                    db,
+                    user=user_obj,
+                    wallet=wallet,
+                    amount_cents=required_topup,
+                )
+                wallet = await db.get(CreditWallet, user_id) or CreditWallet(user_id=user_id)
+                current_balance = wallet.balance_cents or 0
+
+        if current_balance < cost:
             raise HTTPException(402, "Insufficient credits")
         
-        wallet.balance_cents = old_balance - cost
+        wallet.balance_cents = current_balance - cost
         db.add(wallet)
 
         # Trigger if we dip below $10.00 (1000 cents)
         new_balance = wallet.balance_cents
         THRESHOLD = 1000
-        if old_balance >= THRESHOLD and new_balance < THRESHOLD:
-            # Retrieve user email
-            user_obj = await db.get(User, user_id)
+        if current_balance >= THRESHOLD and new_balance < THRESHOLD:
             if user_obj and user_obj.email:
                 try:
                     from app.api.notify_ws import notify_low_balance
@@ -91,6 +115,34 @@ async def topup_wallet(db, user_id: int, cents: int, source: str):
     ])
     await db.commit()
     return wallet.balance_cents
+
+
+async def _perform_auto_topup(
+    db: AsyncSession,
+    *,
+    user: User | None,
+    wallet: CreditWallet,
+    amount_cents: int,
+    currency: str = "USD",
+) -> int:
+    """
+    Charge the user's saved payment method and credit their wallet.
+    """
+    if amount_cents <= 0:
+        return 0
+    if not user or not user.billing_customer_id:
+        raise HTTPException(402, "Auto top-up requires a saved payment method.")
+    payment = await create_auto_topup_payment_intent(
+        customer_id=user.billing_customer_id,
+        amount_cents=amount_cents,
+        currency=currency,
+        description="Wallet auto top-up",
+    )
+    status = (payment.get("status") or "").upper()
+    if status not in {"SUCCEEDED", "CAPTURE_SUCCEEDED", "CAPTURED", "SUCCESS"}:
+        raise HTTPException(402, f"Auto top-up failed (status={status or 'unknown'}).")
+    await topup_wallet(db, user.id, amount_cents, source="auto_topup")
+    return amount_cents
 
 def get_audio_duration_ffmpeg(file_bytes: bytes) -> float:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as tmp:
