@@ -19,6 +19,8 @@ class Signals:
     respect: float = 0.0
     rude: float = 0.0
     boundary_push: float = 0.0
+    dislike: float = 0.0
+    hate: float = 0.0
     apology: float = 0.0
     commitment_talk: float = 0.0
     accepted_exclusive: bool = False
@@ -30,8 +32,6 @@ class RelOut:
     closeness: float
     attraction: float
     safety: float
-    state: str
-    can_ask_gf: bool
 
 def compute_state(trust, closeness, attraction, safety, prev_state):
     if prev_state == "BROKEN":
@@ -40,10 +40,8 @@ def compute_state(trust, closeness, attraction, safety, prev_state):
     if prev_state == "STRAINED":
         if safety < 45:
             return "STRAINED"
-
     if safety < 30:
         return "STRAINED"
-
     if trust > 80 and closeness > 75 and attraction > 70 and safety > 75:
         return "DATING"
     if attraction > 55 and closeness > 45 and safety > 55:
@@ -55,7 +53,7 @@ def compute_state(trust, closeness, attraction, safety, prev_state):
 def can_ask_gf(trust, closeness, attraction, safety, state):
     return state == "DATING" and safety >= 70 and trust >= 75 and closeness >= 70 and attraction >= 65
 
-def update_relationship(trust, closeness, attraction, safety, prev_state, sig: Signals) -> RelOut:
+def update_relationship(trust, closeness, attraction, safety, sig: Signals) -> RelOut:
     trust_pos = 8*sig.support + 6*sig.respect + 4*sig.apology
     trust_neg = 14*sig.rude + 18*sig.boundary_push
 
@@ -70,15 +68,10 @@ def update_relationship(trust, closeness, attraction, safety, prev_state, sig: S
 
     def cap(x, max_val): return min(x, max_val)
 
-    trust_pos  = cap(trust_pos, 4.0)
-    close_pos  = cap(close_pos, 4.0)
-    attr_pos   = cap(attr_pos, 3.0)
-    safety_pos = cap(safety_pos, 2.0)
-
-    trust_neg  = cap(trust_neg, 6.0)
-    close_neg  = cap(close_neg, 5.0)
-    attr_neg   = cap(attr_neg, 6.0)
-    safety_neg = cap(safety_neg, 6.0)
+    trust_pos  = cap(trust_pos, 4.0); trust_neg  = cap(trust_neg, 6.0)
+    close_pos  = cap(close_pos, 4.0); close_neg  = cap(close_neg, 5.0)
+    attr_pos   = cap(attr_pos, 3.0);  attr_neg   = cap(attr_neg, 6.0)
+    safety_pos = cap(safety_pos, 2.0); safety_neg = cap(safety_neg, 6.0)
 
     trust = sat_up(trust, trust_pos); trust = sat_down(trust, trust_neg)
     closeness = sat_up(closeness, close_pos); closeness = sat_down(closeness, close_neg)
@@ -90,6 +83,4 @@ def update_relationship(trust, closeness, attraction, safety, prev_state, sig: S
     attraction = clamp(attraction, 0, 100)
     safety = clamp(safety, 0, 100)
 
-    state = compute_state(trust, closeness, attraction, safety, prev_state)
-    ask = can_ask_gf(trust, closeness, attraction, safety, state)
-    return RelOut(trust, closeness, attraction, safety, state, ask)
+    return RelOut(trust, closeness, attraction, safety)

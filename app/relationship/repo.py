@@ -26,6 +26,7 @@ async def get_or_create_relationship(db, user_id: int, influencer_id: str) -> Re
         girlfriend_confirmed=False,
         dtr_stage=0,
         stage_points=0.0,
+        sentiment_score=0.0,
         dtr_cooldown_until=None,
         last_interaction_at=now,
         created_at=now,

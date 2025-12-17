@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.elevenlabs import _push_prompt_to_elevenlabs
 from app.db.models import Influencer
 from app.db.session import get_db
-from app.services.openai_assistants import upsert_influencer_agent
 from app.core.config import settings
 
 log = logging.getLogger("persona-import")
