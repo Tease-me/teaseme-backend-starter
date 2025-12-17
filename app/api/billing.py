@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import CreditWallet, WalletTopup
 from app.db.session import get_db
 from app.schemas.billing import AutoTopupCheckRequest, BillingCheckoutRequest, TopUpCheckoutRequest, TopUpRequest
-from app.services.airwallex import create_billing_checkout
+# Note: create_customer and create_payment_link are imported inline in functions
 from app.services.billing import auto_topup_if_below_threshold, topup_wallet
 from app.utils.deps import get_current_user
 
@@ -27,55 +27,65 @@ async def topup_checkout(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    """
+    Create a checkout session for wallet top-up.
+    Uses Payment Link API for consistent cus_ customer IDs.
+    """
+    # Ensure we have a PA customer ID (cus_), not a billing customer ID (bcus_)
+    from app.services.airwallex import create_customer, create_payment_link
+    
+    billing_customer_id = getattr(user, "billing_customer_id", None)
+    if not billing_customer_id or billing_customer_id.startswith("bcus_"):
+        cust = await create_customer(
+            email=user.email,
+            name=user.full_name or user.email,
+            reference_id=f"user_{user.id}",
+        )
+        billing_customer_id = cust.get("id")
+        user.billing_customer_id = billing_customer_id
+        db.add(user)
+        await db.flush()
+
+    request_id = str(uuid4())
+    
+    # Create WalletTopup record first
     wallet_topup = WalletTopup(
         user_id=user.id,
         amount_cents=req.amount_cents,
         currency=req.currency,
         source="manual",
         status="pending",
+        ext_request_id=request_id,
+        billing_customer_id=billing_customer_id,
         meta={"kind": "manual_wallet_topup"},
     )
     db.add(wallet_topup)
     await db.flush()
 
-    line_item = {
+    # Create Payment Link payload
+    payload = {
+        "request_id": request_id,
         "amount": req.amount_cents,
         "currency": req.currency,
-        "quantity": 1,
-    }
-    payload = {
-        "request_id": str(uuid4()),
-        "mode": "PAYMENT",
-        "currency": req.currency,
-        "line_items": [line_item],
-        "invoice_data": {"line_items": [line_item]},
+        "title": "Wallet Top-up",
+        "description": f"Add ${req.amount_cents / 100:.2f} to your wallet",
+        "reusable": False,
+        "customer_id": billing_customer_id,
+        "payment_intent_data": {
+            "setup_future_usage": "off_session",
+            "capture_method": "automatic",
+            "metadata": {"request_id": request_id, "wallet_topup_id": str(wallet_topup.id)},
+        },
         "success_url": str(req.success_url),
-        "back_url": str(req.cancel_url),
+        "return_url": str(req.success_url),
     }
 
-    billing_customer_id = getattr(user, "billing_customer_id", None)
-    if billing_customer_id:
-        payload["billing_customer_id"] = billing_customer_id
-    else:
-        payload["customer_data"] = {
-            "email": user.email,
-            "name": user.full_name or user.email,
-            "type": "INDIVIDUAL",
-        }
-
-    checkout = await create_billing_checkout(payload)
-    new_cust_id = checkout.get("billing_customer_id") or billing_customer_id
-    if new_cust_id and not getattr(user, "billing_customer_id", None):
-        user.billing_customer_id = new_cust_id
-        db.add(user)
-
-    # Consolidate into WalletTopup - no more AirwallexBillingCheckout
+    checkout = await create_payment_link(payload)
+    
+    # Update WalletTopup with response
     wallet_topup.ext_transaction_id = checkout.get("id")
-    wallet_topup.ext_request_id = payload["request_id"]
-    wallet_topup.billing_customer_id = new_cust_id
     wallet_topup.request_payload = payload
     wallet_topup.response_payload = checkout
-    # Update status immediately if we have it, though usually it's pending until webhook
     if checkout.get("status") in ("SUCCEEDED", "PAID"):
         wallet_topup.status = "succeeded"
 
@@ -84,10 +94,12 @@ async def topup_checkout(
 
     return {
         "wallet_topup_id": wallet_topup.id,
-        "checkout_id": checkout.get("id"),
+        "transaction_id": checkout.get("id"),  # For UI display
+        "checkout_url": checkout.get("url"),
         "status": checkout.get("status"),
-        "next_action": checkout.get("next_action"),
-        "billing_customer_id": new_cust_id,
+        "amount_cents": req.amount_cents,
+        "currency": req.currency,
+        "billing_customer_id": billing_customer_id,
     }
 
 
@@ -207,12 +219,13 @@ async def billing_checkout(
         await db.commit()
         
     return {
-        "checkout_id": payment_link.get("id"),
-        "checkout_url": payment_link.get("url"), # This is likely 'url' or 'short_url'
+        "wallet_topup_id": wallet_topup.id,
+        "transaction_id": payment_link.get("id"),  # For UI display
+        "checkout_url": payment_link.get("url"),
         "status": payment_link.get("status"),
-        "next_action": None, 
+        "amount_cents": amount_cents,
+        "currency": req.currency,
         "billing_customer_id": billing_customer_id,
-        "wallet_topup_id": wallet_topup.id
     }
 
 

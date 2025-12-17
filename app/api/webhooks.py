@@ -584,7 +584,7 @@ async def airwallex_webhook(
     success_statuses = {"SUCCEEDED", "CAPTURE_SUCCEEDED", "CAPTURED", "SUCCESS", "COMPLETED", "PAID"}
     failure_statuses = {"FAILED", "CANCELLED", "CANCELED", "EXPIRED"}
 
-    is_refundish = "refund" in str(event_type).lower() or "chargeback" in str(event_type).lower()
+    is_refundish = "refund" in str(event_type).lower() or "chargeback" in str(event_type).lower() or "dispute" in str(event_type).lower()
 
     if not is_refundish and status in success_statuses:
         if wallet_topup.credit_transaction_id is None and wallet_topup.status != "succeeded":
@@ -615,36 +615,72 @@ async def airwallex_webhook(
             db.add(wallet_topup)
 
     elif is_refundish:
-        amount_cents = data.get("amount") or data.get("amount_cents") or topup.amount_cents
+        is_chargeback = "chargeback" in str(event_type).lower() or "dispute" in str(event_type).lower()
+        
+        amount_cents = data.get("amount") or data.get("amount_cents") or wallet_topup.amount_cents
         try:
             amount_cents = int(amount_cents)
         except Exception:
-            amount_cents = topup.amount_cents
+            amount_cents = wallet_topup.amount_cents
 
-        if topup.status == "succeeded" and amount_cents and amount_cents > 0:
-            wallet = await db.get(CreditWallet, topup.user_id) or CreditWallet(user_id=topup.user_id)
+        if wallet_topup.status == "succeeded" and amount_cents and amount_cents > 0:
+            wallet = await db.get(CreditWallet, wallet_topup.user_id) or CreditWallet(user_id=wallet_topup.user_id)
             balance = wallet.balance_cents or 0
-            if balance >= amount_cents:
+            
+            if is_chargeback:
+                log.warning(
+                    "webhook.chargeback user_id=%s amount_cents=%s wallet_topup_id=%s event_type=%s",
+                    wallet_topup.user_id, amount_cents, wallet_topup.id, event_type
+                )
                 wallet.balance_cents = balance - amount_cents
                 tx = CreditTransaction(
-                    user_id=topup.user_id,
+                    user_id=wallet_topup.user_id,
+                    feature="chargeback",
+                    units=-amount_cents,
+                    amount_cents=-amount_cents,
+                    meta={
+                        "source": "airwallex_chargeback",
+                        "wallet_topup_id": wallet_topup.id,
+                        "ext_transaction_id": wallet_topup.ext_transaction_id,
+                        "event_type": event_type,
+                        "dispute_reason": data.get("reason") or data.get("dispute_reason"),
+                    },
+                )
+                db.add_all([wallet, tx])
+                wallet_topup.status = "chargebacked"
+                wallet_topup.error_message = f"chargeback: {event_type}"
+                db.add(wallet_topup)
+                
+            elif balance >= amount_cents:
+                wallet.balance_cents = balance - amount_cents
+                tx = CreditTransaction(
+                    user_id=wallet_topup.user_id,
                     feature="refund",
                     units=-amount_cents,
                     amount_cents=-amount_cents,
                     meta={
                         "source": "airwallex_refund",
-                        "wallet_topup_id": topup.id,
-                        "airwallex_checkout_id": checkout_row.airwallex_checkout_id,
+                        "wallet_topup_id": wallet_topup.id,
+                        "ext_transaction_id": wallet_topup.ext_transaction_id,
                         "event_type": event_type,
                     },
                 )
                 db.add_all([wallet, tx])
-                topup.status = "refunded"
-                db.add(topup)
+                wallet_topup.status = "refunded"
+                db.add(wallet_topup)
+                log.info(
+                    "webhook.refund.success user_id=%s amount_cents=%s wallet_topup_id=%s",
+                    wallet_topup.user_id, amount_cents, wallet_topup.id
+                )
             else:
-                topup.status = "refund_failed_insufficient_balance"
-                topup.error_message = f"refund_amount={amount_cents} balance={balance}"
-                db.add(topup)
+                # Insufficient balance for refund
+                wallet_topup.status = "refund_failed_insufficient_balance"
+                wallet_topup.error_message = f"refund_amount={amount_cents} balance={balance}"
+                db.add(wallet_topup)
+                log.warning(
+                    "webhook.refund.insufficient_balance user_id=%s amount=%s balance=%s",
+                    wallet_topup.user_id, amount_cents, balance
+                )
 
     await db.commit()
     return {"ok": True}

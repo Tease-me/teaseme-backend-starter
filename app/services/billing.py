@@ -14,7 +14,7 @@ from app.db.models import (
     User,
     WalletTopup,
 )
-from app.services.airwallex import create_auto_topup_payment_intent, create_billing_checkout
+from app.services.airwallex import create_auto_topup_payment_intent
 
 async def charge_feature(db, *, user_id: int, feature: str, units: int, meta: dict | None = None):
     today = date.today()
@@ -176,12 +176,27 @@ async def _perform_auto_topup(
             },
         )
 
+    from app.services.airwallex import create_customer
+    customer_id = user.billing_customer_id
+    if customer_id.startswith("bcus_"):
+        print(f"[AutoTopup] Migrating user {user.id} from bcus_ to cus_ customer ID")
+        cust = await create_customer(
+            email=user.email,
+            name=user.full_name or user.email,
+            reference_id=f"user_{user.id}",
+        )
+        customer_id = cust.get("id")
+        user.billing_customer_id = customer_id
+        db.add(user)
+        await db.flush()
+        print(f"[AutoTopup] User {user.id} now has PA customer ID: {customer_id}")
+
     request_id = str(uuid4())
     merchant_order_id = f"wallet-topup-{uuid4()}"
     request_payload = {
         "request_id": request_id,
         "merchant_order_id": merchant_order_id,
-        "customer_id": user.billing_customer_id,
+        "customer_id": customer_id,  # Use migrated cus_ ID
         "amount": amount_cents,
         "currency": currency,
         "description": "Wallet auto top-up",
@@ -194,7 +209,7 @@ async def _perform_auto_topup(
         currency=currency,
         source="auto",
         status="pending",
-        billing_customer_id=user.billing_customer_id,
+        billing_customer_id=customer_id,  # Use migrated cus_ ID
         ext_request_id=request_id,
         request_payload=request_payload,
         meta={"source": "auto_topup", "merchant_order_id": merchant_order_id}
@@ -204,7 +219,7 @@ async def _perform_auto_topup(
     wallet_topup_id = wallet_topup.id
 
     payment = await create_auto_topup_payment_intent(
-        customer_id=user.billing_customer_id,
+        customer_id=customer_id,  # Use migrated cus_ ID
         amount_cents=amount_cents,
         currency=currency,
         description="Wallet auto top-up",
@@ -245,45 +260,12 @@ async def _perform_auto_topup(
     db.add(wallet_topup)
     await db.commit()
     
-    return {"topped_up": True, "topped_up_cents": amount_cents, "new_balance": (await db.get(CreditWallet, user.id)).balance_cents}
-
-
-
-
-    requires_action = bool(payment.get("next_action")) or status in {
-        "REQUIRES_CUSTOMER_ACTION",
-        "REQUIRES_ACTION",
-        "ACTION_REQUIRED",
-    }
-    if not requires_action:
-        payment_intent_row.airwallex_payment_intent_id = payment.get("id")
-        payment_intent_row.status = status or "FAILED"
-        payment_intent_row.response_payload = payment
-        wallet_topup_row.status = "failed"
-        wallet_topup_row.error_message = f"status={status or 'unknown'}"
-        db.add_all([payment_intent_row, wallet_topup_row])
-        await db.commit()
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": "PAYMENT_FAILED",
-                "message": f"Auto top-up failed (status={status or 'unknown'}).",
-            },
-        )
-
-    payment_intent_row.airwallex_payment_intent_id = payment.get("id")
-    payment_intent_row.status = status or "REQUIRES_ACTION"
-    payment_intent_row.response_payload = payment
-    wallet_topup_row.status = "requires_action"
-    db.add_all([payment_intent_row, wallet_topup_row])
-    await db.commit()
-
     return {
-        "topped_up": False,
-        "requires_action": True,
-        "payment_intent_id": payment.get("id"),
-        "payment_intent_status": status or "unknown",
-        "wallet_topup_id": wallet_topup_row_id,
+        "topped_up": True,
+        "topped_up_cents": amount_cents,
+        "new_balance": (await db.get(CreditWallet, user.id)).balance_cents,
+        "transaction_id": str(wallet_topup_id),  # For UI display
+        "wallet_topup_id": wallet_topup_id,
     }
 
 
@@ -328,65 +310,14 @@ async def auto_topup_if_below_threshold(
         currency=currency,
     )
     if topup_result.get("requires_action"):
-        wallet_topup_id = topup_result.get("wallet_topup_id")
-        if not success_url or not cancel_url:
-            return {
-                "topped_up": False,
-                "requires_action": True,
-                "reason": "customer_action_required",
-                "action": "SETUP_PAYMENT_METHOD",
-                "wallet_topup_id": wallet_topup_id,
-            }
-        if not user or not user.billing_customer_id:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "error": "ACTION_REQUIRED",
-                    "message": "Auto top-up requires a saved payment method.",
-                    "action": "SETUP_PAYMENT_METHOD",
-                },
-            )
-        checkout_payload = {
-            "request_id": str(uuid4()),
-            "mode": "SETUP",
-            "currency": currency,
-            "success_url": success_url,
-            "back_url": cancel_url,
-            "billing_customer_id": user.billing_customer_id,
-        }
-        checkout = await create_billing_checkout(checkout_payload)
-        checkout_row = AirwallexBillingCheckout(
-            user_id=user.id,
-            request_id=checkout_payload["request_id"],
-            airwallex_checkout_id=checkout.get("id"),
-            mode="SETUP",
-            status=checkout.get("status"),
-            currency=currency,
-            billing_customer_id=user.billing_customer_id,
-            purpose="auto_topup_setup_fallback",
-            success_url=success_url,
-            back_url=cancel_url,
-            request_payload=checkout_payload,
-            response_payload=checkout,
-        )
-        db.add(checkout_row)
-        await db.flush()
-        if wallet_topup_id:
-            linked_wallet_topup = await db.get(WalletTopup, wallet_topup_id)
-            if linked_wallet_topup:
-                linked_wallet_topup.airwallex_billing_checkout_row_id = checkout_row.id
-                db.add(linked_wallet_topup)
-        await db.commit()
+        # User needs to set up a payment method before auto top-up can work
         return {
             "topped_up": False,
             "requires_action": True,
             "reason": "customer_action_required",
             "action": "SETUP_PAYMENT_METHOD",
-            "checkout_id": checkout.get("id"),
-            "checkout_status": checkout.get("status"),
-            "next_action": checkout.get("next_action"),
-            "billing_customer_id": user.billing_customer_id,
-            "wallet_topup_id": wallet_topup_id,
+            "message": "Please set up a payment method via /billing-checkout first.",
+            "wallet_topup_id": topup_result.get("wallet_topup_id"),
         }
 
     refreshed = await db.get(CreditWallet, user_id)
