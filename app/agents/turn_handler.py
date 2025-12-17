@@ -290,6 +290,7 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     in_love_stage = stages["in_love"]
 
     mbti_rules = bio.get("mbti_rules", "")
+    personality_rules = bio.get("personality_rules", "")
     tone=bio.get("tone", "")
 
     prompt = prompt_template.partial(
@@ -302,7 +303,7 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
         girlfriend_confirmed=rel.girlfriend_confirmed,
         days_idle_before_message=round(days_idle, 1),
         dtr_goal=dtr_goal,
-        # persona_rules=influencer.prompt_template,
+        personality_rules=personality_rules,
         dating_stage=dating_stage,
         dislike_stage=dislike_stage,
         talking_stage=talking_stage,
