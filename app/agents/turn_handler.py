@@ -154,7 +154,6 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
         history.add_messages(trimmed)
 
     recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
-    analysis_summary = "Intent: unknown\nMeaning: unknown\nEmotion: unknown\nUrgency/Risk: none noted"
 
     # Gather all independent async operations
     influencer, prompt_template, daily_context = await asyncio.gather(
@@ -285,9 +284,7 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     talking_stage = bio.get("talking_stage", "")
     flirting_stage = bio.get("flirting_stage", "")
     hate_stage = bio.get("hate_stage", "")
-    likes = bio.get("likes", "")
     strangers_stage = bio.get("strangers_stage", "")
-    dislikes = bio.get("dislikes", "")
     in_love_stage = bio.get("in_love_stage", "")
     mbti_rules = bio.get("mbti_rules", "")
     tone=bio.get("tone", "")
@@ -310,8 +307,8 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
         hate_stage=hate_stage,
         strangers_stage=strangers_stage,
         in_love_stage=in_love_stage,
-        likes=likes,
-        dislikes=dislikes,
+        likes=persona_likes,
+        dislikes=persona_likes,
         mbti_rules=mbti_rules,
         memories=mem_block,
         daily_context=daily_context,
