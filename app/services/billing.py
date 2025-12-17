@@ -4,18 +4,20 @@ import os
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date
+from uuid import uuid4
 from fastapi import HTTPException
 from app.db.models import CreditWallet, CreditTransaction, DailyUsage, Pricing, User
-from app.services.airwallex import create_auto_topup_payment_intent
+from app.services.airwallex import create_auto_topup_payment_intent, create_billing_checkout
 
 async def charge_feature(db, *, user_id: int, feature: str, units: int, meta: dict | None = None):
     today = date.today()
-    usage = await db.get(DailyUsage, (user_id, today)) or DailyUsage(user_id=user_id, date=today)
-
-    # Ensure no field is None
-    for field in ['text_count', 'voice_secs', 'live_secs']:
-        if getattr(usage, field, None) is None:
-            setattr(usage, field, 0)
+    usage = await db.get(DailyUsage, (user_id, today)) or DailyUsage(
+        user_id=user_id,
+        date=today,
+        text_count=0,
+        voice_secs=0,
+        live_secs=0,
+    )
 
     price: Pricing = await db.scalar(select(Pricing).where(
         Pricing.feature == feature, Pricing.is_active.is_(True)
@@ -32,41 +34,37 @@ async def charge_feature(db, *, user_id: int, feature: str, units: int, meta: di
     billable = max(units - free_left, 0)
     cost = billable * price.price_cents
 
-    # Update usage counters
-    if feature == "text":
-        usage.text_count += units
-    elif feature == "voice":
-        usage.voice_secs += units
-    else:
-        usage.live_secs += units
-    db.add(usage)
-
     # Debit wallet
     if cost:
         wallet = await db.get(CreditWallet, user_id) or CreditWallet(user_id=user_id)
         current_balance = wallet.balance_cents or 0
         user_obj = await db.get(User, user_id)
 
-        required_topup = 0
         if wallet.auto_topup_enabled:
             auto_amount = wallet.auto_topup_amount_cents or 0
             threshold = wallet.low_balance_threshold_cents
             post_balance_without_topup = current_balance - cost
-            need_for_cost = max(cost - current_balance, 0)
-            need_for_threshold = max((threshold or 0) - post_balance_without_topup, 0) if threshold else 0
-            should_topup = need_for_cost > 0 or (threshold is not None and post_balance_without_topup < threshold)
+            should_topup = threshold is not None and post_balance_without_topup < threshold
             if should_topup:
                 if auto_amount <= 0:
                     raise HTTPException(402, "Auto top-up amount is not configured.")
                 if not user_obj or not user_obj.billing_customer_id:
                     raise HTTPException(402, "Auto top-up requires a saved payment method.")
-                required_topup = max(auto_amount, need_for_cost, need_for_threshold)
-                await _perform_auto_topup(
+                topup_result = await _perform_auto_topup(
                     db,
                     user=user_obj,
                     wallet=wallet,
-                    amount_cents=required_topup,
+                    amount_cents=auto_amount,
                 )
+                if topup_result.get("requires_action"):
+                    raise HTTPException(
+                        status_code=402,
+                        detail={
+                            "error": "AUTO_TOPUP_ACTION_REQUIRED",
+                            "message": "Auto top-up requires user action.",
+                            **topup_result,
+                        },
+                    )
                 wallet = await db.get(CreditWallet, user_id) or CreditWallet(user_id=user_id)
                 current_balance = wallet.balance_cents or 0
 
@@ -76,16 +74,29 @@ async def charge_feature(db, *, user_id: int, feature: str, units: int, meta: di
         wallet.balance_cents = current_balance - cost
         db.add(wallet)
 
-        # Trigger if we dip below $10.00 (1000 cents)
+        # Trigger a low-balance notification when crossing below the configured threshold.
         new_balance = wallet.balance_cents
-        THRESHOLD = 1000
-        if current_balance >= THRESHOLD and new_balance < THRESHOLD:
+        notify_threshold = (
+            wallet.low_balance_threshold_cents
+            if wallet.low_balance_threshold_cents is not None
+            else 1000
+        )
+        if current_balance >= notify_threshold and new_balance < notify_threshold:
             if user_obj and user_obj.email:
                 try:
                     from app.api.notify_ws import notify_low_balance
                     await notify_low_balance(user_obj.email, new_balance)
                 except Exception as e:
                     print(f"Error sending low balance notification: {e}")
+
+    # Update usage counters (after any auto top-up side effects).
+    if feature == "text":
+        usage.text_count = (usage.text_count or 0) + units
+    elif feature == "voice":
+        usage.voice_secs = (usage.voice_secs or 0) + units
+    else:
+        usage.live_secs = (usage.live_secs or 0) + units
+    db.add(usage)
 
     db.add(CreditTransaction(
         user_id=user_id,
@@ -124,12 +135,12 @@ async def _perform_auto_topup(
     wallet: CreditWallet,
     amount_cents: int,
     currency: str = "USD",
-) -> int:
+) -> dict:
     """
     Charge the user's saved payment method and credit their wallet.
     """
     if amount_cents <= 0:
-        return 0
+        return {"topped_up": False, "topped_up_cents": 0}
     if not user or not user.billing_customer_id:
         raise HTTPException(402, "Auto top-up requires a saved payment method.")
     payment = await create_auto_topup_payment_intent(
@@ -139,10 +150,109 @@ async def _perform_auto_topup(
         description="Wallet auto top-up",
     )
     status = (payment.get("status") or "").upper()
-    if status not in {"SUCCEEDED", "CAPTURE_SUCCEEDED", "CAPTURED", "SUCCESS"}:
+    if status in {"SUCCEEDED", "CAPTURE_SUCCEEDED", "CAPTURED", "SUCCESS"}:
+        await topup_wallet(db, user.id, amount_cents, source="auto_topup")
+        return {
+            "topped_up": True,
+            "topped_up_cents": amount_cents,
+            "payment_intent_id": payment.get("id"),
+            "payment_intent_status": status,
+        }
+
+    requires_action = bool(payment.get("next_action")) or status in {
+        "REQUIRES_CUSTOMER_ACTION",
+        "REQUIRES_ACTION",
+        "ACTION_REQUIRED",
+    }
+    if not requires_action:
         raise HTTPException(402, f"Auto top-up failed (status={status or 'unknown'}).")
-    await topup_wallet(db, user.id, amount_cents, source="auto_topup")
-    return amount_cents
+
+    return {
+        "topped_up": False,
+        "requires_action": True,
+        "payment_intent_id": payment.get("id"),
+        "payment_intent_status": status or "unknown",
+    }
+
+
+async def auto_topup_if_below_threshold(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    currency: str = "USD",
+    success_url: str | None = None,
+    cancel_url: str | None = None,
+) -> dict:
+    """
+    Scheduled/explicit check: if the user's wallet balance is below the configured threshold,
+    charge the saved payment method and credit the wallet by the configured auto top-up amount.
+    """
+    wallet = await db.get(CreditWallet, user_id)
+    if not wallet or not wallet.auto_topup_enabled:
+        balance = wallet.balance_cents if wallet and wallet.balance_cents is not None else 0
+        return {"topped_up": False, "balance_cents": balance, "reason": "disabled"}
+
+    balance = wallet.balance_cents if wallet.balance_cents is not None else 0
+    threshold = wallet.low_balance_threshold_cents
+    auto_amount = wallet.auto_topup_amount_cents or 0
+
+    if threshold is None or threshold <= 0 or auto_amount <= 0:
+        raise HTTPException(400, "Auto top-up is not configured.")
+
+    if balance >= threshold:
+        return {
+            "topped_up": False,
+            "balance_cents": balance,
+            "threshold_cents": threshold,
+            "reason": "above_threshold",
+        }
+
+    user = await db.get(User, user_id)
+    topup_result = await _perform_auto_topup(
+        db,
+        user=user,
+        wallet=wallet,
+        amount_cents=auto_amount,
+        currency=currency,
+    )
+    if topup_result.get("requires_action"):
+        if not success_url or not cancel_url:
+            return {
+                "topped_up": False,
+                "requires_action": True,
+                "reason": "customer_action_required",
+                "action": "SETUP_PAYMENT_METHOD",
+            }
+        if not user or not user.billing_customer_id:
+            raise HTTPException(402, "Auto top-up requires a saved payment method.")
+        checkout_payload = {
+            "request_id": str(uuid4()),
+            "mode": "SETUP",
+            "currency": currency,
+            "success_url": success_url,
+            "back_url": cancel_url,
+            "billing_customer_id": user.billing_customer_id,
+        }
+        checkout = await create_billing_checkout(checkout_payload)
+        return {
+            "topped_up": False,
+            "requires_action": True,
+            "reason": "customer_action_required",
+            "action": "SETUP_PAYMENT_METHOD",
+            "checkout_id": checkout.get("id"),
+            "checkout_status": checkout.get("status"),
+            "next_action": checkout.get("next_action"),
+            "billing_customer_id": user.billing_customer_id,
+        }
+
+    refreshed = await db.get(CreditWallet, user_id)
+    new_balance = refreshed.balance_cents if refreshed and refreshed.balance_cents is not None else balance
+    return {
+        "topped_up": True,
+        "topped_up_cents": auto_amount,
+        "balance_cents": new_balance,
+        "threshold_cents": threshold,
+    }
 
 def get_audio_duration_ffmpeg(file_bytes: bytes) -> float:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as tmp:
@@ -266,8 +376,25 @@ async def can_afford(
     wallet = await db.get(CreditWallet, user_id)
     balance = wallet.balance_cents if wallet and wallet.balance_cents is not None else 0
 
-    ok = balance >= cost_cents
-    return ok or (cost_cents == 0), cost_cents, free_left
+    if cost_cents == 0:
+        return True, 0, free_left
+
+    if balance >= cost_cents:
+        return True, cost_cents, free_left
+
+    # If auto top-up is enabled, estimate whether a single top-up would cover this charge.
+    if wallet and wallet.auto_topup_enabled:
+        auto_amount = wallet.auto_topup_amount_cents or 0
+        threshold = wallet.low_balance_threshold_cents
+        if auto_amount > 0 and threshold is not None:
+            post_balance_without_topup = balance - cost_cents
+            should_topup = post_balance_without_topup < threshold
+            if should_topup:
+                user = await db.get(User, user_id)
+                if user and user.billing_customer_id and (balance + auto_amount) >= cost_cents:
+                    return True, cost_cents, free_left
+
+    return False, cost_cents, free_left
 
 async def get_remaining_units(db: AsyncSession, user_id: int, feature: str) -> int:
     """

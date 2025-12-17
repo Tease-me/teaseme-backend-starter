@@ -59,9 +59,6 @@ class User(Base):
         cascade="all, delete-orphan",
     )
     billing_customer_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    auto_topup_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    auto_topup_amount_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    low_balance_threshold_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 class Chat(Base):
     __tablename__ = "chats"
@@ -117,6 +114,9 @@ class CreditWallet(Base):
     __tablename__ = "credit_wallets"
     user_id: Mapped[int]     = mapped_column(ForeignKey("users.id"), primary_key=True)
     balance_cents: Mapped[int] = mapped_column(Integer, default=0)
+    auto_topup_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    auto_topup_amount_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    low_balance_threshold_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 class CreditTransaction(Base):
     """Immutable ledger of debits and credits."""
@@ -274,4 +274,3 @@ class PreInfluencer(Base):
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
-

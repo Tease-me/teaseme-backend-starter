@@ -3,9 +3,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import CreditWallet
 from app.db.session import get_db
-from app.schemas.billing import BillingCheckoutRequest, TopUpRequest
+from app.schemas.billing import AutoTopupCheckRequest, BillingCheckoutRequest, TopUpRequest
 from app.services.airwallex import create_billing_checkout
-from app.services.billing import topup_wallet
+from app.services.billing import auto_topup_if_below_threshold, topup_wallet
 from app.utils.deps import get_current_user
 
 router = APIRouter(prefix="/billing", tags=["billing"])
@@ -63,11 +63,18 @@ async def billing_checkout(
         user.billing_customer_id = new_cust_id
         db.add(user)
         await db.commit()
-    if req.auto_topup_enabled is not None:
+    if (
+        req.auto_topup_enabled is not None
+        or req.auto_topup_amount_cents is not None
+        or req.low_balance_threshold_cents is not None
+    ):
         wallet = await db.get(CreditWallet, user.id) or CreditWallet(user_id=user.id)
-        wallet.auto_topup_enabled = req.auto_topup_enabled
-        wallet.auto_topup_amount_cents = req.auto_topup_amount_cents
-        wallet.low_balance_threshold_cents = req.low_balance_threshold_cents
+        if req.auto_topup_enabled is not None:
+            wallet.auto_topup_enabled = req.auto_topup_enabled
+        if req.auto_topup_amount_cents is not None:
+            wallet.auto_topup_amount_cents = req.auto_topup_amount_cents
+        if req.low_balance_threshold_cents is not None:
+            wallet.low_balance_threshold_cents = req.low_balance_threshold_cents
         db.add(wallet)
         await db.commit()
         
@@ -77,3 +84,19 @@ async def billing_checkout(
         "next_action": checkout.get("next_action"),
         "billing_customer_id": new_cust_id or billing_customer_id,
     }
+
+
+@router.post("/auto-topup/check")
+async def auto_topup_check(
+    req: AutoTopupCheckRequest | None = None,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    result = await auto_topup_if_below_threshold(
+        db,
+        user_id=user.id,
+        currency=req.currency if req else "USD",
+        success_url=str(req.success_url) if req and req.success_url else None,
+        cancel_url=str(req.cancel_url) if req and req.cancel_url else None,
+    )
+    return {"ok": True, **result}
