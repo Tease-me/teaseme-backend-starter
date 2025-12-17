@@ -10,6 +10,9 @@ from app.db.session import get_db
 from sqlalchemy import select
 from app.db.models import RelationshipState, User
 
+from pydantic import BaseModel, Field
+from datetime import datetime, timezone
+from typing import Optional
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 log = logging.getLogger("admin")
@@ -123,3 +126,144 @@ async def list_users(q: str | None = None, db: AsyncSession = Depends(get_db)):
         }
         for u in users
     ]
+
+class RelationshipPatch(BaseModel):
+    user_id: int
+    influencer_id: str
+
+    trust: Optional[float] = Field(default=None, ge=0, le=100)
+    closeness: Optional[float] = Field(default=None, ge=0, le=100)
+    attraction: Optional[float] = Field(default=None, ge=0, le=100)
+    safety: Optional[float] = Field(default=None, ge=0, le=100)
+
+    state: Optional[str] = None
+
+    stage_points: Optional[float] = Field(default=None, ge=0, le=100)
+    sentiment_score: Optional[float] = Field(default=None, ge=-100, le=100)
+
+    exclusive_agreed: Optional[bool] = None
+    girlfriend_confirmed: Optional[bool] = None
+
+    dtr_stage: Optional[int] = Field(default=None, ge=0)
+    dtr_cooldown_until: Optional[datetime] = None
+    last_interaction_at: Optional[datetime] = None
+
+
+@router.patch("/relationships")
+async def patch_relationship(payload: RelationshipPatch, db: AsyncSession = Depends(get_db)):
+    q = select(RelationshipState).where(
+        RelationshipState.user_id == payload.user_id,
+        RelationshipState.influencer_id == payload.influencer_id,
+    )
+    res = await db.execute(q)
+    rel = res.scalar_one_or_none()
+
+    if not rel:
+        raise HTTPException(status_code=404, detail="Relationship not found")
+
+    # apply updates if provided
+    if payload.trust is not None:
+        rel.trust = payload.trust
+    if payload.closeness is not None:
+        rel.closeness = payload.closeness
+    if payload.attraction is not None:
+        rel.attraction = payload.attraction
+    if payload.safety is not None:
+        rel.safety = payload.safety
+
+    if payload.state is not None:
+        rel.state = payload.state
+
+    if payload.stage_points is not None:
+        rel.stage_points = payload.stage_points
+
+    if payload.sentiment_score is not None:
+        rel.sentiment_score = payload.sentiment_score
+
+    if payload.exclusive_agreed is not None:
+        rel.exclusive_agreed = payload.exclusive_agreed
+    if payload.girlfriend_confirmed is not None:
+        rel.girlfriend_confirmed = payload.girlfriend_confirmed
+
+    if payload.dtr_stage is not None:
+        rel.dtr_stage = payload.dtr_stage
+    if payload.dtr_cooldown_until is not None:
+        rel.dtr_cooldown_until = payload.dtr_cooldown_until
+
+    if payload.last_interaction_at is not None:
+        rel.last_interaction_at = payload.last_interaction_at
+
+    # optional: keep girlfriend sticky
+    if rel.girlfriend_confirmed:
+        rel.state = "GIRLFRIEND"
+        rel.exclusive_agreed = True
+
+    rel.updated_at = datetime.now(timezone.utc)
+
+    db.add(rel)
+    await db.commit()
+    await db.refresh(rel)
+
+    return {
+        "ok": True,
+        "relationship": {
+            "id": rel.id,
+            "user_id": rel.user_id,
+            "influencer_id": rel.influencer_id,
+            "trust": rel.trust,
+            "closeness": rel.closeness,
+            "attraction": rel.attraction,
+            "safety": rel.safety,
+            "state": rel.state,
+            "stage_points": rel.stage_points,
+            "sentiment_score": rel.sentiment_score,
+            "exclusive_agreed": rel.exclusive_agreed,
+            "girlfriend_confirmed": rel.girlfriend_confirmed,
+            "updated_at": rel.updated_at.isoformat() if rel.updated_at else None,
+        }
+    }
+
+@router.post("/relationships/update")
+async def update_relationship(payload: RelationshipPatch, db: AsyncSession = Depends(get_db)):
+    q = select(RelationshipState).where(
+        RelationshipState.user_id == payload.user_id,
+        RelationshipState.influencer_id == payload.influencer_id,
+    )
+    res = await db.execute(q)
+    rel = res.scalar_one_or_none()
+
+    if not rel:
+        raise HTTPException(status_code=404, detail="Relationship not found")
+
+    if payload.trust is not None:
+        rel.trust = payload.trust
+    if payload.closeness is not None:
+        rel.closeness = payload.closeness
+    if payload.attraction is not None:
+        rel.attraction = payload.attraction
+    if payload.safety is not None:
+        rel.safety = payload.safety
+
+    if payload.state is not None:
+        rel.state = payload.state
+    if payload.stage_points is not None:
+        rel.stage_points = payload.stage_points
+    if payload.sentiment_score is not None:
+        rel.sentiment_score = payload.sentiment_score
+
+    if payload.exclusive_agreed is not None:
+        rel.exclusive_agreed = payload.exclusive_agreed
+    if payload.girlfriend_confirmed is not None:
+        rel.girlfriend_confirmed = payload.girlfriend_confirmed
+
+    if rel.girlfriend_confirmed:
+        rel.state = "GIRLFRIEND"
+        rel.exclusive_agreed = True
+
+    rel.updated_at = datetime.now(timezone.utc)
+
+    db.add(rel)
+    await db.commit()
+    await db.refresh(rel)
+
+    return {"ok": True}

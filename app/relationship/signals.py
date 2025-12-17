@@ -2,11 +2,19 @@ import json
 
 DEFAULT = {
     "support": 0.0, "affection": 0.0, "flirt": 0.0, "respect": 0.0,
-    "rude": 0.0, "boundary_push": 0.0, "apology": 0.0,
-    "commitment_talk": 0.0,
+    "apology": 0.0, "commitment_talk": 0.0,
+
+    "rude": 0.0, "boundary_push": 0.0,
+    "dislike": 0.0, "hate": 0.0,
+
     "accepted_exclusive": False,
     "accepted_girlfriend": False,
 }
+
+NUM_KEYS = [
+    "support","affection","flirt","respect","apology","commitment_talk",
+    "rude","boundary_push","dislike","hate",
+]
 
 def _clampf(x):
     try:
@@ -14,11 +22,27 @@ def _clampf(x):
     except Exception:
         return 0.0
 
-async def classify_signals(message: str, recent_ctx: str, llm) -> dict:
+async def classify_signals(
+    message: str,
+    recent_ctx: str,
+    persona_likes: list[str],
+    persona_dislikes: list[str],
+    llm
+) -> dict:
     prompt = f"""
         Return ONLY valid JSON with keys:
-        support, affection, flirt, respect, rude, boundary_push, apology, commitment_talk,
+        support, affection, flirt, respect, apology, commitment_talk,
+        rude, boundary_push, dislike, hate,
         accepted_exclusive, accepted_girlfriend.
+
+        Influencer preferences:
+        Likes: {persona_likes}
+        Dislikes: {persona_dislikes}
+
+        Guidance:
+        - If the user message aligns with Likes -> raise affection/support/respect.
+        - If the user message aligns with Dislikes -> raise dislike (mild), not hate.
+        - Use hate only for strong hostility ("I hate you", slurs, wishing harm).
 
         Context:
         {recent_ctx}
@@ -26,20 +50,20 @@ async def classify_signals(message: str, recent_ctx: str, llm) -> dict:
         User message:
         {message}
         """
+
     try:
         r = await llm.ainvoke(prompt)
         data = json.loads((r.content or "").strip())
     except Exception:
-        data = DEFAULT
+        data = {}
 
     out = dict(DEFAULT)
-    for k in ["support","affection","flirt","respect","rude","boundary_push","apology","commitment_talk"]:
+    for k in NUM_KEYS:
         out[k] = _clampf(data.get(k, 0.0))
     out["accepted_exclusive"] = bool(data.get("accepted_exclusive", False))
     out["accepted_girlfriend"] = bool(data.get("accepted_girlfriend", False))
 
     msg_len = len(message.strip())
-
     if msg_len <= 4:
         scale = 0.15
     elif msg_len <= 12:
@@ -49,6 +73,7 @@ async def classify_signals(message: str, recent_ctx: str, llm) -> dict:
     else:
         scale = 1.0
 
-    for k in ["support","affection","flirt","respect","rude","boundary_push","apology","commitment_talk"]:
+    for k in NUM_KEYS:
         out[k] *= scale
+
     return out

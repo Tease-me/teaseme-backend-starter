@@ -19,6 +19,8 @@ class Signals:
     respect: float = 0.0
     rude: float = 0.0
     boundary_push: float = 0.0
+    dislike: float = 0.0
+    hate: float = 0.0
     apology: float = 0.0
     commitment_talk: float = 0.0
     accepted_exclusive: bool = False

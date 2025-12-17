@@ -177,8 +177,20 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     # 2) Inactivity decay (if user disappeared for days)
     days_idle = apply_inactivity_decay(rel, now)
 
+    # --- Persona preferences from bio_json ---
+    bio = influencer.bio_json or {}
+
+    persona_likes = bio.get("likes", [])
+    persona_dislikes = bio.get("dislikes", [])
+
+    # Ensure lists (defensive)
+    if not isinstance(persona_likes, list):
+        persona_likes = []
+    if not isinstance(persona_dislikes, list):
+        persona_dislikes = []
+
     # 3) Classify user message -> relationship signals
-    sig_dict = await classify_signals(message, recent_ctx, CONVO_ANALYZER)
+    sig_dict = await classify_signals(message, recent_ctx,persona_likes, persona_dislikes, CONVO_ANALYZER)
     log.info("[%s] SIG_DICT=%s", cid, sig_dict)
     sig = Signals(**sig_dict)
 

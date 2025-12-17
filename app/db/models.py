@@ -1,6 +1,7 @@
 from sqlalchemy.orm import DeclarativeBase, mapped_column, Mapped, relationship
 from sqlalchemy import Integer, String, Boolean, Text, ForeignKey, DateTime, JSON, Index, Float
 from typing import Optional, List
+from sqlalchemy.dialects.postgresql import JSONB
 
 from datetime import datetime, timezone
 from pgvector.sqlalchemy import Vector
@@ -21,7 +22,8 @@ class Influencer(Base):
     owner_id:       Mapped[int | None]   = mapped_column(ForeignKey("users.id"), nullable=True)
     voice_id:       Mapped[str | None]   = mapped_column(String, nullable=True)        # ElevenLabs, etc.
     prompt_template:Mapped[str]          = mapped_column(Text, nullable=False)
-    voice_prompt:   Mapped[str | None] = mapped_column(String, nullable=True)
+
+    bio_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     profile_photo_key: Mapped[str | None] = mapped_column(String, nullable=True)
     profile_video_key: Mapped[str | None] = mapped_column(String, nullable=True)
     native_language: Mapped[str | None] = mapped_column(String, nullable=True)
