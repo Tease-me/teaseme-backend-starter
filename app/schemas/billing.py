@@ -60,3 +60,45 @@ class TopUpCheckoutRequest(BaseModel):
             raise ValueError("amount_cents must be positive.")
         self.currency = (self.currency or "USD").upper()
         return self
+
+
+class CardTopUpRequest(BaseModel):
+    """
+    Request for custom UI card payment.
+    Step 1: Amount selection
+    Step 2: Card token from Airwallex SDK
+    Step 3: Low credit settings
+    """
+    # Step 1: Amount
+    amount_cents: int
+    currency: str = "USD"
+    
+    # Step 2: Card (tokenized via Airwallex SDK)
+    payment_method_id: str | None = None  # From Airwallex SDK on frontend
+    save_card: bool = True  # Save for future auto-topup
+    
+    # Step 3: Low Credit Settings
+    low_balance_threshold_cents: int | None = None
+    auto_topup_enabled: bool | None = None
+    auto_topup_amount_cents: int | None = None
+    notify_low_balance: bool | None = None
+
+    @model_validator(mode="after")
+    def validate_fields(self):
+        if self.amount_cents <= 0:
+            raise ValueError("amount_cents must be positive.")
+        self.currency = (self.currency or "USD").upper()
+        
+        if self.auto_topup_enabled is True:
+            if self.low_balance_threshold_cents is None:
+                raise ValueError("low_balance_threshold_cents required when auto_topup_enabled.")
+            if self.auto_topup_amount_cents is None:
+                # Default to same as current topup amount
+                self.auto_topup_amount_cents = self.amount_cents
+        
+        if self.auto_topup_amount_cents is not None and self.auto_topup_amount_cents <= 0:
+            raise ValueError("auto_topup_amount_cents must be positive.")
+        if self.low_balance_threshold_cents is not None and self.low_balance_threshold_cents <= 0:
+            raise ValueError("low_balance_threshold_cents must be positive.")
+        
+        return self

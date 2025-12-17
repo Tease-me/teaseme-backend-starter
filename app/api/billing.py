@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import CreditWallet, WalletTopup
 from app.db.session import get_db
-from app.schemas.billing import AutoTopupCheckRequest, BillingCheckoutRequest, TopUpCheckoutRequest, TopUpRequest
+from app.schemas.billing import AutoTopupCheckRequest, BillingCheckoutRequest, CardTopUpRequest, TopUpCheckoutRequest, TopUpRequest
 # Note: create_customer and create_payment_link are imported inline in functions
 from app.services.billing import auto_topup_if_below_threshold, topup_wallet
 from app.utils.deps import get_current_user
@@ -99,6 +99,139 @@ async def topup_checkout(
         "status": checkout.get("status"),
         "amount_cents": req.amount_cents,
         "currency": req.currency,
+        "billing_customer_id": billing_customer_id,
+    }
+
+
+@router.post("/topup/card", status_code=201)
+async def topup_with_card(
+    req: CardTopUpRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    Process a card payment from custom UI.
+    Step 1: Amount is in req.amount_cents
+    Step 2: Card token is in req.payment_method_id (from Airwallex SDK)
+    Step 3: Auto-topup settings in req
+    """
+    from app.services.airwallex import (
+        create_customer, 
+        create_payment_intent, 
+        confirm_payment_intent
+    )
+    from app.db.models import CreditTransaction
+    
+    # Ensure customer ID exists
+    billing_customer_id = getattr(user, "billing_customer_id", None)
+    if not billing_customer_id or billing_customer_id.startswith("bcus_"):
+        cust = await create_customer(
+            email=user.email,
+            name=user.full_name or user.email,
+            reference_id=f"user_{user.id}",
+        )
+        billing_customer_id = cust.get("id")
+        user.billing_customer_id = billing_customer_id
+        db.add(user)
+        await db.flush()
+
+    request_id = str(uuid4())
+    
+    # Create WalletTopup record
+    wallet_topup = WalletTopup(
+        user_id=user.id,
+        amount_cents=req.amount_cents,
+        currency=req.currency,
+        source="card_ui",
+        status="pending",
+        ext_request_id=request_id,
+        billing_customer_id=billing_customer_id,
+        meta={"kind": "card_ui_topup", "save_card": req.save_card},
+    )
+    db.add(wallet_topup)
+    await db.flush()
+
+    # Create Payment Intent
+    payment_intent = await create_payment_intent(
+        customer_id=billing_customer_id,
+        amount_cents=req.amount_cents,
+        currency=req.currency,
+        save_payment_method=req.save_card,
+        request_id=request_id,
+        metadata={"wallet_topup_id": str(wallet_topup.id)},
+    )
+    
+    payment_intent_id = payment_intent.get("id")
+    wallet_topup.ext_transaction_id = payment_intent_id
+    wallet_topup.response_payload = payment_intent
+    db.add(wallet_topup)
+    
+    # If payment method provided, confirm immediately
+    result_status = "pending"
+    if req.payment_method_id:
+        try:
+            confirm_result = await confirm_payment_intent(
+                payment_intent_id=payment_intent_id,
+                payment_method_id=req.payment_method_id,
+                customer_id=billing_customer_id,
+                save_payment_method=req.save_card,
+            )
+            result_status = (confirm_result.get("status") or "").upper()
+            wallet_topup.response_payload = confirm_result
+            
+            # Check if payment succeeded immediately
+            if result_status in {"SUCCEEDED", "CAPTURED", "SUCCESS"}:
+                wallet_topup.status = "succeeded"
+                # Credit wallet immediately
+                wallet = await db.get(CreditWallet, user.id) or CreditWallet(user_id=user.id)
+                wallet.balance_cents = (wallet.balance_cents or 0) + req.amount_cents
+                tx = CreditTransaction(
+                    user_id=user.id,
+                    feature="topup",
+                    units=req.amount_cents,
+                    amount_cents=req.amount_cents,
+                    meta={"source": "card_ui_topup", "wallet_topup_id": wallet_topup.id},
+                )
+                db.add_all([wallet, tx])
+                await db.flush()
+                wallet_topup.credit_transaction_id = tx.id
+            elif result_status in {"REQUIRES_CAPTURE", "REQUIRES_CUSTOMER_ACTION"}:
+                wallet_topup.status = "requires_action"
+            else:
+                wallet_topup.status = "failed"
+                wallet_topup.error_message = f"status={result_status}"
+                
+            db.add(wallet_topup)
+        except Exception as e:
+            wallet_topup.status = "failed"
+            wallet_topup.error_message = str(e)
+            db.add(wallet_topup)
+            await db.commit()
+            raise HTTPException(400, f"Payment failed: {e}")
+
+    # Update wallet settings (Step 3)
+    wallet = await db.get(CreditWallet, user.id) or CreditWallet(user_id=user.id)
+    if req.low_balance_threshold_cents is not None:
+        wallet.low_balance_threshold_cents = req.low_balance_threshold_cents
+    if req.auto_topup_enabled is not None:
+        wallet.auto_topup_enabled = req.auto_topup_enabled
+    if req.auto_topup_amount_cents is not None:
+        wallet.auto_topup_amount_cents = req.auto_topup_amount_cents
+    # Note: notify_low_balance would need a new column if not exists
+    db.add(wallet)
+    
+    await db.commit()
+    
+    # Refresh to get latest balance
+    wallet = await db.get(CreditWallet, user.id)
+    
+    return {
+        "transaction_id": payment_intent_id,
+        "wallet_topup_id": wallet_topup.id,
+        "status": wallet_topup.status,
+        "amount_cents": req.amount_cents,
+        "currency": req.currency,
+        "balance_cents": wallet.balance_cents if wallet else 0,
         "billing_customer_id": billing_customer_id,
     }
 
