@@ -34,7 +34,7 @@ async def billing_checkout(
         "success_url": req.success_url,
         "back_url": req.cancel_url,
     }
-
+    billing_customer_id = req.billing_customer_id or getattr(user, "billing_customer_id",None)
     if user.billing_customer_id:
         payload["billing_customer_id"] = user.billing_customer_id
     else:
@@ -45,9 +45,23 @@ async def billing_checkout(
         }
     
     checkout = await create_billing_checkout(payload)
+    new_cust_id = checkout.get("billing_customer_id")
+    if new_cust_id and not getattr(user, "billing_customer_id", None):
+        user.billing_customer_id = new_cust_id
+        db.add(user)
+        await db.commit()
+    if req.auto_topup_enabled is not None:
+        wallet = await db.get(CreditWallet, user.id)
+        wallet.auto_topup_enabled = req.auto_topup_enabled
+        wallet.auto_topup_amount_cents = req.auto_topup_amount_cents
+        wallet.low_balance_threshold_cents = req.low_balance_threshold_cents
+        db.add(wallet)
+        await db.commit()
+        
     return {
         "checkout_id": checkout.get("id"),
         "status": checkout.get("status"),
         "next_action": checkout.get("next_action"),
+        "billing_customer_id": new_cust_id or billing_customer_id,
     }
 

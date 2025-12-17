@@ -59,7 +59,10 @@ class User(Base):
         cascade="all, delete-orphan",
     )
     billing_customer_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    
+    auto_topup_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    auto_topup_amount_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    low_balance_threshold_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
 class Chat(Base):
     __tablename__ = "chats"
 
