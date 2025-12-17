@@ -676,6 +676,39 @@ async def _poll_and_persist_conversation(
                 exc,
             )
 
+        # Extract and store facts from the transcript using existing fact extractor
+        if chat_id and normalized_transcript:
+            try:
+                from app.agents.turn_handler import extract_and_store_facts_for_turn
+                # Format transcript as context, use last user message as "message"
+                user_messages = [t.get("message") or t.get("text") or "" for t in normalized_transcript 
+                                 if (t.get("role") or "").lower() in ("user", "human")]
+                last_user_msg = user_messages[-1] if user_messages else ""
+                ctx_lines = [f"{t.get('role', 'unknown')}: {t.get('message') or t.get('text') or ''}" 
+                             for t in normalized_transcript]
+                recent_ctx = "\n".join(ctx_lines)
+                
+                if last_user_msg:
+                    asyncio.create_task(
+                        extract_and_store_facts_for_turn(
+                            message=last_user_msg,
+                            recent_ctx=recent_ctx,
+                            chat_id=chat_id,
+                            cid=conversation_id,
+                        )
+                    )
+                    log.info(
+                        "background.fact_extraction_scheduled conv=%s chat=%s",
+                        conversation_id,
+                        chat_id,
+                    )
+            except Exception as exc:
+                log.warning(
+                    "background.fact_extraction_schedule_failed conv=%s err=%s",
+                    conversation_id,
+                    exc,
+                )
+
 
 # === DO NOT RENAME: you said you call this elsewhere ===
 async def _push_prompt_to_elevenlabs(
