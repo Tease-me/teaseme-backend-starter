@@ -1,8 +1,6 @@
 from uuid import uuid4
-
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.db.models import CreditWallet
 from app.db.session import get_db
 from app.schemas.billing import BillingCheckoutRequest, TopUpRequest
@@ -32,18 +30,24 @@ async def billing_checkout(
         "request_id": str(uuid4()),
         "mode": req.mode,
         "currency": req.currency,
-        "line_items": [{"price_id": req.price_id, "quantity": req.quantity}],
+        "line_items": [{"price_id": req.price_id}],
         "success_url": req.success_url,
         "back_url": req.cancel_url,
-        "customer_data": {
+    }
+
+    if user.billing_customer_id:
+        payload["billing_customer_id"] = user.billing_customer_id
+    else:
+        payload["customer_data"] = {
             "email": user.email,
             "name": user.full_name or user.email,
             "type": "INDIVIDUAL",
-        },
-    }
+        }
+    
     checkout = await create_billing_checkout(payload)
     return {
         "checkout_id": checkout.get("id"),
         "status": checkout.get("status"),
         "next_action": checkout.get("next_action"),
     }
+

@@ -58,6 +58,7 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    billing_customer_id: Mapped[str | None] = mapped_column(String, nullable=True)
     
 class Chat(Base):
     __tablename__ = "chats"
