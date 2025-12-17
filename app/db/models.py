@@ -98,12 +98,6 @@ class Memory(Base):
     sender = mapped_column(String)  # 'user', 'ai', 'fact', etc
     created_at = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
-class Subscription(Base):
-    __tablename__ = "subscriptions"
-    id = mapped_column(Integer, primary_key=True)
-    user_id = mapped_column(Integer, ForeignKey("users.id"))
-    subscription_json = mapped_column(JSON)
-    created_at = mapped_column(DateTime, default=datetime.utcnow)
 
 class Pricing(Base):
     """

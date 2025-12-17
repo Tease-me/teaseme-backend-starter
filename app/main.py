@@ -5,7 +5,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.chat import router
 from app.api.auth import router as auth_router
-from app.api.push import router as push_router 
 from app.api import billing
 
 from app.api.notify_ws import router as notify_ws_router
@@ -48,7 +47,6 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(router)
-app.include_router(push_router)
 app.include_router(notify_ws_router)
 app.include_router(billing.router)
 app.include_router(influencer_router)
