@@ -3,7 +3,7 @@ import logging
 import math
 import random
 from uuid import uuid4
-from app.agents.prompt_utils import get_global_audio_prompt
+from app.agents.prompt_utils import build_relationship_prompt, get_global_prompt
 from app.relationship.dtr import plan_dtr_goal
 from app.relationship.inactivity import apply_inactivity_decay
 from app.relationship.repo import get_or_create_relationship
@@ -34,7 +34,7 @@ router = APIRouter(prefix="/elevenlabs", tags=["elevenlabs"])
 log = logging.getLogger(__name__)
 
 ELEVENLABS_API_KEY = settings.ELEVENLABS_API_KEY
-ELEVEN_BASE_URL = "https://api.elevenlabs.io/v1"
+ELEVEN_BASE_URL = settings.ELEVEN_BASE_URL
 DEFAULT_ELEVENLABS_VOICE_ID = settings.ELEVENLABS_VOICE_ID or None
 
 # Temporary in-memory greetings (no DB). Keep the content SFW and generic.
@@ -1120,13 +1120,26 @@ async def get_conversation_token(
     agent_id = await get_agent_id_from_influencer(db, influencer_id)
     influencer, prompt_template = await asyncio.gather(
         db.get(Influencer, influencer_id),
-        get_global_audio_prompt(db),
+        get_global_prompt(db, True),
     )
     chat_id = await get_or_create_chat(db, user_id, influencer_id)
 
     if not influencer:
         raise HTTPException(404, "Influencer not found")
     persona_rules = influencer.prompt_template
+    bio = influencer.bio_json or {}
+    persona_likes = bio.get("likes", [])
+    persona_dislikes = bio.get("dislikes", [])
+    if not isinstance(persona_likes, list):
+        persona_likes = []
+    if not isinstance(persona_dislikes, list):
+        persona_dislikes = []
+    stages = bio.get("stages", {})
+    if not isinstance(stages, dict):
+        stages = {}
+    mbti_rules = bio.get("mbti_rules", "")
+    personality_rules = bio.get("personality_rules", "")
+    tone = bio.get("tone", "")
 
     history = redis_history(chat_id)
 
@@ -1149,23 +1162,31 @@ async def get_conversation_token(
 
     dtr_goal = plan_dtr_goal(rel, can_ask)
 
-    prompt = prompt_template.partial(
-        analysis="",
+    prompt = build_relationship_prompt(
+        prompt_template,
+        rel=rel,
+        days_idle=days_idle,
+        dtr_goal=dtr_goal,
+        personality_rules=personality_rules,
+        stages=stages,
+        persona_likes=persona_likes,
+        persona_dislikes=persona_dislikes,
+        mbti_rules=mbti_rules,
+        memories="",
         daily_context="",
         last_user_message="",
-        memories= "",
+        tone=tone,
         persona_rules=persona_rules,
-        relationship_state=rel.state,
-        history=history.messages,
-        trust=rel.trust,
-        closeness=rel.closeness,
-        attraction=rel.attraction,
-        safety=rel.safety,
-        exclusive_agreed=rel.exclusive_agreed,
-        girlfriend_confirmed=rel.girlfriend_confirmed,
-        days_idle_before_message=round(days_idle, 1),
-        dtr_goal=dtr_goal,
+        analysis="",
     )
+    
+    try:
+        hist_msgs = history.messages
+        rendered = prompt.format_prompt(input="", history=hist_msgs)
+        full_prompt_text = rendered.to_string()
+        log.info("[%s] ==== FULL PROMPT ====\n%s", "", full_prompt_text)
+    except Exception as log_ex:
+        log.info("[%s] Prompt logging failed: %s", "", log_ex)
 
     try:
         async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
