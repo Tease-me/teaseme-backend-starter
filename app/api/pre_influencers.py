@@ -339,7 +339,7 @@ async def upload_pre_influencer_picture(
     s3_key = await save_influencer_photo_to_s3(
         file.file,
         file.filename or "profile.jpg",
-        file.content_type or "image/jpeg",
+        file.content_type or "profile/jpeg",
         influencer_id=pre.username,
     )
 

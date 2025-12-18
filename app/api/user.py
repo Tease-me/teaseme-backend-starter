@@ -81,8 +81,8 @@ async def upload_user_photo_endpoint(
     try:
         key = await save_user_photo_to_s3(
             file.file, 
-            file.filename or "photo.jpg", 
-            file.content_type or "image/jpeg", 
+            file.filename or "profile.jpg", 
+            file.content_type or "profile/jpeg", 
             current_user.id
         )
         current_user.profile_photo_key = key
