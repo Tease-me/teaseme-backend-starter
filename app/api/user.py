@@ -13,6 +13,7 @@ from app.utils.deps import get_current_user
 from app.utils.s3 import (
     generate_user_presigned_url,
     generate_presigned_url,
+    delete_file_from_s3,
     save_user_photo_to_s3,
 )
 
@@ -78,17 +79,34 @@ async def upload_user_photo_endpoint(
     if not file:
         raise HTTPException(400, "No file uploaded")
         
+    previous_key = current_user.profile_photo_key
+
     try:
         key = await save_user_photo_to_s3(
             file.file, 
             file.filename or "profile.jpg", 
-            file.content_type or "profile/jpeg", 
+            file.content_type or "image/jpeg", 
             current_user.id
         )
         current_user.profile_photo_key = key
         db.add(current_user)
-        await db.commit()
-        await db.refresh(current_user)
+        try:
+            await db.commit()
+            await db.refresh(current_user)
+        except Exception:
+            await db.rollback()
+            if key and key != previous_key:
+                try:
+                    await delete_file_from_s3(key)
+                except Exception:
+                    log.warning("Failed to rollback uploaded S3 photo %s", key, exc_info=True)
+            raise
+
+        if previous_key and previous_key != key:
+            try:
+                await delete_file_from_s3(previous_key)
+            except Exception:
+                log.warning("Failed to delete previous S3 photo %s", previous_key, exc_info=True)
         
         user_out = UserOut.model_validate(current_user)
         user_out.profile_photo_url = generate_user_presigned_url(key)
