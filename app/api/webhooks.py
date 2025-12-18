@@ -7,6 +7,7 @@ from typing import Optional, Any
 from app.agents.prompts import CONVO_ANALYZER
 from app.relationship.engine import Signals, update_relationship
 from app.relationship.inactivity import apply_inactivity_decay
+from app.relationship.processor import process_relationship_turn
 from app.relationship.repo import get_or_create_relationship
 from app.relationship.signals import classify_signals
 from fastapi import APIRouter, Depends, HTTPException, Request, Header
@@ -17,7 +18,7 @@ from app.services.billing import charge_feature
 from app.api.elevenlabs import _extract_total_seconds
 from sqlalchemy import select
 from app.db.models import CallRecord, Chat, Influencer
-from app.agents.turn_handler import handle_turn
+from app.agents.turn_handler import handle_turn, redis_history
 from app.agents.memory import find_similar_memories
 
 log = logging.getLogger(__name__)
@@ -27,7 +28,7 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 ELEVENLABS_CONVAI_WEBHOOK_SECRET = settings.ELEVENLABS_CONVAI_WEBHOOK_SECRET
 ELEVEN_BASE_URL = settings.ELEVEN_BASE_URL
 
-log = logging.getLogger(__name__)  # <-- logger
+log = logging.getLogger(__name__)
 
 
 def _redact(val: Any) -> str:
@@ -228,6 +229,123 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
     # Always respond quickly with 200 on success.
     return {"ok": True, "conversation_id": conversation_id, "status": status, "total_seconds": int(total_seconds)}
 
+@router.post("/update_relationship")
+async def update_relationship( req: Request,
+    db: AsyncSession = Depends(get_db),
+    x_webhook_token: str | None = Header(default=None)
+    ):
+    
+     # 1) Auth
+    _verify_token(ELEVENLABS_CONVAI_WEBHOOK_SECRET, x_webhook_token)
+
+    # 2) Parse payload
+    try:
+        payload = await req.json()
+    except Exception:
+        return {"text": "Sorry, I didn’t catch that. Could you repeat?"}
+
+    try:
+        log.info("[EL TOOL] payload(head)=%s", str(payload)[:800])
+    except Exception:
+        pass
+
+    # 3) Extract user text
+    args = payload.get("arguments") or {}
+    raw_text = (
+        payload.get("text")
+        or payload.get("input")
+        or (args.get("text") if isinstance(args, dict) else None)
+        or ""
+    )
+    user_text = str(raw_text).strip()
+    if not user_text:
+        return {"text": "I didn’t catch that. Could you repeat?"}
+
+    conversation_id = payload.get("conversation_id")
+    if not conversation_id:
+        log.warning("[EL TOOL] missing conversation_id in payload=%s", str(payload)[:300])
+        return {"text": "I’m missing the call ID. Please try again."}
+
+    # 4) Look up CallRecord – must exist (set by /elevenlabs/conversations/{conversation_id}/register)
+    try:
+        res = await db.execute(
+            select(CallRecord).where(CallRecord.conversation_id == conversation_id)
+        )
+        call = res.scalar_one_or_none()
+    except Exception as e:
+        log.exception("[EL TOOL] CallRecord lookup failed: %s", e)
+        return {"text": "I had an internal issue looking up this call. Please try again."}
+
+    if not call:
+        log.warning("[EL TOOL] No CallRecord found for conv=%s", conversation_id)
+        return {"error": "Conversation ID Not Found"}
+
+    user_id = call.user_id
+    influencer_id = call.influencer_id
+    chat_id = call.chat_id
+
+    # 5) Validate context – no defaults
+    if not user_id or not influencer_id or not chat_id:
+        log.warning(
+            "[EL TOOL] incomplete CallRecord context conv=%s user=%s infl=%s chat=%s",
+            conversation_id, user_id, influencer_id, chat_id
+        )
+        return {
+            "text": (
+                "I’m having trouble with this call’s context. "
+            )
+        }
+    
+    history = redis_history(chat_id)
+
+    if len(history.messages) > settings.MAX_HISTORY_WINDOW:
+        trimmed = history.messages[-settings.MAX_HISTORY_WINDOW:]
+        history.clear()
+        history.add_messages(trimmed)
+
+    recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
+    
+    influencer = await db.get(Influencer, influencer_id)
+    if not influencer:
+        log.warning("[EL TOOL] Influencer not found infl=%s conv=%s", influencer_id, conversation_id)
+        return {"error": "Influencer not found"}
+
+    rel_result = await process_relationship_turn(
+        db=db,
+        user_id=int(user_id),
+        influencer_id=influencer_id,
+        influencer=influencer,
+        message=user_text,
+        recent_ctx=recent_ctx,
+        cid=chat_id,
+        convo_analyzer=CONVO_ANALYZER,
+    )
+
+    rel = rel_result["rel"]
+    days_idle = rel_result.get("days_idle")
+    dtr_goal = rel_result.get("dtr_goal")
+
+    relationship = (
+        "# Relationship Metrics:\n"
+        f"- phase: {rel.state}\n"
+        f"- trust: {rel.trust}/100\n"
+        f"- closeness: {rel.closeness}/100\n"
+        f"- attraction: {rel.attraction}/100\n"
+        f"- safety: {rel.safety}/100\n"
+        f"- exclusive_agreed: {rel.exclusive_agreed}\n"
+        f"- girlfriend_confirmed: {rel.girlfriend_confirmed}\n"
+        f"- days_idle_before_message: {days_idle}\n"
+        f"- dtr_goal: {dtr_goal}\n"
+    )
+
+    log.info("[EL TOOL] relationship_metrics conv=%s\n%s", conversation_id, relationship)
+    return relationship
+
+@router.get("/get_relationship")
+async def get_relationship( req: Request,
+    db: AsyncSession = Depends(get_db),
+    x_webhook_token: str | None = Header(default=None),):
+    pass
 
 def _verify_token(shared: str, token: str | None) -> None:
     """Simple shared-secret check (constant time if you prefer)."""
@@ -238,7 +356,7 @@ def _verify_token(shared: str, token: str | None) -> None:
     # constant-time compare (avoid timing attacks)
     if not hmac.compare_digest(shared, token):
         raise HTTPException(status_code=403, detail="Invalid webhook token")
-    
+
 @router.post("/memories")
 async def eleven_webhook_get_memories(
     req: Request,
