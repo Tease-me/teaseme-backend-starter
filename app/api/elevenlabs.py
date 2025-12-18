@@ -34,7 +34,7 @@ router = APIRouter(prefix="/elevenlabs", tags=["elevenlabs"])
 log = logging.getLogger(__name__)
 
 ELEVENLABS_API_KEY = settings.ELEVENLABS_API_KEY
-ELEVEN_BASE_URL = "https://api.elevenlabs.io/v1"
+ELEVEN_BASE_URL = settings.ELEVEN_BASE_URL
 DEFAULT_ELEVENLABS_VOICE_ID = settings.ELEVENLABS_VOICE_ID or None
 
 # Temporary in-memory greetings (no DB). Keep the content SFW and generic.
