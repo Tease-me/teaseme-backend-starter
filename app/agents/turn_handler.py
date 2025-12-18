@@ -4,13 +4,12 @@ from app.core.config import settings
 from app.agents.memory import find_similar_memories, store_fact
 from app.agents.prompts import MODEL, FACT_EXTRACTOR, CONVO_ANALYZER, get_fact_prompt
 from app.db.session import SessionLocal
-from app.agents.prompt_utils import get_global_audio_prompt, get_global_prompt, get_today_script
+from app.agents.prompt_utils import get_global_prompt, get_today_script, build_relationship_prompt
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import RedisChatMessageHistory
 from app.db.models import Influencer
 from fastapi import HTTPException
 from app.utils.tts_sanitizer import sanitize_tts_text
-
 from datetime import datetime, timezone
 from app.relationship.repo import get_or_create_relationship
 from app.relationship.inactivity import apply_inactivity_decay
@@ -158,7 +157,7 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     # Gather all independent async operations
     influencer, prompt_template, daily_context = await asyncio.gather(
         db.get(Influencer, influencer_id),
-        get_global_audio_prompt(db) if is_audio else get_global_prompt(db),
+        get_global_prompt(db, is_audio),
         get_today_script(db=db, influencer_id=influencer_id),
     )
     
@@ -189,7 +188,7 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
         persona_dislikes = []
 
     # 3) Classify user message -> relationship signals
-    sig_dict = await classify_signals(message, recent_ctx,persona_likes, persona_dislikes, CONVO_ANALYZER)
+    sig_dict = await classify_signals(message, recent_ctx, persona_likes, persona_dislikes, CONVO_ANALYZER)
     log.info("[%s] SIG_DICT=%s", cid, sig_dict)
     sig = Signals(**sig_dict)
 
@@ -279,45 +278,29 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
         s for s in (_norm(m) for m in memories or []) if s
     )
 
-    stages = bio.get("stages", {})
-
-    dating_stage = stages["dating"]
-    dislike_stage = stages["dislike"]
-    talking_stage = stages["talking"]
-    flirting_stage = stages["flirting"]
-    hate_stage = stages["hate"]
-    strangers_stage = stages["strangers"]
-    in_love_stage = stages["in_love"]
-
     mbti_rules = bio.get("mbti_rules", "")
     personality_rules = bio.get("personality_rules", "")
-    tone=bio.get("tone", "")
+    tone = bio.get("tone", "")
 
-    prompt = prompt_template.partial(
-        relationship_state=rel.state,
-        trust=int(rel.trust),
-        closeness=int(rel.closeness),
-        attraction=int(rel.attraction),
-        safety=int(rel.safety),
-        exclusive_agreed=rel.exclusive_agreed,
-        girlfriend_confirmed=rel.girlfriend_confirmed,
-        days_idle_before_message=round(days_idle, 1),
+    stages = bio.get("stages", {})
+    if not isinstance(stages, dict):
+        stages = {}
+        
+    prompt = build_relationship_prompt(
+        prompt_template,
+        rel=rel,
+        days_idle=days_idle,
         dtr_goal=dtr_goal,
         personality_rules=personality_rules,
-        dating_stage=dating_stage,
-        dislike_stage=dislike_stage,
-        talking_stage=talking_stage,
-        flirting_stage=flirting_stage,
-        hate_stage=hate_stage,
-        strangers_stage=strangers_stage,
-        in_love_stage=in_love_stage,
-        likes=", ".join(map(str, persona_likes or [])),
-        dislikes=", ".join(map(str, persona_dislikes or [])),
+        stages=stages,
+        persona_likes=persona_likes,
+        persona_dislikes=persona_dislikes,
         mbti_rules=mbti_rules,
         memories=mem_block,
         daily_context=daily_context,
         last_user_message=message,
         tone=tone,
+        persona_rules=getattr(influencer, "prompt_template", "") or "",
     )
 
     try:

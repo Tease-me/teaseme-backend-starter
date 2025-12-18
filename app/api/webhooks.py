@@ -1,8 +1,14 @@
 
+from datetime import datetime, timezone
 import asyncio, time, logging, json, hmac
 
 from hashlib import sha256
 from typing import Optional, Any
+from app.agents.prompts import CONVO_ANALYZER
+from app.relationship.engine import Signals, update_relationship
+from app.relationship.inactivity import apply_inactivity_decay
+from app.relationship.repo import get_or_create_relationship
+from app.relationship.signals import classify_signals
 from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
@@ -10,7 +16,7 @@ from app.db.session import get_db
 from app.services.billing import charge_feature
 from app.api.elevenlabs import _extract_total_seconds
 from sqlalchemy import select
-from app.db.models import CallRecord, Chat
+from app.db.models import CallRecord, Chat, Influencer
 from app.agents.turn_handler import handle_turn
 from app.agents.memory import find_similar_memories
 
@@ -19,7 +25,7 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 ELEVENLABS_CONVAI_WEBHOOK_SECRET = settings.ELEVENLABS_CONVAI_WEBHOOK_SECRET
-ELEVEN_BASE_URL = "https://api.elevenlabs.io/v1"
+ELEVEN_BASE_URL = settings.ELEVEN_BASE_URL
 
 log = logging.getLogger(__name__)  # <-- logger
 
@@ -94,12 +100,6 @@ async def _resolve_user_for_conversation(db, conversation_id: str):
 
 @router.post("/elevenlabs")
 async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_db)):
-    """
-    ElevenLabs post-call webhook handler.
-    - Validates HMAC signature.
-    - Bills when status == "done" (idempotent by conversation_id).
-    - Responds 200 quickly (webhooks may be disabled after repeated failures).
-    """
     client_ip = request.client.host if request.client else "-"
     te = (request.headers.get("transfer-encoding") or "").lower()
     log.info("webhook.receive start ip=%s transfer_encoding=%s", client_ip, te)
@@ -131,6 +131,12 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
     conversation_id = data.get("conversation_id")
     status = (data.get("status") or "done").lower()
     total_seconds = _extract_total_seconds(data)
+    transcript_entries = data.get("transcript") or []
+    full_transcript = " ".join(
+        entry.get("message", "")
+        for entry in transcript_entries
+        if isinstance(entry, dict) and entry.get("message")
+    )
 
     log.info(
         "webhook.parsed type=%s conv_id=%s status=%s seconds=%s ip=%s",
@@ -144,7 +150,29 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
     # Derive your user mapping. Prefer the stored mapping from /register.
     meta_map = await _resolve_user_for_conversation(db, conversation_id)
     user_id = meta_map.get("user_id") or data.get("user_id")  # last-resort fallback
+    influencer_id = meta_map.get("influencer_id") or data.get("influencer_id")
     sid = meta_map.get("sid") or conversation_id
+    
+    # Update Relationship
+    influencer = db.get(Influencer, influencer_id)
+    now = datetime.now(timezone.utc)
+    rel = await get_or_create_relationship(db, int(user_id), influencer_id)
+    days_idle = apply_inactivity_decay(rel, now)
+
+    bio = influencer.bio_json or {}
+
+    persona_likes = bio.get("likes", [])
+    persona_dislikes = bio.get("dislikes", [])
+
+    # Ensure lists (defensive)
+    if not isinstance(persona_likes, list):
+        persona_likes = []
+    if not isinstance(persona_dislikes, list):
+        persona_dislikes = []
+
+    sig_dict = await classify_signals(full_transcript, None, persona_likes, persona_dislikes, CONVO_ANALYZER)
+    signals = Signals(**sig_dict)
+    update_relationship(rel.trust, rel.closeness, rel.attraction, rel.safety, signals)
 
     # Only bill when the conversation is fully done (avoid processing/in-progress).
     if status == "done" and user_id:
@@ -256,7 +284,7 @@ async def eleven_webhook_get_memories(
         call = res.scalar_one_or_none()
     except Exception as e:
         log.exception("[EL TOOL] CallRecord lookup failed: %s", e)
-        return {"memories": "I had an internal issue looking up this call. Please try again."}
+        return {"memories": []}
 
     if not call:
         log.warning("[EL TOOL] No CallRecord found for conv=%s", conversation_id)
@@ -327,15 +355,6 @@ async def eleven_webhook_reply(
     db: AsyncSession = Depends(get_db),
     x_webhook_token: str | None = Header(default=None),
 ):
-    """
-    ElevenLabs ConvAI tool webhook.
-    Expects JSON payload with at least "text" and "conversation_id".
-
-    This implementation:
-    - DOES NOT use any defaults.
-    - Relies on CallRecord created earlier (via /elevenlabs/conversations/{conversation_id}/register).
-    """
-
     # 1) Auth
     _verify_token(ELEVENLABS_CONVAI_WEBHOOK_SECRET, x_webhook_token)
 
