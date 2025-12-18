@@ -75,7 +75,68 @@ async def get_global_audio_prompt(
             ("user", "{input}"),
         ]
     )
+    
+    
+def build_relationship_prompt(
+    prompt_template: ChatPromptTemplate,
+    *,
+    rel,
+    days_idle: float,
+    dtr_goal: str,
+    personality_rules: str = "",
+    stages: dict | None = None,
+    persona_likes: list[str] | None = None,
+    persona_dislikes: list[str] | None = None,
+    mbti_rules: str = "",
+    memories: str = "",
+    daily_context: str = "",
+    last_user_message: str = "",
+    tone: str = "",
+    persona_rules: str | None = None,
+    analysis: str | None = None,
+):
+    """
+    Shared prompt_template.partial(...) builder used by both turn handling and ElevenLabs.
+    Filters kwargs to only variables the given prompt_template expects.
+    """
+    stages = stages or {}
 
+    partial_vars = {
+        "relationship_state": rel.state,
+        "trust": int(rel.trust or 0),
+        "closeness": int(rel.closeness or 0),
+        "attraction": int(rel.attraction or 0),
+        "safety": int(rel.safety or 0),
+        "exclusive_agreed": bool(rel.exclusive_agreed),
+        "girlfriend_confirmed": bool(rel.girlfriend_confirmed),
+        "days_idle_before_message": round(float(days_idle or 0.0), 1),
+        "dtr_goal": dtr_goal,
+        "personality_rules": personality_rules,
+        "dating_stage": stages.get("dating", ""),
+        "dislike_stage": stages.get("dislike", ""),
+        "talking_stage": stages.get("talking", ""),
+        "flirting_stage": stages.get("flirting", ""),
+        "hate_stage": stages.get("hate", ""),
+        "strangers_stage": stages.get("strangers", ""),
+        "in_love_stage": stages.get("in_love", ""),
+        "likes": ", ".join(map(str, persona_likes or [])),
+        "dislikes": ", ".join(map(str, persona_dislikes or [])),
+        "mbti_rules": mbti_rules,
+        "memories": memories,
+        "daily_context": daily_context,
+        "last_user_message": last_user_message,
+        "tone": tone,
+    }
+
+    if persona_rules is not None:
+        partial_vars["persona_rules"] = persona_rules
+    if analysis is not None:
+        partial_vars["analysis"] = analysis
+
+    expected = set(getattr(prompt_template, "input_variables", []) or [])
+    filtered = {k: v for k, v in partial_vars.items() if k in expected}
+    return prompt_template.partial(**filtered)
+    
 async def build_system_prompt(
     db: AsyncSession,
     influencer_id: str,
