@@ -188,7 +188,7 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
         persona_dislikes = []
 
     # 3) Classify user message -> relationship signals
-    sig_dict = await classify_signals(message, recent_ctx,persona_likes, persona_dislikes, CONVO_ANALYZER)
+    sig_dict = await classify_signals(message, recent_ctx, persona_likes, persona_dislikes, CONVO_ANALYZER)
     log.info("[%s] SIG_DICT=%s", cid, sig_dict)
     sig = Signals(**sig_dict)
 
