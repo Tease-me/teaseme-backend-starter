@@ -1179,6 +1179,14 @@ async def get_conversation_token(
         persona_rules=persona_rules,
         analysis="",
     )
+    
+    try:
+        hist_msgs = history.messages
+        rendered = prompt.format_prompt(input="", history=hist_msgs)
+        full_prompt_text = rendered.to_string()
+        log.info("[%s] ==== FULL PROMPT ====\n%s", "", full_prompt_text)
+    except Exception as log_ex:
+        log.info("[%s] Prompt logging failed: %s", "", log_ex)
 
     try:
         async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
