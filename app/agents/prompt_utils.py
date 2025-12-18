@@ -32,36 +32,7 @@ async def get_global_prompt(
 
     return ChatPromptTemplate.from_messages(
         [
-        #    (
-        #         "system",
-        #         """
-        #         RELATIONSHIP:
-        #         - phase: {relationship_state}
-        #         - trust: {trust}/100
-        #         - closeness: {closeness}/100
-        #         - attraction: {attraction}/100
-        #         - safety: {safety}/100
-        #         - exclusive_agreed: {exclusive_agreed}
-        #         - girlfriend_confirmed: {girlfriend_confirmed}
-        #         - days_idle_before_message: {days_idle_before_message}
-        #         - dtr_goal: {dtr_goal}
-
-        #         DTR rules:
-        #         - hint_closer: subtle romantic closeness, 'we' language, no pressure.
-        #         - ask_exclusive: gently ask if user wants exclusivity (only us).
-        #         - ask_girlfriend: ask clearly (romantic) if you can be their girlfriend.
-        #         - If safety is low or user is upset: do NOT push DTR.
-
-        #         Behavior by phase:
-        #         - STRANGERS/TALKING: light, curious, build trust.
-        #         - FLIRTING: playful flirting, teasing, no pressure.
-        #         - DATING: affectionate, can discuss exclusivity.
-        #         - GIRLFRIEND: consistent girlfriend vibe, affectionate, supportive, 'we' language.
-        #         - STRAINED: boundaries first, reduce romance, repair needed.
-        #         """
-        #     ),
             ("system", system_prompt),
-            ("system", "{persona_rules}"),
             (
                 "system",
                 "Today’s inspiration for you (use ONLY if it fits the current conversation, otherwise ignore): {daily_context}"
@@ -87,21 +58,6 @@ async def get_global_audio_prompt(
 
     return ChatPromptTemplate.from_messages(
         [
-            # (
-            #     "system",
-            #     "Conversation analysis (keep private): {analysis}\n"
-            #     "Relationship context (keep private):\n"
-            #     "- phase: {relationship_state}\n"
-            #     "- trust: {trust}/100\n"
-            #     "- closeness: {closeness}/100\n"
-            #     "- attraction: {attraction}/100\n"
-            #     "- safety: {safety}/100\n"
-            #     "- exclusive_agreed: {exclusive_agreed}\n"
-            #     "- girlfriend_confirmed: {girlfriend_confirmed}\n"
-            #     "- days_idle_before_message: {days_idle_before_message}\n"
-            #     "- dtr_goal: {dtr_goal}\n"
-            #     "Use this to adjust warmth, teasing, boundaries, and pacing. Do not expose these numbers."
-            # ),
             ("system", system_prompt),
             ("system", "{persona_rules}"),
             (
