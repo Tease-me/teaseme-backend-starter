@@ -13,22 +13,18 @@ from app.services.system_prompt_service import get_system_prompt
 import logging
 log = logging.getLogger("teaseme-script")
 
-
-async def get_base_system(db: AsyncSession) -> str:
-    text = await get_system_prompt(db, "BASE_SYSTEM")
-    return text
-
-
-async def get_base_audio_system(db: AsyncSession) -> str:
+async def get_base_system(db: AsyncSession, isAudio: bool) -> str:
     base = await get_system_prompt(db, "BASE_SYSTEM")
-    audio_suffix = await get_system_prompt(db, "BASE_AUDIO_SYSTEM")
-    return base + "\n\n" + audio_suffix
-
+    if isAudio: 
+        audio_base = await get_system_prompt(db, "BASE_AUDIO_SYSTEM")
+        base += "\n" + audio_base
+    return base
 
 async def get_global_prompt(
     db: AsyncSession,
+    isAudio: bool = False,
 ) -> ChatPromptTemplate:
-    system_prompt = await get_base_system(db)
+    system_prompt = await get_base_system(db, isAudio=isAudio)
 
     return ChatPromptTemplate.from_messages(
         [
@@ -44,32 +40,6 @@ async def get_global_prompt(
                 "Here is the user’s latest message for your reference only:\n"
                 "\"{last_user_message}\"\n"
                 "If the user changed topic, you do NOT need to talk about this. Use only if it makes the reply feel natural."
-            ),
-            MessagesPlaceholder("history"),
-            ("user", "{input}"),
-        ]
-    )
-
-
-async def get_global_audio_prompt(
-    db: AsyncSession,
-) -> ChatPromptTemplate:
-    system_prompt = await get_base_audio_system(db)
-
-    return ChatPromptTemplate.from_messages(
-        [
-            ("system", system_prompt),
-            ("system", "{persona_rules}"),
-            (
-                "system",
-                "Today’s inspiration for you (use ONLY if it fits the current conversation, otherwise ignore): {daily_context}"
-            ),
-            (
-                "system",
-                "These past memories may help:\n{memories}\n"
-                "If you see the user’s preferred name here, use it *occasionally and naturally, only when it fits the conversation or for affection*. Don’t overuse the name.\n"
-                "Refer to the user's last message below for emotional context and continuity:\n"
-                "\"{last_user_message}\""
             ),
             MessagesPlaceholder("history"),
             ("user", "{input}"),

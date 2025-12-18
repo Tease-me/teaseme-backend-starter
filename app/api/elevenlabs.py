@@ -3,7 +3,7 @@ import logging
 import math
 import random
 from uuid import uuid4
-from app.agents.prompt_utils import get_global_audio_prompt
+from app.agents.prompt_utils import get_global_prompt
 from app.relationship.dtr import plan_dtr_goal
 from app.relationship.inactivity import apply_inactivity_decay
 from app.relationship.repo import get_or_create_relationship
@@ -1120,7 +1120,7 @@ async def get_conversation_token(
     agent_id = await get_agent_id_from_influencer(db, influencer_id)
     influencer, prompt_template = await asyncio.gather(
         db.get(Influencer, influencer_id),
-        get_global_audio_prompt(db),
+        get_global_prompt(db, True),
     )
     chat_id = await get_or_create_chat(db, user_id, influencer_id)
 

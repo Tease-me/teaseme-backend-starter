@@ -4,7 +4,7 @@ from app.core.config import settings
 from app.agents.memory import find_similar_memories, store_fact
 from app.agents.prompts import MODEL, FACT_EXTRACTOR, CONVO_ANALYZER, get_fact_prompt
 from app.db.session import SessionLocal
-from app.agents.prompt_utils import get_global_audio_prompt, get_global_prompt, get_today_script
+from app.agents.prompt_utils import get_global_prompt, get_today_script
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import RedisChatMessageHistory
 from app.db.models import Influencer
@@ -158,7 +158,7 @@ async def handle_turn(message: str, chat_id: str, influencer_id: str, user_id: s
     # Gather all independent async operations
     influencer, prompt_template, daily_context = await asyncio.gather(
         db.get(Influencer, influencer_id),
-        get_global_audio_prompt(db) if is_audio else get_global_prompt(db),
+        get_global_prompt(db, is_audio),
         get_today_script(db=db, influencer_id=influencer_id),
     )
     
