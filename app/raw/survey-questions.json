@@ -430,7 +430,7 @@
     },
     {
         "id": "routine",
-        "title": "Catchphrases",
+        "title": "Catchphrases & Topics to Avoid",
         "questions": [
             {
                 "id": "q29_catchphrases",
@@ -439,8 +439,14 @@
                 "required": true
             },
             {
-                "id": "q57_call_loved_ones",
+                "id": "q30_catchphrases",
                 "label": "How would you call your loved ones? (babe, hubby, honey...)",
+                "type": "text",
+                "required": true
+            },
+            {
+                "id": "q31_catchphrases",
+                "label": "What topic would you like to avoid.",
                 "type": "text",
                 "required": true
             }
