@@ -18,6 +18,7 @@ from app.utils.s3 import (
     save_influencer_photo_to_s3,
     save_influencer_profile_to_s3,
     save_influencer_video_to_s3,
+    delete_file_from_s3,
 )
 
 log = logging.getLogger(__name__)
@@ -104,50 +105,78 @@ async def update_influencer_profile(
     if not influencer:
         raise HTTPException(status_code=404, detail="Influencer not found")
 
-    photo_key = influencer.profile_photo_key
-    video_key = influencer.profile_video_key
+    previous_photo_key = influencer.profile_photo_key
+    previous_video_key = influencer.profile_video_key
+    uploaded_photo_key: str | None = None
+    uploaded_video_key: str | None = None
 
-    # Upload media if provided
-    if photo:
-        try:
-            photo_key = await save_influencer_photo_to_s3(
-                photo.file, photo.filename, photo.content_type or "image/jpeg", influencer_id
-            )
-            influencer.profile_photo_key = photo_key
-        except Exception as exc:
-            log.error("Failed to upload influencer photo: %s", exc, exc_info=True)
-            raise HTTPException(status_code=500, detail="Failed to upload photo")
-
-    if video:
-        try:
-            video_key = await save_influencer_video_to_s3(
-                video.file, video.filename, video.content_type or "video/mp4", influencer_id
-            )
-            influencer.profile_video_key = video_key
-        except Exception as exc:
-            log.error("Failed to upload influencer video: %s", exc, exc_info=True)
-            raise HTTPException(status_code=500, detail="Failed to upload video")
-        
-    # Update metadata
-    if native_language:
-        influencer.native_language = native_language
-
-    dt_val = _parse_iso_datetime(date_of_birth)
-    if date_of_birth and not dt_val:
-        raise HTTPException(status_code=400, detail="Invalid date_of_birth format; use ISO 8601")
-    if dt_val:
-        influencer.date_of_birth = dt_val
-
-    # Save profile JSON (about + native language) to S3; keep extras minimal
     try:
+        # Upload media if provided
+        if photo:
+            uploaded_photo_key = await save_influencer_photo_to_s3(
+                photo.file,
+                photo.filename,
+                photo.content_type or "image/jpeg",
+                influencer_id,
+            )
+            influencer.profile_photo_key = uploaded_photo_key
+
+        if video:
+            uploaded_video_key = await save_influencer_video_to_s3(
+                video.file,
+                video.filename,
+                video.content_type or "video/mp4",
+                influencer_id,
+            )
+            influencer.profile_video_key = uploaded_video_key
+
+        # Update metadata
+        if native_language:
+            influencer.native_language = native_language
+
+        dt_val = _parse_iso_datetime(date_of_birth)
+        if date_of_birth and not dt_val:
+            raise HTTPException(status_code=400, detail="Invalid date_of_birth format; use ISO 8601")
+        if dt_val:
+            influencer.date_of_birth = dt_val
+
+        # Save profile JSON (about + native language) to S3; keep extras minimal
         await save_influencer_profile_to_s3(
             influencer_id,
             about=about,
             native_language=native_language or influencer.native_language,
-            extras={"has_photo": bool(photo_key), "has_video": bool(video_key)},
+            extras={
+                "has_photo": bool(influencer.profile_photo_key),
+                "has_video": bool(influencer.profile_video_key),
+            },
         )
     except Exception as exc:
-        log.error("Failed to upload profile JSON: %s", exc, exc_info=True)
+        try:
+            await db.rollback()
+        except Exception:
+            log.warning("Failed to rollback DB session after profile update error", exc_info=True)
+
+        for key, previous in (
+            (uploaded_photo_key, previous_photo_key),
+            (uploaded_video_key, previous_video_key),
+        ):
+            if key and key != previous:
+                try:
+                    await delete_file_from_s3(key)
+                except Exception:
+                    log.warning("Failed to rollback uploaded S3 object %s", key, exc_info=True)
+
+        if isinstance(exc, HTTPException):
+            raise
+
+        if photo and not uploaded_photo_key:
+            log.error("Failed to upload influencer photo: %s", exc, exc_info=True)
+            raise HTTPException(status_code=500, detail="Failed to upload photo")
+        if video and not uploaded_video_key:
+            log.error("Failed to upload influencer video: %s", exc, exc_info=True)
+            raise HTTPException(status_code=500, detail="Failed to upload video")
+
+        log.error("Failed to update influencer profile: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to save profile metadata")
 
     try:
@@ -155,17 +184,41 @@ async def update_influencer_profile(
         await db.refresh(influencer)
     except Exception as exc:
         await db.rollback()
+        for key, previous in (
+            (uploaded_photo_key, previous_photo_key),
+            (uploaded_video_key, previous_video_key),
+        ):
+            if key and key != previous:
+                try:
+                    await delete_file_from_s3(key)
+                except Exception:
+                    log.warning("Failed to rollback uploaded S3 object %s", key, exc_info=True)
         log.error("Failed to persist influencer profile: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to persist influencer profile")
 
+    # Best-effort cleanup: remove previous objects if the key changed (e.g., photo.jpg -> photo.png)
+    for key, new_key in (
+        (previous_photo_key, influencer.profile_photo_key),
+        (previous_video_key, influencer.profile_video_key),
+    ):
+        if key and new_key and key != new_key:
+            try:
+                await delete_file_from_s3(key)
+            except Exception:
+                log.warning("Failed to delete previous S3 object %s", key, exc_info=True)
+
     return {
         "ok": True,
-        "profile_photo_key": photo_key,
-        "profile_video_key": video_key,
+        "profile_photo_key": influencer.profile_photo_key,
+        "profile_video_key": influencer.profile_video_key,
         "native_language": influencer.native_language,
         "date_of_birth": influencer.date_of_birth.isoformat() if influencer.date_of_birth else None,
-        "photo_url": generate_influencer_presigned_url(photo_key) if photo_key else None,
-        "video_url": generate_influencer_presigned_url(video_key) if video_key else None,
+        "photo_url": generate_influencer_presigned_url(influencer.profile_photo_key)
+        if influencer.profile_photo_key
+        else None,
+        "video_url": generate_influencer_presigned_url(influencer.profile_video_key)
+        if influencer.profile_video_key
+        else None,
     }
 
 

@@ -1,13 +1,14 @@
 from pydantic import BaseModel, EmailStr, ConfigDict
 from typing import Optional, Dict, Any, List
 from uuid import UUID
-
+from typing import Literal
 class PreInfluencerRegisterRequest(BaseModel):
     full_name: str
     location: Optional[str] = None
     username: str
     email: EmailStr
     password: str
+    terms_agreement: Literal[True]
 
 class PreInfluencerRegisterResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -15,6 +16,7 @@ class PreInfluencerRegisterResponse(BaseModel):
     user_id: int
     email: EmailStr
     message: str
+    
 
 class SurveyState(BaseModel):
     pre_influencer_id: int

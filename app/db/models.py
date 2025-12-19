@@ -278,6 +278,7 @@ class PreInfluencer(Base):
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+    terms_agreement: Mapped[bool] = mapped_column(Boolean, default=False)
 
 class RelationshipState(Base):
     __tablename__ = "relationship_state"
