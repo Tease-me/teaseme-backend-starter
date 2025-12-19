@@ -24,6 +24,7 @@ from app.schemas.pre_influencer import (
     PreInfluencerRegisterRequest,
     PreInfluencerRegisterResponse,
     SurveyQuestionsResponse,
+    PreInfluencerAcceptTermsRequest,
     SurveyState,
     SurveySaveRequest,
     InfluencerAudioDeleteRequest,
@@ -179,6 +180,21 @@ async def _generate_prompt_from_markdown(markdown: str, additional_prompt: str |
     parsed["dislikes"] = _as_str_list(parsed.get("dislikes"))
 
     return parsed
+@router.post("/{pre_id}/accept-terms")
+async def accept_pre_influencer_terms(
+    pre_id: int,
+    payload: PreInfluencerAcceptTermsRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    res = await db.execute(select(PreInfluencer).where(PreInfluencer.id == pre_id))
+    pre = res.scalar_one_or_none()
+    if not pre:
+        raise HTTPException(status_code=404, detail="Pre-influencer not found")
+    
+    pre.terms_agreement = True 
+    await db.commit()
+    return {"ok": True, "terms_agreement": True}
+
 
 @router.post("/register", response_model=PreInfluencerRegisterResponse)
 async def register_pre_influencer(
@@ -208,6 +224,7 @@ async def register_pre_influencer(
         email=data.email,
         password=data.password,
         survey_token=verify_token,
+        terms_agreement=data.terms_agreement,
     )
 
     db.add(pre)
@@ -336,6 +353,9 @@ async def upload_pre_influencer_picture(
             detail="Pre-influencer has no username to store picture under",
         )
 
+    answers = pre.survey_answers or {}
+    previous_key = answers.get("profile_picture_key")
+
     s3_key = await save_influencer_photo_to_s3(
         file.file,
         file.filename or "profile.jpg",
@@ -343,12 +363,26 @@ async def upload_pre_influencer_picture(
         influencer_id=pre.username,
     )
 
-    answers = pre.survey_answers or {}
     answers["profile_picture_key"] = s3_key
     pre.survey_answers = answers
 
-    await db.commit()
-    await db.refresh(pre)
+    try:
+        await db.commit()
+        await db.refresh(pre)
+    except Exception:
+        await db.rollback()
+        if s3_key and s3_key != previous_key:
+            try:
+                await delete_file_from_s3(s3_key)
+            except Exception:
+                log.warning("Failed to rollback uploaded S3 picture %s", s3_key, exc_info=True)
+        raise
+
+    if previous_key and previous_key != s3_key:
+        try:
+            await delete_file_from_s3(previous_key)
+        except Exception:
+            log.warning("Failed to delete previous S3 picture %s", previous_key, exc_info=True)
 
     return {"s3_key": s3_key}
 

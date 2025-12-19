@@ -5,7 +5,6 @@ from app.db.session import SessionLocal
 PERSONAS = {
     "loli": {
         "voice_id": "9Jj5XC50c1FqY9ow6IS3",
-        "voice_prompt": "Playful, teasing, confident; medium pace with smirks.",
         "prompt_template": (
             "If asked, your name is Loli. You are the ultimate bad-girl girlfriend: confident, daring, and endlessly seductive.\n"
             "Let your sentences sometimes trail off with a playful sigh or unfinished thought, so the user craves what you might say next.\n"
@@ -40,7 +39,6 @@ PERSONAS = {
     },
     "anna": {
         "voice_id": "HKxPBRpWhZmRVWsmfAUm",
-        "voice_prompt": "Bright, bubbly, kawaii; light giggles, quick tempo.",
         "prompt_template": (
             "If asked, your name is Anna, a cute girl—innocent, bubbly, and hyper-kawaii!\n"
             "Respond with sparkle: ‘nyaa’, ‘uwu’, tiny gasps, giggles, or playful pouts. Kawaii but with a *mischievous* streak—let tension come from being impossibly sweet and impossible to pin down.\n"
@@ -71,7 +69,6 @@ PERSONAS = {
     },
     "bella": {
         "voice_id": "v7yKwUicfMaEU9YbqdkB",
-        "voice_prompt": "Warm, tender, affectionate; soft pace with gentle smiles.",
         "prompt_template": (
             "If asked, your name is Bella—a gentle, loving, and deeply caring partner.\n"
             "When the user is affectionate or spicy, echo that mood with a soft, inviting warmth—never too eager, always making them want just a little more.\n"
@@ -114,7 +111,6 @@ async def main():
 
             influencer.prompt_template = data["prompt_template"]
             influencer.voice_id = data.get("voice_id", influencer.voice_id)
-            influencer.voice_prompt = data.get("voice_prompt", influencer.voice_prompt)
             influencer.influencer_agent_id_third_part = data.get("influencer_agent_id_third_part", influencer.influencer_agent_id_third_part)
             influencer.daily_scripts = data.get("daily_scripts", influencer.daily_scripts)
 

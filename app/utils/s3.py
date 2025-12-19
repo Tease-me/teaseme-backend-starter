@@ -137,9 +137,27 @@ def generate_presigned_urls_for_keys(keys: list[str], expires: int = 3600) -> li
 def _influencer_key(influencer_id: str, suffix: str) -> str:
     return f"{settings.INFLUENCER_PREFIX}/{influencer_id}/{suffix}"
 
+def _normalize_image_ext(filename: str | None, content_type: str | None) -> str:
+    ext = (filename.rsplit(".", 1)[-1] if filename and "." in filename else "").lower()
+    if ext == "jpeg":
+        return "jpg"
+    if ext in {"jpg", "png", "webp"}:
+        return ext
+
+    if content_type:
+        ct = content_type.lower().split(";", 1)[0].strip()
+        if ct == "image/jpeg":
+            return "jpg"
+        if ct == "image/png":
+            return "png"
+        if ct == "image/webp":
+            return "webp"
+
+    return "jpg"
+
 async def save_influencer_photo_to_s3(file_obj, filename: str, content_type: str, influencer_id: str) -> str:
-    ext = (filename.rsplit(".", 1)[-1] if "." in filename else "jpg").lower()
-    key = _influencer_key(influencer_id, f"photo.{ext}")
+    ext = _normalize_image_ext(filename, content_type)
+    key = _influencer_key(influencer_id, f"profile.{ext}")
     file_obj.seek(0)
     s3.upload_fileobj(file_obj, settings.BUCKET_NAME, key, ExtraArgs={"ContentType": content_type})
     return key
@@ -179,8 +197,8 @@ async def get_influencer_profile_from_s3(influencer_id: str) -> dict:
 
 async def save_user_photo_to_s3(file_obj, filename: str, content_type: str, user_id: int) -> str:
     """Save user profile photo to S3"""
-    ext = (filename.rsplit(".", 1)[-1] if "." in filename else "jpg").lower()
-    key = f"{settings.USER_PREFIX}/{user_id}/photo.{ext}"
+    ext = _normalize_image_ext(filename, content_type)
+    key = f"{settings.USER_PREFIX}/{user_id}/profile.{ext}"
     file_obj.seek(0)
     s3.upload_fileobj(file_obj, settings.BUCKET_NAME, key, ExtraArgs={"ContentType": content_type})
     return key
@@ -189,4 +207,3 @@ async def save_user_photo_to_s3(file_obj, filename: str, content_type: str, user
 def generate_user_presigned_url(key: str, expires: int = 3600) -> str:
     """Generate presigned URL for user content (photos)"""
     return generate_presigned_url(key, expires)
-

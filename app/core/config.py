@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     BLAND_API_KEY: str
     BLAND_VOICE_ID: str
     ELEVENLABS_API_KEY: str
-    ELEVEN_BASE_URL: str
+    ELEVEN_BASE_URL: str 
     ELEVENLABS_VOICE_ID: str
     ELEVENLABS_CONVAI_WEBHOOK_SECRET: str | None = None
     
@@ -37,8 +37,8 @@ class Settings(BaseSettings):
     AWS_REGION: str
     SES_SENDER: str
     SES_SERVER: str
-    AWS_ACCESS_KEY_ID: str
-    AWS_SECRET_ACCESS_KEY: str
+    SES_AWS_ACCESS_KEY_ID: str
+    SES_AWS_SECRET_ACCESS_KEY: str
 
     PUBLIC_BASE_URL: str
 
@@ -53,5 +53,13 @@ class Settings(BaseSettings):
     USER_PREFIX: str = "user-content"  # Default fallback if missing in .env
 
     TWITTER_BEARER_TOKEN: str | None = None
+
+    PAYPAL_MODE: str | None = None
+    PAYPAL_CURRENCY: str | None = None
+    PAYPAL_CLIENT_ID: str | None = None
+    PAYPAL_CLIENT_SECRET: str | None = None
+    PAYPAL_BASE_URL: str | None = None
+    PAYPAL_RETURN_URL: str | None = None
+    PAYPAL_CANCEL_URL: str | None = None
 
 settings = Settings()
