@@ -320,3 +320,24 @@ class RelationshipState(Base):
         Index("ix_rel_user_influencer", "user_id", "influencer_id", unique=True),
     )
 
+class PayPalTopUp(Base):
+    __tablename__ = "paypal_topups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+
+    order_id: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
+    cents: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    status: Mapped[str] = mapped_column(String, default="CREATED")  # CREATED | COMPLETED | FAILED
+    credited: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
