@@ -224,7 +224,7 @@ async def register_pre_influencer(
         email=data.email,
         password=data.password,
         survey_token=verify_token,
-        terms_agreement=data.terms_agreement,
+        terms_agreement=False,
     )
 
     db.add(pre)
