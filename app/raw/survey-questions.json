@@ -439,14 +439,20 @@
                 "required": true
             },
             {
-                "id": "q30_catchphrases",
+                "id": "q30_call_loved_ones",
                 "label": "How would you call your loved ones? (babe, hubby, honey...)",
                 "type": "text",
                 "required": true
             },
             {
-                "id": "q31_catchphrases",
+                "id": "q31_topics_to_avoid",
                 "label": "What topic would you like to avoid.",
+                "type": "text",
+                "required": true
+            },
+            {
+                "id": "q32_talking_style",
+                "label": "What talking style you like to use when talking to the followers? (e.g., flirty, rude, sarcastic, sweet, etc.)",
                 "type": "text",
                 "required": true
             }
