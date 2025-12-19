@@ -24,6 +24,7 @@ from app.schemas.pre_influencer import (
     PreInfluencerRegisterRequest,
     PreInfluencerRegisterResponse,
     SurveyQuestionsResponse,
+    PreInfluencerAcceptTermsRequest,
     SurveyState,
     SurveySaveRequest,
     InfluencerAudioDeleteRequest,
@@ -179,6 +180,21 @@ async def _generate_prompt_from_markdown(markdown: str, additional_prompt: str |
     parsed["dislikes"] = _as_str_list(parsed.get("dislikes"))
 
     return parsed
+@router.post("/{pre_id}/accept-terms")
+async def accept_pre_influencer_terms(
+    pre_id: int,
+    payload: PreInfluencerAcceptTermsRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    res = await db.execute(select(PreInfluencer).where(PreInfluencer.id == pre_id))
+    pre = res.scalar_one_or_none()
+    if not pre:
+        raise HTTPException(status_code=404, detail="Pre-influencer not found")
+    
+    pre.terms_agreement = True 
+    await db.commit()
+    return {"ok": True, "terms_agreement": True}
+
 
 @router.post("/register", response_model=PreInfluencerRegisterResponse)
 async def register_pre_influencer(

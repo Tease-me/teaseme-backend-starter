@@ -8,7 +8,7 @@ class PreInfluencerRegisterRequest(BaseModel):
     username: str
     email: EmailStr
     password: str
-    terms_agreement: Literal[True]
+    
 
 class PreInfluencerRegisterResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -17,7 +17,9 @@ class PreInfluencerRegisterResponse(BaseModel):
     email: EmailStr
     message: str
     
-
+class PreInfluencerAcceptTermsRequest(BaseModel):
+    terms_agreement: Literal[True]
+    
 class SurveyState(BaseModel):
     pre_influencer_id: int
     username: str
