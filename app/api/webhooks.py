@@ -5,6 +5,7 @@ import asyncio, time, logging, json, hmac
 from hashlib import sha256
 from typing import Optional, Any
 from app.agents.prompts import CONVO_ANALYZER
+from app.relationship.dtr import plan_dtr_goal
 from app.relationship.engine import Signals, update_relationship
 from app.relationship.inactivity import apply_inactivity_decay
 from app.relationship.repo import get_or_create_relationship
@@ -17,7 +18,7 @@ from app.services.billing import charge_feature
 from app.api.elevenlabs import _extract_total_seconds
 from sqlalchemy import select
 from app.db.models import CallRecord, Chat, Influencer
-from app.agents.turn_handler import handle_turn
+from app.agents.turn_handler import compute_sentiment_delta, compute_stage_delta, handle_turn, redis_history, stage_from_signals_and_points
 from app.agents.memory import find_similar_memories
 
 log = logging.getLogger(__name__)
@@ -27,7 +28,7 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 ELEVENLABS_CONVAI_WEBHOOK_SECRET = settings.ELEVENLABS_CONVAI_WEBHOOK_SECRET
 ELEVEN_BASE_URL = settings.ELEVEN_BASE_URL
 
-log = logging.getLogger(__name__)  # <-- logger
+log = logging.getLogger(__name__)
 
 
 def _redact(val: Any) -> str:
@@ -150,29 +151,7 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
     # Derive your user mapping. Prefer the stored mapping from /register.
     meta_map = await _resolve_user_for_conversation(db, conversation_id)
     user_id = meta_map.get("user_id") or data.get("user_id")  # last-resort fallback
-    influencer_id = meta_map.get("influencer_id") or data.get("influencer_id")
     sid = meta_map.get("sid") or conversation_id
-    
-    # Update Relationship
-    influencer = db.get(Influencer, influencer_id)
-    now = datetime.now(timezone.utc)
-    rel = await get_or_create_relationship(db, int(user_id), influencer_id)
-    days_idle = apply_inactivity_decay(rel, now)
-
-    bio = influencer.bio_json or {}
-
-    persona_likes = bio.get("likes", [])
-    persona_dislikes = bio.get("dislikes", [])
-
-    # Ensure lists (defensive)
-    if not isinstance(persona_likes, list):
-        persona_likes = []
-    if not isinstance(persona_dislikes, list):
-        persona_dislikes = []
-
-    sig_dict = await classify_signals(full_transcript, None, persona_likes, persona_dislikes, CONVO_ANALYZER)
-    signals = Signals(**sig_dict)
-    update_relationship(rel.trust, rel.closeness, rel.attraction, rel.safety, signals)
 
     # Only bill when the conversation is fully done (avoid processing/in-progress).
     if status == "done" and user_id:
@@ -228,6 +207,213 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
     # Always respond quickly with 200 on success.
     return {"ok": True, "conversation_id": conversation_id, "status": status, "total_seconds": int(total_seconds)}
 
+@router.post("/update_relationship")
+async def update_relationship_api( req: Request,
+    db: AsyncSession = Depends(get_db),
+    x_webhook_token: str | None = Header(default=None)
+    ):
+    
+     # 1) Auth
+    _verify_token(ELEVENLABS_CONVAI_WEBHOOK_SECRET, x_webhook_token)
+
+    # 2) Parse payload
+    try:
+        payload = await req.json()
+    except Exception:
+        return {"error": "Sorry, I didn’t catch that. Could you repeat?"}
+
+    try:
+        log.info("[EL TOOL] payload(head)=%s", str(payload)[:800])
+    except Exception:
+        pass
+
+    # 3) Extract user text
+    args = payload.get("arguments") or {}
+    raw_text = (
+        payload.get("text")
+        or payload.get("input")
+        or (args.get("text") if isinstance(args, dict) else None)
+        or ""
+    )
+    user_text = str(raw_text).strip()
+    if not user_text:
+        return {"error": "I didn’t catch that. Could you repeat?"}
+
+    conversation_id = payload.get("conversation_id")
+    if not conversation_id:
+        log.warning("[EL TOOL] missing conversation_id in payload=%s", str(payload)[:300])
+        return {"error": "I’m missing the call ID. Please try again."}
+
+    # 4) Look up CallRecord – must exist (set by /elevenlabs/conversations/{conversation_id}/register)
+    try:
+        res = await db.execute(
+            select(CallRecord).where(CallRecord.conversation_id == conversation_id)
+        )
+        call = res.scalar_one_or_none()
+    except Exception as e:
+        log.exception("[EL TOOL] CallRecord lookup failed: %s", e)
+        return {"error": "I had an internal issue looking up this call. Please try again."}
+
+    if not call:
+        log.warning("[EL TOOL] No CallRecord found for conv=%s", conversation_id)
+        return {"error": "Conversation ID Not Found"}
+
+    user_id = call.user_id
+    influencer_id = call.influencer_id
+    chat_id = call.chat_id
+
+    # 5) Validate context – no defaults
+    if not user_id or not influencer_id or not chat_id:
+        log.warning(
+            "[EL TOOL] incomplete CallRecord context conv=%s user=%s infl=%s chat=%s",
+            conversation_id, user_id, influencer_id, chat_id
+        )
+        return {"error": "I’m having trouble with this call’s context."}
+    
+    history = redis_history(chat_id)
+
+    if len(history.messages) > settings.MAX_HISTORY_WINDOW:
+        trimmed = history.messages[-settings.MAX_HISTORY_WINDOW:]
+        history.clear()
+        history.add_messages(trimmed)
+
+    recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
+    
+    influencer = await db.get(Influencer, influencer_id)
+    if not influencer:
+        log.warning("[EL TOOL] Influencer not found infl=%s conv=%s", influencer_id, conversation_id)
+        return {"error": "Influencer not found"}
+
+    history = redis_history(chat_id)
+
+    if len(history.messages) > settings.MAX_HISTORY_WINDOW:
+        trimmed = history.messages[-settings.MAX_HISTORY_WINDOW:]
+        history.clear()
+        history.add_messages(trimmed)
+
+    recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
+    
+    if not influencer:
+        raise HTTPException(404, "Influencer not found")
+    
+    if not user_id:
+        raise HTTPException(400, "user_id is required for relationship persistence")
+    
+    now = datetime.now(timezone.utc)
+
+    # 1) Load relationship row from DB
+    rel = await get_or_create_relationship(db, int(user_id), influencer_id)
+
+    # 2) Inactivity decay (if user disappeared for days)
+    days_idle = apply_inactivity_decay(rel, now)
+
+    # --- Persona preferences from bio_json ---
+    bio = influencer.bio_json or {}
+
+    persona_likes = bio.get("likes", [])
+    persona_dislikes = bio.get("dislikes", [])
+
+    # Ensure lists (defensive)
+    if not isinstance(persona_likes, list):
+        persona_likes = []
+    if not isinstance(persona_dislikes, list):
+        persona_dislikes = []
+
+    # 3) Classify user message -> relationship signals
+    sig_dict = await classify_signals(user_text, recent_ctx, persona_likes, persona_dislikes, CONVO_ANALYZER)
+    log.info("SIG_DICT=%s", sig_dict)
+    sig = Signals(**sig_dict)
+
+    # --- sentiment_score (-100..100): Sims-like mood (can be negative) ---
+    d_sent = compute_sentiment_delta(sig)
+    rel.sentiment_score = max(
+        -100.0,
+        min(100.0, float(rel.sentiment_score or 0.0) + d_sent)
+    )
+
+    # 4) Update dimensions (trust/closeness/attraction/safety)
+    out = update_relationship(rel.trust, rel.closeness, rel.attraction, rel.safety, sig)
+
+    log.info(
+        "DIM before->after | t %.4f->%.4f c %.4f->%.4f a %.4f->%.4f s %.4f->%.4f",
+        rel.trust, out.trust,
+        rel.closeness, out.closeness,
+        rel.attraction, out.attraction,
+        rel.safety, out.safety,
+    )
+
+    rel.trust = out.trust
+    rel.closeness = out.closeness
+    rel.attraction = out.attraction
+    rel.safety = out.safety
+
+    # --- stage points update (controls state progression) ---
+    prev_sp = float(rel.stage_points or 0.0)
+    delta = compute_stage_delta(sig)
+    rel.stage_points = max(0.0, min(100.0, prev_sp + delta))
+
+    # Derive stage from BOTH points and negative dominance
+    rel.state = stage_from_signals_and_points(rel.stage_points, sig)
+
+    # eligibility based on final state + dimensions
+    # (Only allow girlfriend/exclusive talk if not in negative stages)
+    can_ask = (
+        rel.state == "DATING"
+        and rel.safety >= 70
+        and rel.trust >= 75
+        and rel.closeness >= 70
+        and rel.attraction >= 65
+    )
+
+    # Block commitment if user is in DISLIKE/HATE
+    if rel.state in ("HATE", "DISLIKE"):
+        can_ask = False
+
+    # Apply accepts AFTER state is derived
+    if sig.accepted_exclusive and rel.state in ("DATING", "GIRLFRIEND"):
+        rel.exclusive_agreed = True
+
+    if sig.accepted_girlfriend and can_ask:
+        rel.girlfriend_confirmed = True
+        rel.exclusive_agreed = True
+        rel.state = "GIRLFRIEND"
+
+    # keep girlfriend sticky
+    if rel.girlfriend_confirmed:
+        rel.state = "GIRLFRIEND"
+
+    dtr_goal = plan_dtr_goal(rel, can_ask)
+
+    log.info(
+        "STAGE prev=%.2f delta=%.2f new=%.2f state=%s can_ask=%s",
+        prev_sp, delta, rel.stage_points, rel.state, can_ask
+    )
+
+    log.info("STAGE prev=%.2f delta=%.2f new=%.2f state=%s can_ask=%s",
+            prev_sp, delta, rel.stage_points, rel.state, can_ask)
+    # 7) Update last interaction
+    rel.last_interaction_at = now
+    rel.updated_at = now
+
+    db.add(rel)
+    await db.commit()
+    await db.refresh(rel)
+
+    relationship = (
+        "# Relationship Metrics:\n"
+        f"- phase: {rel.state}\n"
+        f"- trust: {rel.trust}/100\n"
+        f"- closeness: {rel.closeness}/100\n"
+        f"- attraction: {rel.attraction}/100\n"
+        f"- safety: {rel.safety}/100\n"
+        f"- exclusive_agreed: {rel.exclusive_agreed}\n"
+        f"- girlfriend_confirmed: {rel.girlfriend_confirmed}\n"
+        f"- days_idle_before_message: {days_idle}\n"
+        f"- dtr_goal: {dtr_goal}\n"
+    )
+
+    log.info("[EL TOOL] relationship_metrics conv=%s\n%s", conversation_id, relationship)
+    return relationship
 
 def _verify_token(shared: str, token: str | None) -> None:
     """Simple shared-secret check (constant time if you prefer)."""
@@ -238,7 +424,7 @@ def _verify_token(shared: str, token: str | None) -> None:
     # constant-time compare (avoid timing attacks)
     if not hmac.compare_digest(shared, token):
         raise HTTPException(status_code=403, detail="Invalid webhook token")
-    
+
 @router.post("/memories")
 async def eleven_webhook_get_memories(
     req: Request,
@@ -303,8 +489,7 @@ async def eleven_webhook_get_memories(
             conversation_id, user_id, influencer_id, chat_id
         )
         return {
-            "memories": []
-        }
+            "memories": []}
 
     # 6) Ensure Chat exists
     try:
@@ -312,7 +497,7 @@ async def eleven_webhook_get_memories(
         chat = res.scalar_one_or_none()
     except Exception as e:
         log.exception("[EL TOOL] Chat lookup failed: %s", e)
-        return {"text": "I hit an error accessing our chat. Please try again later."}
+        return {"memories": []}
 
     if not chat:
         log.warning(
