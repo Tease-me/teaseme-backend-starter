@@ -232,7 +232,7 @@
             },
             {
                 "id": "q18_plan_date",
-                "label": "When plan a date, you?",
+                "label": "When planning a date, you?",
                 "type": "radio",
                 "required": true,
                 "options": [
