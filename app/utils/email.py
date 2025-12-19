@@ -9,8 +9,8 @@ log = logging.getLogger(__name__)
 AWS_REGION = settings.AWS_REGION
 SES_SENDER = settings.SES_SENDER
 CONFIRM_BASE_URL = settings.SES_SERVER
-AWS_ACCESS_KEY_ID = settings.AWS_ACCESS_KEY_ID
-AWS_SECRET_ACCESS_KEY = settings.AWS_SECRET_ACCESS_KEY
+AWS_ACCESS_KEY_ID = settings.SES_AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY = settings.SES_AWS_SECRET_ACCESS_KEY
 
 ses_client = boto3.client("ses", region_name=AWS_REGION)
 
@@ -132,14 +132,17 @@ def send_profile_survey_email(to_email: str, token: str, temp_password: str):
                     Start Profile Survey
                   </a>
 
-                  <p style="font-size:14px;color:#666;margin:12px 0 24px 0;">
-                    Your temporary password to access your creator area:
+                  <p style="font-size:14px;color:#666;margin:12px 0 8px 0;">
+                    Your session identifier is:
                   </p>
 
                   <div style="display:inline-block;padding:10px 18px;border-radius:8px;background:#f3f4ff;
                               font-family:monospace;font-size:16px;color:#333;margin-bottom:16px;">
                     {temp_password}
                   </div>
+                   <p style="font-size:12px;color:#666;margin:2px 0 8px 0;">
+                    You will only need this if support asks for it.
+                  </p>
 
                   <p style="margin:24px 0 0 0; font-size:14px; color:#bbb;">
                     If you didn’t request this, you can safely ignore the email.<br/>
