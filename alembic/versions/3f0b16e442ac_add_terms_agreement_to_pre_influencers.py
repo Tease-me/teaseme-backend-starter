@@ -27,7 +27,10 @@ def upgrade() -> None:
                existing_nullable=True)
     op.add_column('pre_influencers', sa.Column('ig_user_id', sa.String(), nullable=True))
     op.add_column('pre_influencers', sa.Column('ig_access_token', sa.String(), nullable=True))
-    op.add_column('pre_influencers', sa.Column('terms_agreement', sa.Boolean(), nullable=False))
+    op.add_column(
+        'pre_influencers',
+        sa.Column('terms_agreement', sa.Boolean(), nullable=False, server_default=sa.text("false")),
+    )
     # ### end Alembic commands ###
 
 

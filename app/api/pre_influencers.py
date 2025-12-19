@@ -1,3 +1,4 @@
+import io
 import json
 import logging
 import secrets
@@ -32,7 +33,12 @@ from app.schemas.pre_influencer import (
 )
 from app.core.config import settings
 from app.utils.email import send_profile_survey_email
-from app.utils.s3 import save_influencer_photo_to_s3, generate_presigned_url, delete_file_from_s3
+from app.utils.s3 import (
+    save_influencer_audio_to_s3,
+    save_influencer_photo_to_s3,
+    generate_presigned_url,
+    delete_file_from_s3,
+)
 
 
 log = logging.getLogger(__name__)
@@ -208,7 +214,6 @@ async def register_pre_influencer(
         email=data.email,
         password=data.password,
         survey_token=verify_token,
-        terms_agreement=data.terms_agreement,
     )
 
     db.add(pre)
@@ -369,6 +374,47 @@ async def upload_pre_influencer_picture(
             log.warning("Failed to delete previous S3 picture %s", previous_key, exc_info=True)
 
     return {"s3_key": s3_key}
+
+@router.post("/upload-audio")
+async def upload_pre_influencer_audio(
+    pre_influencer_id: int = Form(...),
+    terms_agreement: bool = Form(...),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    if terms_agreement is not True:
+        raise HTTPException(status_code=400, detail="terms_agreement must be true")
+
+    result = await db.execute(
+        select(PreInfluencer).where(PreInfluencer.id == pre_influencer_id)
+    )
+    pre = result.scalar_one_or_none()
+
+    if not pre:
+        raise HTTPException(status_code=404, detail="Pre-influencer not found")
+    if not pre.username:
+        raise HTTPException(
+            status_code=400,
+            detail="Pre-influencer has no username to store audio under",
+        )
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    key = await save_influencer_audio_to_s3(
+        io.BytesIO(file_bytes),
+        file.filename or "audio.webm",
+        file.content_type or "audio/webm",
+        influencer_id=pre.username,
+    )
+
+    pre.terms_agreement = True
+    db.add(pre)
+    await db.commit()
+    await db.refresh(pre)
+
+    return {"key": key, "url": generate_presigned_url(key, expires=3600)}
 
 @router.get("/{pre_id}/picture-url")
 async def get_pre_influencer_picture_url(

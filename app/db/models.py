@@ -320,4 +320,3 @@ class RelationshipState(Base):
     __table_args__ = (
         Index("ix_rel_user_influencer", "user_id", "influencer_id", unique=True),
     )
-

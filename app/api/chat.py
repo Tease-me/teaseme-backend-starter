@@ -328,7 +328,7 @@ async def chat_audio(
     chat_id: str = Form(...),
     influencer_id: str = Form("default"),
     token: str = Form(""),    
-    db=Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     if not token:
         raise HTTPException(status_code=400, detail="Token missing")
