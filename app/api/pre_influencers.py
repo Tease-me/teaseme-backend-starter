@@ -236,7 +236,7 @@ async def register_pre_influencer(
 
     try:
         tid = getattr(data, "fp_tid", None) or request.cookies.get("_fprom_tid")
-        log.info("FP TID=%s", tid)
+        log.info("FP BODY fp_tid=%s cookie_tid=%s", getattr(data, "fp_tid", None), request.cookies.get("_fprom_tid"))
 
         res = None
         if tid:
