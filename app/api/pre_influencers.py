@@ -13,6 +13,7 @@ from fastapi import (
     Form,
     Response,
     status,
+    Request
 )
 from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +35,7 @@ from app.schemas.pre_influencer import (
 from app.core.config import settings
 from app.utils.email import send_profile_survey_email
 from app.utils.s3 import save_influencer_photo_to_s3, generate_presigned_url, delete_file_from_s3
+from app.services.firstpromoter import fp_track_signup
 
 
 log = logging.getLogger(__name__)
@@ -199,6 +201,7 @@ async def accept_pre_influencer_terms(
 @router.post("/register", response_model=PreInfluencerRegisterResponse)
 async def register_pre_influencer(
     data: PreInfluencerRegisterRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     existing = await db.execute(
@@ -230,6 +233,17 @@ async def register_pre_influencer(
     db.add(pre)
     await db.commit()
     await db.refresh(pre)
+
+    try:
+        tid = request.cookies.get("_fprom_tid")
+        await fp_track_signup(
+            email=pre.email,
+            uid=str(pre.id),
+            tid=tid,
+        )
+    except Exception as e:
+        # Never block signup/email if FP fails
+        print("FirstPromoter track/signup failed:", e)
 
     send_profile_survey_email(
         pre.email,
