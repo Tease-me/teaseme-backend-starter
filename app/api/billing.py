@@ -12,6 +12,7 @@ from decimal import Decimal
 from pydantic import BaseModel, PositiveInt
 from sqlalchemy import select
 from app.services.paypal import paypal_access_token
+from app.services.firstpromoter import fp_track_sale_v2
 from app.db.models import PayPalTopUp
 from app.core.config import settings
 
@@ -69,7 +70,11 @@ class PayPalCaptureReq(BaseModel):
     order_id: str
 
 @router.post("/paypal/capture")
-async def paypal_capture(req: PayPalCaptureReq, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def paypal_capture(
+    req: PayPalCaptureReq,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
     row = await db.scalar(select(PayPalTopUp).where(PayPalTopUp.order_id == req.order_id))
     if not row:
         raise HTTPException(404, "Unknown order_id")
@@ -77,6 +82,7 @@ async def paypal_capture(req: PayPalCaptureReq, db: AsyncSession = Depends(get_d
     if row.user_id != user.id:
         raise HTTPException(403, "Order does not belong to this user")
 
+    # If already credited, don't double-credit or double-track
     if row.credited:
         wallet = await db.get(CreditWallet, user.id)
         return {"ok": True, "credited": True, "new_balance_cents": wallet.balance_cents if wallet else 0}
@@ -92,6 +98,7 @@ async def paypal_capture(req: PayPalCaptureReq, db: AsyncSession = Depends(get_d
         cap = r.json()
 
     status = cap.get("status", "UNKNOWN")
+
     if status != "COMPLETED":
         row.status = status
         db.add(row)
@@ -102,6 +109,18 @@ async def paypal_capture(req: PayPalCaptureReq, db: AsyncSession = Depends(get_d
 
     row.status = "COMPLETED"
     row.credited = True
+
+    try:
+        await fp_track_sale_v2(
+            email=getattr(user, "email", None),
+            uid=str(user.id),
+            amount_cents=row.cents,
+            event_id=req.order_id,
+            plan="wallet_topup",
+        )
+    except Exception as e:
+        print("FirstPromoter track sale failed:", e)
+
     db.add(row)
     await db.commit()
 

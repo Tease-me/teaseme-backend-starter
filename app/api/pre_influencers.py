@@ -244,6 +244,34 @@ async def register_pre_influencer(
         message="Check your email.",
     )
 
+@router.post("/resend-survey")
+async def resend_pre_influencer_survey_by_username(
+    username: str,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(PreInfluencer).where(PreInfluencer.username == username)
+    )
+    pre = result.scalar_one_or_none()
+
+    if not pre:
+        raise HTTPException(status_code=404, detail="Pre-influencer not found")
+
+    if not pre.survey_token:
+        raise HTTPException(status_code=400, detail="Survey token missing")
+
+    send_profile_survey_email(
+        pre.email,
+        pre.survey_token,
+        pre.password,
+    )
+
+    return {
+        "ok": True,
+        "username": pre.username,
+        "email": pre.email,
+        "message": "Survey email resent",
+    }
 
 @router.get("/survey", response_model=SurveyState)
 async def open_survey(token: str, db: AsyncSession = Depends(get_db)):

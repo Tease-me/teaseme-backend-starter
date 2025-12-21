@@ -333,7 +333,7 @@ class PayPalTopUp(Base):
 
     status: Mapped[str] = mapped_column(String, default="CREATED")  # CREATED | COMPLETED | FAILED
     credited: Mapped[bool] = mapped_column(Boolean, default=False)
-
+    fp_tracked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
