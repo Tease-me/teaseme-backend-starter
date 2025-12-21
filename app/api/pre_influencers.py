@@ -235,19 +235,22 @@ async def register_pre_influencer(
     await db.refresh(pre)
 
     try:
-        #tid = request.cookies.get("_fprom_tid")
-        tid = data.fp_tid or request.cookies.get("_fprom_tid")
+        tid = getattr(data, "fp_tid", None) or request.cookies.get("_fprom_tid")
         log.info("FP TID=%s", tid)
 
-        res = await fp_track_signup(
-            email=pre.email,
-            uid=str(pre.id),
-            tid=tid,
-        )
-        log.info("FP RESPONSE =", res)
+        res = None
+        if tid:
+            res = await fp_track_signup(
+                email=pre.email,
+                uid=str(pre.id),
+                tid=tid,
+            )
+
+        log.info("FP RESPONSE=%s", res)
+
     except Exception as e:
-        # Never block signup/email if FP fails
-        print("FirstPromoter track/signup failed:", e)
+        log.exception("FirstPromoter track/signup failed: %s", e)
+      
 
     send_profile_survey_email(
         pre.email,
