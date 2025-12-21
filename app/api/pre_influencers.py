@@ -237,11 +237,14 @@ async def register_pre_influencer(
     try:
         #tid = request.cookies.get("_fprom_tid")
         tid = data.fp_tid or request.cookies.get("_fprom_tid")
-        await fp_track_signup(
+        log.info("FP TID =", tid)
+
+        res = await fp_track_signup(
             email=pre.email,
             uid=str(pre.id),
             tid=tid,
         )
+        log.info("FP RESPONSE =", res)
     except Exception as e:
         # Never block signup/email if FP fails
         print("FirstPromoter track/signup failed:", e)
