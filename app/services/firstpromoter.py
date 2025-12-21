@@ -71,7 +71,7 @@ async def fp_track_signup(
             "https://v2.firstpromoter.com/api/v2/track/signup",
             json=payload,
             headers={
-                "Authorization": f"Bearer {settings.FIRSTPROMOTER_API_KEY}",
+                "Authorization": f"Bearer {settings.FIRSTPROMOTER_TOKEN}",
                 "Account-ID": settings.FIRSTPROMOTER_ACCOUNT_ID,
                 "Content-Type": "application/json",
             },
