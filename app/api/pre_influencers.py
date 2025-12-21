@@ -235,7 +235,8 @@ async def register_pre_influencer(
     await db.refresh(pre)
 
     try:
-        tid = request.cookies.get("_fprom_tid")
+        #tid = request.cookies.get("_fprom_tid")
+        tid = data.fp_tid or request.cookies.get("_fprom_tid")
         await fp_track_signup(
             email=pre.email,
             uid=str(pre.id),
