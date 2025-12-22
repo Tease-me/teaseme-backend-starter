@@ -238,11 +238,7 @@ async def register_pre_influencer(
             
             parent_promoter_id = None
             if data.parent_ref_id:
-                parent = await db.scalar(
-                    select(PreInfluencer).where(PreInfluencer.fp_ref_id == data.parent_ref_id)
-                )
-                if parent and parent.fp_promoter_id:
-                    parent_promoter_id = await fp_find_promoter_id_by_ref_token(data.parent_ref_id)
+                parent_promoter_id = await fp_find_promoter_id_by_ref_token(data.parent_ref_id)
 
             log.info("LINK DEBUG parent_ref_id=%s parent_promoter_id=%s", data.parent_ref_id, parent_promoter_id)
             
