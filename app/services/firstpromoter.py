@@ -1,5 +1,7 @@
 import httpx
 from app.core.config import settings
+import logging
+log = logging.getLogger(__name__)
 
 async def fp_track_sale_v2(*, email: str | None, uid: str | None, amount_cents: int, event_id: str, tid: str | None = None, ref_id: str | None = None, plan: str | None = None):
     """
@@ -99,5 +101,10 @@ async def fp_create_promoter(*, email: str, first_name: str, last_name: str, cus
             json=payload,
             headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
         )
+
+
+        if r.status_code >= 400:
+            log.error("FP create promoter failed: %s %s payload=%s", r.status_code, r.text, payload)
+        
         r.raise_for_status()
         return r.json()

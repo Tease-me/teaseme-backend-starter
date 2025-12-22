@@ -260,6 +260,7 @@ async def register_pre_influencer(
             await db.refresh(pre)
 
             log.info("FP promoter created id=%s ref_id=%s", pre.fp_promoter_id, pre.fp_ref_id)
+            
 
     except Exception as e:
         log.exception("FirstPromoter create promoter failed: %s", e)
