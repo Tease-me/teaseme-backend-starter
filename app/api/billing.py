@@ -116,7 +116,7 @@ async def paypal_capture(
             uid=str(user.id),
             amount_cents=row.cents,
             event_id=req.order_id,
-            tid=getattr(user, "fp_tid", None), 
+            ref_id=getattr(user, "fp_ref_id", None),
             plan="wallet_topup",
         )
     except Exception as e:
