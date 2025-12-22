@@ -1,7 +1,8 @@
-from datetime import datetime, timedelta, timezone
+import secrets
+import logging
 
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.responses import HTMLResponse
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -15,8 +16,8 @@ from app.utils.deps import get_current_user
 from app.utils.email import send_verification_email, send_password_reset_email
 from app.utils.auth import create_token
 from app.api.notify_ws import notify_email_verified
-
-import secrets
+from app.services.firstpromoter import fp_track_signup
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -63,7 +64,7 @@ def _clear_auth_cookies(response: Response) -> None:
         )
 
 @router.post("/register")
-async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
+async def register(data: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db)):
     existing_user = await db.execute(
         select(User).where((User.email == data.email))
     )
@@ -81,6 +82,22 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
     db.add(user)
     await db.commit()
     await db.refresh(user)
+
+    try:
+        tid = getattr(data, "fp_tid", None) or request.cookies.get("_fprom_tid")
+        log.info("FP BODY fp_tid=%s cookie_tid=%s", getattr(data, "fp_tid", None), request.cookies.get("_fprom_tid"))
+
+        res = None
+        if tid:
+            res = await fp_track_signup(
+                email=user.email,
+                uid=str(user.id),
+                tid=tid,
+            )
+
+        log.info("FP RESPONSE=%s", res)
+    except Exception as e:
+        log.exception("FirstPromoter track/signup failed: %s", e)
 
     send_verification_email(user.email, verify_token)
 
