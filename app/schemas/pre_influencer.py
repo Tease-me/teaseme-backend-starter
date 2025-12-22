@@ -10,6 +10,7 @@ class PreInfluencerRegisterRequest(BaseModel):
     password: str
     terms_agreement: bool = False
     fp_tid: str | None = None
+    parent_ref_id: str | None = None
 
 class PreInfluencerRegisterResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
