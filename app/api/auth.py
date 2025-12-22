@@ -78,7 +78,7 @@ async def register(data: RegisterRequest, request: Request, db: AsyncSession = D
         email=data.email,
         is_verified=False,
         email_token=verify_token,
-        fp_tid=data.fp_tid,
+        fp_ref_id=data.fp_ref_id,
     )
     db.add(user)
     await db.commit()
