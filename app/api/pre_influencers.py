@@ -244,6 +244,8 @@ async def register_pre_influencer(
                 if parent and parent.fp_promoter_id:
                     parent_promoter_id = int(parent.fp_promoter_id) if parent and parent.fp_promoter_id else None
 
+            log.info("LINK DEBUG parent_ref_id=%s parent_promoter_id=%s", data.parent_ref_id, parent_promoter_id)
+            
             promoter = await fp_create_promoter(
                 email=pre.email,
                 first_name=first,

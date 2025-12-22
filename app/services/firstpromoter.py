@@ -102,7 +102,6 @@ async def fp_create_promoter(*, email: str, first_name: str, last_name: str, cus
             headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
         )
 
-
         if r.status_code >= 400:
             log.error("FP create promoter failed: %s %s payload=%s", r.status_code, r.text, payload)
         
