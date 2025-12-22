@@ -79,25 +79,30 @@ async def fp_track_signup(
         r.raise_for_status()
 
 
-async def fp_create_promoter(*, email: str, name: str | None = None):
-    token = settings.FIRSTPROMOTER_TOKEN
-    account_id = settings.FIRSTPROMOTER_ACCOUNT_ID
-    if not token or not account_id:
+
+async def fp_create_promoter(*, email: str, first_name: str, last_name: str, cust_id: str):
+    api_key = settings.FIRSTPROMOTER_API_KEY
+    if not api_key:
         return None
 
-    payload: dict = {"email": email}
-    if name:
-        payload["name"] = name
+    payload = {
+        "email": email,
+        "first_name": first_name,
+        "last_name": last_name,
+        "cust_id": cust_id,
+    }
 
-    async with httpx.AsyncClient(timeout=20) as client:
+    async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post(
-            "https://v2.firstpromoter.com/api/v2/promoters",
+            "https://firstpromoter.com/api/v1/promoters/create",
             json=payload,
             headers={
-                "Authorization": f"Bearer {settings.FIRSTPROMOTER_TOKEN}",
-                "Account-ID":  settings.FIRSTPROMOTER_ACCOUNT_ID,
+                "X-API-KEY": settings.FIRSTPROMOTER_API_KEY,
                 "Content-Type": "application/json",
             },
         )
         r.raise_for_status()
         return r.json()
+    
+
+    

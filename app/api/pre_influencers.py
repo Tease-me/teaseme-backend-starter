@@ -232,22 +232,29 @@ async def register_pre_influencer(
     await db.refresh(pre)
 
     try:
-        promoter = await fp_create_promoter(
-            email=pre.email,
-            name=pre.full_name or pre.username,
-        )
-        
-        pre.fp_promoter_id = promoter.get("id")
-        pre.fp_ref_id = promoter.get("ref_id")
-        db.add(pre)
-        await db.commit()
-        await db.refresh(pre)
+        if not pre.fp_promoter_id or not pre.fp_ref_id:
+            first = (pre.full_name or pre.username or "Influencer").split(" ")[0]
+            last = " ".join((pre.full_name or "").split(" ")[1:]) or "TeaseMe"
 
-        print("FP promoter created:", promoter)
+            promoter = await fp_create_promoter(
+                email=pre.email,
+                first_name=first,
+                last_name=last,
+                cust_id=f"preinf-{pre.id}",
+            )
+
+            pre.fp_promoter_id = str(promoter.get("id"))
+            pre.fp_ref_id = promoter.get("default_ref_id") or (promoter.get("promotions") or [{}])[0].get("ref_id")
+
+            db.add(pre)
+            await db.commit()
+            await db.refresh(pre)
+
+            log.info("FP promoter created id=%s ref_id=%s", pre.fp_promoter_id, pre.fp_ref_id)
+
     except Exception as e:
-        # Don't block registration if FP fails
-        print("FirstPromoter create promoter failed:", e)
-      
+        log.exception("FirstPromoter create promoter failed: %s", e)
+        
 
     send_profile_survey_email(
         pre.email,
