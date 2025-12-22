@@ -12,8 +12,7 @@ from fastapi import (
     File,
     Form,
     Response,
-    status,
-    Request
+    status
 )
 from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,13 +28,12 @@ from app.schemas.pre_influencer import (
     SurveyState,
     SurveySaveRequest,
     InfluencerAudioDeleteRequest,
-    SurveyPromptRequest,
     SurveyPromptResponse,
 )
 from app.core.config import settings
 from app.utils.email import send_profile_survey_email
 from app.utils.s3 import save_influencer_photo_to_s3, generate_presigned_url, delete_file_from_s3
-from app.services.firstpromoter import fp_track_signup
+from app.services.firstpromoter import fp_create_promoter
 
 
 log = logging.getLogger(__name__)
@@ -201,7 +199,6 @@ async def accept_pre_influencer_terms(
 @router.post("/register", response_model=PreInfluencerRegisterResponse)
 async def register_pre_influencer(
     data: PreInfluencerRegisterRequest,
-    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     existing = await db.execute(
@@ -235,21 +232,21 @@ async def register_pre_influencer(
     await db.refresh(pre)
 
     try:
-        tid = getattr(data, "fp_tid", None) or request.cookies.get("_fprom_tid")
-        log.info("FP BODY fp_tid=%s cookie_tid=%s", getattr(data, "fp_tid", None), request.cookies.get("_fprom_tid"))
+        promoter = await fp_create_promoter(
+            email=pre.email,
+            name=pre.full_name or pre.username,
+        )
+        
+        pre.fp_promoter_id = promoter.get("id")
+        pre.fp_ref_id = promoter.get("ref_id")
+        db.add(pre)
+        await db.commit()
+        await db.refresh(pre)
 
-        res = None
-        if tid:
-            res = await fp_track_signup(
-                email=pre.email,
-                uid=str(pre.id),
-                tid=tid,
-            )
-
-        log.info("FP RESPONSE=%s", res)
-
+        print("FP promoter created:", promoter)
     except Exception as e:
-        log.exception("FirstPromoter track/signup failed: %s", e)
+        # Don't block registration if FP fails
+        print("FirstPromoter create promoter failed:", e)
       
 
     send_profile_survey_email(

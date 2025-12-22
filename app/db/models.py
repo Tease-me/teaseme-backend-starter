@@ -279,6 +279,8 @@ class PreInfluencer(Base):
         nullable=False,
     )
     terms_agreement: Mapped[bool] = mapped_column(Boolean, default=False)
+    fp_promoter_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    fp_ref_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
 class RelationshipState(Base):
     __tablename__ = "relationship_state"
