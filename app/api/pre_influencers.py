@@ -235,12 +235,21 @@ async def register_pre_influencer(
         if not pre.fp_promoter_id or not pre.fp_ref_id:
             first = (pre.full_name or pre.username or "Influencer").split(" ")[0]
             last = " ".join((pre.full_name or "").split(" ")[1:]) or "TeaseMe"
+            
+            parent_promoter_id = None
+            if data.parent_ref_id:
+                parent = await db.scalar(
+                    select(PreInfluencer).where(PreInfluencer.fp_ref_id == data.parent_ref_id)
+                )
+                if parent and parent.fp_promoter_id:
+                    parent_promoter_id = int(parent.fp_promoter_id)
 
             promoter = await fp_create_promoter(
                 email=pre.email,
                 first_name=first,
                 last_name=last,
                 cust_id=f"preinf-{pre.id}",
+                parent_promoter_id=parent_promoter_id,
             )
 
             pre.fp_promoter_id = str(promoter.get("id"))
