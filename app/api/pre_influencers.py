@@ -242,7 +242,7 @@ async def register_pre_influencer(
                     select(PreInfluencer).where(PreInfluencer.fp_ref_id == data.parent_ref_id)
                 )
                 if parent and parent.fp_promoter_id:
-                    parent_promoter_id = int(parent.fp_promoter_id)
+                    parent_promoter_id = int(parent.fp_promoter_id) if parent and parent.fp_promoter_id else None
 
             promoter = await fp_create_promoter(
                 email=pre.email,

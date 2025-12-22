@@ -91,7 +91,7 @@ async def fp_create_promoter(*, email: str, first_name: str, last_name: str, cus
             "cust_id": cust_id,
     }
     if parent_promoter_id:
-        payload["parent_promoter_id"] = parent_promoter_id
+        payload["parent_promoter_id"] = int(parent_promoter_id) 
 
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post(
