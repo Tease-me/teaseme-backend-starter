@@ -107,3 +107,26 @@ async def fp_create_promoter(*, email: str, first_name: str, last_name: str, cus
         
         r.raise_for_status()
         return r.json()
+    
+async def fp_find_promoter_id_by_ref_token(ref_token: str) -> int | None:
+    token = settings.FIRSTPROMOTER_TOKEN
+    account_id = settings.FIRSTPROMOTER_ACCOUNT_ID
+
+    async with httpx.AsyncClient(timeout=20) as client:
+        r = await client.get(
+            "https://api.firstpromoter.com/api/v2/company/promoters",
+            params={"search": ref_token},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Account-ID": account_id,
+            },
+        )
+        r.raise_for_status()
+        data = r.json().get("data", [])
+
+    for p in data:
+        for pc in p.get("promoter_campaigns", []):
+            if pc.get("ref_token") == ref_token:
+                return int(p["id"])
+
+    return None
