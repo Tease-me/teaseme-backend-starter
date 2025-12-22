@@ -48,3 +48,61 @@ async def fp_track_sale_v2(*, email: str | None, uid: str | None, amount_cents: 
         )
         r.raise_for_status()
         return r.json()
+    
+async def fp_track_signup(
+    *,
+    email: str | None,
+    uid: str | None,
+    tid: str | None,
+):
+    if not tid:
+        return
+
+    payload = {}
+    if email:
+        payload["email"] = email
+    if uid:
+        payload["uid"] = uid
+
+    payload["tid"] = tid
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(
+            "https://v2.firstpromoter.com/api/v2/track/signup",
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {settings.FIRSTPROMOTER_TOKEN}",
+                "Account-ID": settings.FIRSTPROMOTER_ACCOUNT_ID,
+                "Content-Type": "application/json",
+            },
+        )
+        r.raise_for_status()
+
+
+
+async def fp_create_promoter(*, email: str, first_name: str, last_name: str, cust_id: str):
+    api_key = settings.FIRSTPROMOTER_API_KEY
+    if not api_key:
+        return None
+
+    payload = {
+        "email": email,
+        "first_name": first_name,
+        "last_name": last_name,
+        "cust_id": cust_id,
+    }
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(
+            "https://firstpromoter.com/api/v1/promoters/create",
+            json=payload,
+            headers={
+                "X-API-KEY": settings.FIRSTPROMOTER_API_KEY,
+                "Content-Type": "application/json",
+            },
+        )
+        r.raise_for_status()
+        return r.json()
+    
+
+    

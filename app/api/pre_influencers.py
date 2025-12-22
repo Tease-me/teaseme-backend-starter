@@ -12,7 +12,7 @@ from fastapi import (
     File,
     Form,
     Response,
-    status,
+    status
 )
 from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,12 +28,12 @@ from app.schemas.pre_influencer import (
     SurveyState,
     SurveySaveRequest,
     InfluencerAudioDeleteRequest,
-    SurveyPromptRequest,
     SurveyPromptResponse,
 )
 from app.core.config import settings
 from app.utils.email import send_profile_survey_email
 from app.utils.s3 import save_influencer_photo_to_s3, generate_presigned_url, delete_file_from_s3
+from app.services.firstpromoter import fp_create_promoter
 
 
 log = logging.getLogger(__name__)
@@ -230,6 +230,31 @@ async def register_pre_influencer(
     db.add(pre)
     await db.commit()
     await db.refresh(pre)
+
+    try:
+        if not pre.fp_promoter_id or not pre.fp_ref_id:
+            first = (pre.full_name or pre.username or "Influencer").split(" ")[0]
+            last = " ".join((pre.full_name or "").split(" ")[1:]) or "TeaseMe"
+
+            promoter = await fp_create_promoter(
+                email=pre.email,
+                first_name=first,
+                last_name=last,
+                cust_id=f"preinf-{pre.id}",
+            )
+
+            pre.fp_promoter_id = str(promoter.get("id"))
+            pre.fp_ref_id = promoter.get("default_ref_id") or (promoter.get("promotions") or [{}])[0].get("ref_id")
+
+            db.add(pre)
+            await db.commit()
+            await db.refresh(pre)
+
+            log.info("FP promoter created id=%s ref_id=%s", pre.fp_promoter_id, pre.fp_ref_id)
+
+    except Exception as e:
+        log.exception("FirstPromoter create promoter failed: %s", e)
+        
 
     send_profile_survey_email(
         pre.email,

@@ -9,7 +9,8 @@ class PreInfluencerRegisterRequest(BaseModel):
     username: str
     email: EmailStr
     password: str
-    
+    terms_agreement: bool = False
+    fp_tid: str | None = None
 
 class PreInfluencerRegisterResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
