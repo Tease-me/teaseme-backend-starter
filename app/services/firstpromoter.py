@@ -1,5 +1,7 @@
 import httpx
 from app.core.config import settings
+import logging
+log = logging.getLogger(__name__)
 
 async def fp_track_sale_v2(*, email: str | None, uid: str | None, amount_cents: int, event_id: str, tid: str | None = None, ref_id: str | None = None, plan: str | None = None):
     """
@@ -79,25 +81,52 @@ async def fp_track_signup(
         r.raise_for_status()
 
 
-    async def fp_create_promoter(*, email: str, first_name: str, last_name: str, cust_id: str, parent_promoter_id: int | None = None):
-        api_key = settings.FIRSTPROMOTER_API_KEY
-        if not api_key:
-            return None
+async def fp_create_promoter(*, email: str, first_name: str, last_name: str, cust_id: str, parent_promoter_id: int | None = None):
+    api_key = settings.FIRSTPROMOTER_API_KEY
+    if not api_key:
+        return None
 
-        payload = {
+    payload = {
             "email": email,
             "first_name": first_name,
             "last_name": last_name,
             "cust_id": cust_id,
-        }
-        if parent_promoter_id:
-            payload["parent_promoter_id"] = parent_promoter_id
+    }
+    if parent_promoter_id:
+        payload["parent_promoter_id"] = int(parent_promoter_id) 
 
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.post(
-                "https://firstpromoter.com/api/v1/promoters/create",
-                json=payload,
-                headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
-            )
-            r.raise_for_status()
-            return r.json()
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(
+            "https://firstpromoter.com/api/v1/promoters/create",
+            json=payload,
+            headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
+        )
+
+        if r.status_code >= 400:
+            log.error("FP create promoter failed: %s %s payload=%s", r.status_code, r.text, payload)
+        
+        r.raise_for_status()
+        return r.json()
+    
+async def fp_find_promoter_id_by_ref_token(ref_token: str) -> int | None:
+    token = settings.FIRSTPROMOTER_TOKEN
+    account_id = settings.FIRSTPROMOTER_ACCOUNT_ID
+
+    async with httpx.AsyncClient(timeout=20) as client:
+        r = await client.get(
+            "https://api.firstpromoter.com/api/v2/company/promoters",
+            params={"search": ref_token},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Account-ID": account_id,
+            },
+        )
+        r.raise_for_status()
+        data = r.json().get("data", [])
+
+    for p in data:
+        for pc in p.get("promoter_campaigns", []):
+            if pc.get("ref_token") == ref_token:
+                return int(p["id"])
+
+    return None

@@ -33,7 +33,7 @@ from app.schemas.pre_influencer import (
 from app.core.config import settings
 from app.utils.email import send_profile_survey_email
 from app.utils.s3 import save_influencer_photo_to_s3, generate_presigned_url, delete_file_from_s3
-from app.services.firstpromoter import fp_create_promoter
+from app.services.firstpromoter import fp_create_promoter, fp_find_promoter_id_by_ref_token
 
 
 log = logging.getLogger(__name__)
@@ -238,12 +238,10 @@ async def register_pre_influencer(
             
             parent_promoter_id = None
             if data.parent_ref_id:
-                parent = await db.scalar(
-                    select(PreInfluencer).where(PreInfluencer.fp_ref_id == data.parent_ref_id)
-                )
-                if parent and parent.fp_promoter_id:
-                    parent_promoter_id = int(parent.fp_promoter_id)
+                parent_promoter_id = await fp_find_promoter_id_by_ref_token(data.parent_ref_id)
 
+            log.info("LINK DEBUG parent_ref_id=%s parent_promoter_id=%s", data.parent_ref_id, parent_promoter_id)
+            
             promoter = await fp_create_promoter(
                 email=pre.email,
                 first_name=first,
@@ -260,6 +258,7 @@ async def register_pre_influencer(
             await db.refresh(pre)
 
             log.info("FP promoter created id=%s ref_id=%s", pre.fp_promoter_id, pre.fp_ref_id)
+            
 
     except Exception as e:
         log.exception("FirstPromoter create promoter failed: %s", e)
