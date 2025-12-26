@@ -504,10 +504,12 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
     if not pre.username:
         raise HTTPException(400, "PreInfluencer username missing")
 
-    influencer = await db.get(Influencer, influencer_id)
-    influencer_id = normalize_influencer_id(pre.username.strip())
+    influencer_id = normalize_influencer_id(pre.username.strip())  # ✅ define first
+    if not influencer_id:
+        raise HTTPException(400, "Invalid influencer id")
 
-    # TODO: ADD in .env and choose default voice ID
+    influencer = await db.get(Influencer, influencer_id)          # ✅ then fetch
+
     DEFAULT_VOICE_ID = "YKG78i9n8ybMZ42crVbJ"
     DEFAULT_PROMPT_TEMPLATE = "default"
 
@@ -515,8 +517,8 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
         influencer = Influencer(
             id=influencer_id,
             display_name=pre.full_name or pre.username,
-            prompt_template=DEFAULT_PROMPT_TEMPLATE,
-            owner_id=None,
+            prompt_template=DEFAULT_PROMPT_TEMPLATE,   # ✅ required (NOT NULL)
+            owner_id=None,                             # set if DB requires it
             voice_id=DEFAULT_VOICE_ID,
             fp_promoter_id=pre.fp_promoter_id,
             fp_ref_id=pre.fp_ref_id,
@@ -525,6 +527,11 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
     else:
         if not influencer.display_name:
             influencer.display_name = pre.full_name or pre.username
+        if not influencer.prompt_template:
+            influencer.prompt_template = DEFAULT_PROMPT_TEMPLATE
+        if not influencer.voice_id:
+            influencer.voice_id = DEFAULT_VOICE_ID
+
         influencer.fp_promoter_id = pre.fp_promoter_id
         influencer.fp_ref_id = pre.fp_ref_id
         db.add(influencer)
