@@ -9,7 +9,7 @@ from sqlalchemy.future import select
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 from app.db.session import get_db
-from app.db.models import User
+from app.db.models import User, Influencer
 from app.schemas.auth import RegisterRequest, LoginRequest, Token, PasswordResetRequest
 from app.core.config import settings
 from app.utils.deps import get_current_user
@@ -73,12 +73,20 @@ async def register(data: RegisterRequest, request: Request, db: AsyncSession = D
 
     verify_token = secrets.token_urlsafe(32)
 
+    fp_ref_id = None
+
+    if data.influencer_id:
+        inf = await db.get(Influencer, data.influencer_id)
+        if inf and inf.fp_ref_id:
+            fp_ref_id = inf.fp_ref_id
+           
+
     user = User(
         password_hash=pwd_context.hash(data.password),
         email=data.email,
         is_verified=False,
         email_token=verify_token,
-        fp_ref_id=data.fp_ref_id,
+        fp_ref_id=fp_ref_id, 
     )
     db.add(user)
     await db.commit()
@@ -194,6 +202,7 @@ async def get_me(user: User = Depends(get_current_user)):
         "id": user.id,
         "username": user.username,
         "email": user.email,
+        "fp_ref_id": user.fp_ref_id,
         "is_verified": user.is_verified,
     }
     

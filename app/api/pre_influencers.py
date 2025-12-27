@@ -33,7 +33,7 @@ from app.schemas.pre_influencer import (
     SurveyPromptResponse,
 )
 from app.core.config import settings
-from app.utils.email import send_profile_survey_email
+from app.utils.email import send_profile_survey_email, send_new_influencer_email
 from app.utils.s3 import save_influencer_photo_to_s3, generate_presigned_url, delete_file_from_s3
 from app.services.firstpromoter import fp_create_promoter, fp_find_promoter_id_by_ref_token
 
@@ -262,8 +262,7 @@ async def register_pre_influencer(
             
     except Exception as e:
         log.exception("FirstPromoter create promoter failed: %s", e)
-        
-
+    
     send_profile_survey_email(
         pre.email,
         verify_token,
@@ -504,21 +503,21 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
     if not pre.username:
         raise HTTPException(400, "PreInfluencer username missing")
 
-    influencer_id = normalize_influencer_id(pre.username.strip())  # ✅ define first
+    influencer_id = normalize_influencer_id(pre.username.strip())
     if not influencer_id:
         raise HTTPException(400, "Invalid influencer id")
 
-    influencer = await db.get(Influencer, influencer_id)          # ✅ then fetch
+    influencer = await db.get(Influencer, influencer_id)
 
     DEFAULT_VOICE_ID = "YKG78i9n8ybMZ42crVbJ"
-    DEFAULT_PROMPT_TEMPLATE = "default"
+    DEFAULT_PROMPT_TEMPLATE = "Update this prompt based on the influencer's personality and preferences."
 
     if not influencer:
         influencer = Influencer(
             id=influencer_id,
             display_name=pre.full_name or pre.username,
-            prompt_template=DEFAULT_PROMPT_TEMPLATE,   # ✅ required (NOT NULL)
-            owner_id=None,                             # set if DB requires it
+            prompt_template=DEFAULT_PROMPT_TEMPLATE,
+            owner_id=None,
             voice_id=DEFAULT_VOICE_ID,
             fp_promoter_id=pre.fp_promoter_id,
             fp_ref_id=pre.fp_ref_id,
@@ -541,6 +540,12 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
 
     await db.commit()
     await db.refresh(influencer)
+
+    send_new_influencer_email(
+        to_email=pre.email,
+        influencer_username=influencer.id,
+        fp_ref_id=influencer.fp_ref_id,
+    )
 
     return {
         "ok": True,
