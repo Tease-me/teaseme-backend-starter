@@ -71,22 +71,13 @@ async def register(data: RegisterRequest, request: Request, db: AsyncSession = D
     if existing_user.scalar():
         raise HTTPException(status_code=200, detail="Username or email already registered")
 
-    verify_token = secrets.token_urlsafe(32)
-
-    fp_ref_id = None
-
-    if data.influencer_id:
-        inf = await db.get(Influencer, data.influencer_id)
-        if inf and inf.fp_ref_id:
-            fp_ref_id = inf.fp_ref_id
-           
+    verify_token = secrets.token_urlsafe(32)           
 
     user = User(
         password_hash=pwd_context.hash(data.password),
         email=data.email,
         is_verified=False,
-        email_token=verify_token,
-        fp_ref_id=fp_ref_id, 
+        email_token=verify_token
     )
     db.add(user)
     await db.commit()
@@ -94,21 +85,23 @@ async def register(data: RegisterRequest, request: Request, db: AsyncSession = D
 
     try:
         tid = getattr(data, "fp_tid", None) or request.cookies.get("_fprom_tid")
-        log.info("FP BODY fp_tid=%s cookie_tid=%s", getattr(data, "fp_tid", None), request.cookies.get("_fprom_tid"))
 
-        res = None
+        log.info(
+            "FP signup: tid_body=%s tid_cookie=%s chosen=%s",
+            getattr(data, "fp_tid", None),
+            request.cookies.get("_fprom_tid"),
+            tid,
+        )
+
         if tid:
-            res = await fp_track_signup(
+            await fp_track_signup(
                 email=user.email,
                 uid=str(user.id),
                 tid=tid,
             )
-
-        log.info("FP RESPONSE=%s", res)
-    except Exception as e:
-        log.exception("FirstPromoter track/signup failed: %s", e)
-
-    send_verification_email(user.email, verify_token)
+    except Exception:
+        log.exception("FirstPromoter track/signup failed")
+        send_verification_email(user.email, verify_token)
 
     return {
         "ok": True,
@@ -202,7 +195,6 @@ async def get_me(user: User = Depends(get_current_user)):
         "id": user.id,
         "username": user.username,
         "email": user.email,
-        "fp_ref_id": user.fp_ref_id,
         "is_verified": user.is_verified,
     }
     

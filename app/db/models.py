@@ -60,7 +60,6 @@ class User(Base):
     profile_photo_key: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     chats = relationship("Chat", back_populates="user")
-    fp_ref_id: Mapped[str | None] = mapped_column(String, nullable=True)
     following_influencers: Mapped[List["InfluencerFollower"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
