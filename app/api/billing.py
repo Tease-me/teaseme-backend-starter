@@ -13,7 +13,7 @@ from pydantic import BaseModel, PositiveInt
 from sqlalchemy import select
 from app.services.paypal import paypal_access_token
 from app.services.firstpromoter import fp_track_sale_v2
-from app.db.models import PayPalTopUp
+from app.db.models import PayPalTopUp, Influencer
 from app.core.config import settings
 
 router = APIRouter(prefix="/billing", tags=["billing"])
@@ -68,61 +68,78 @@ async def paypal_create_order(req: PayPalCreateReq, db: AsyncSession = Depends(g
 
 class PayPalCaptureReq(BaseModel):
     order_id: str
-
 @router.post("/paypal/capture")
 async def paypal_capture(
     req: PayPalCaptureReq,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    row = await db.scalar(select(PayPalTopUp).where(PayPalTopUp.order_id == req.order_id))
+    row = await db.scalar(
+        select(PayPalTopUp).where(PayPalTopUp.order_id == req.order_id)
+    )
     if not row:
         raise HTTPException(404, "Unknown order_id")
 
     if row.user_id != user.id:
         raise HTTPException(403, "Order does not belong to this user")
 
-    # If already credited, don't double-credit or double-track
     if row.credited:
         wallet = await db.get(CreditWallet, user.id)
-        return {"ok": True, "credited": True, "new_balance_cents": wallet.balance_cents if wallet else 0}
+        return {
+            "ok": True,
+            "credited": True,
+            "new_balance_cents": wallet.balance_cents if wallet else 0,
+        }
 
+    # Capture PayPal
     token = await paypal_access_token()
-
     async with httpx.AsyncClient(timeout=20) as client:
         r = await client.post(
             f"{settings.PAYPAL_BASE_URL}/v2/checkout/orders/{req.order_id}/capture",
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
         )
         r.raise_for_status()
         cap = r.json()
 
-    status = cap.get("status", "UNKNOWN")
-
-    if status != "COMPLETED":
-        row.status = status
+    if cap.get("status") != "COMPLETED":
+        row.status = cap.get("status", "UNKNOWN")
         db.add(row)
         await db.commit()
-        return {"ok": False, "status": status, "credited": False}
+        return {"ok": False, "status": row.status, "credited": False}
 
-    new_balance = await topup_wallet(db, user.id, row.cents, source=f"paypal:{req.order_id}")
+    # Credit wallet
+    new_balance = await topup_wallet(
+        db, user.id, row.cents, source=f"paypal:{req.order_id}"
+    )
 
     row.status = "COMPLETED"
     row.credited = True
 
     try:
-        await fp_track_sale_v2(
-            email=getattr(user, "email", None),
-            uid=str(user.id),
-            amount_cents=row.cents,
-            event_id=req.order_id,
-            ref_id=getattr(user, "fp_ref_id", None),
-            plan="wallet_topup",
-        )
+        if row.influencer_id:
+            influencer = await db.get(Influencer, row.influencer_id)
+
+            if influencer and influencer.fp_ref_id:
+                await fp_track_sale_v2(
+                    email=user.email,
+                    uid=str(user.id),
+                    amount_cents=row.cents,
+                    event_id=req.order_id,
+                    ref_id=influencer.fp_ref_id,
+                    plan="wallet_topup",
+                )
     except Exception as e:
         print("FirstPromoter track sale failed:", e)
 
     db.add(row)
     await db.commit()
 
-    return {"ok": True, "status": "COMPLETED", "credited": True, "new_balance_cents": new_balance}
+    return {
+        "ok": True,
+        "status": "COMPLETED",
+        "credited": True,
+        "new_balance_cents": new_balance,
+    }
