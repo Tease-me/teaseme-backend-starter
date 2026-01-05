@@ -19,12 +19,21 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "paypal_topups",
-        sa.Column("fp_tracked", sa.Boolean(), nullable=False, server_default=sa.text("false")),
-    )
-    op.alter_column("paypal_topups", "fp_tracked", server_default=None)
+    """Add fp_tracked if it does not already exist (covered in 84a64df2fec6)."""
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing = {col["name"] for col in inspector.get_columns("paypal_topups")}
+    if "fp_tracked" not in existing:
+        op.add_column(
+            "paypal_topups",
+            sa.Column("fp_tracked", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+        )
+        op.alter_column("paypal_topups", "fp_tracked", server_default=None)
 
 
 def downgrade() -> None:
-    op.drop_column("paypal_topups", "fp_tracked")
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing = {col["name"] for col in inspector.get_columns("paypal_topups")}
+    if "fp_tracked" in existing:
+        op.drop_column("paypal_topups", "fp_tracked")
