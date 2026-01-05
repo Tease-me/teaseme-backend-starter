@@ -101,7 +101,8 @@ async def register(data: RegisterRequest, request: Request, db: AsyncSession = D
             )
     except Exception:
         log.exception("FirstPromoter track/signup failed")
-        send_verification_email(user.email, verify_token)
+    
+    send_verification_email(user.email, verify_token)
 
     return {
         "ok": True,

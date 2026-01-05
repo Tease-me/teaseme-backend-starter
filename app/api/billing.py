@@ -68,6 +68,7 @@ async def paypal_create_order(req: PayPalCreateReq, db: AsyncSession = Depends(g
 
 class PayPalCaptureReq(BaseModel):
     order_id: str
+    influencer_id: str | None = None
 @router.post("/paypal/capture")
 async def paypal_capture(
     req: PayPalCaptureReq,
@@ -119,8 +120,8 @@ async def paypal_capture(
     row.credited = True
 
     try:
-        if row.influencer_id:
-            influencer = await db.get(Influencer, row.influencer_id)
+        if req.influencer_id:
+            influencer = await db.get(Influencer, req.influencer_id)
 
             if influencer and influencer.fp_ref_id:
                 await fp_track_sale_v2(
