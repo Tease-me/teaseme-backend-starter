@@ -17,6 +17,8 @@ from app.utils.email import send_verification_email, send_password_reset_email
 from app.utils.auth import create_token
 from app.api.notify_ws import notify_email_verified
 from app.services.firstpromoter import fp_track_signup
+from app.schemas.user import UserOut
+from app.utils.s3 import generate_user_presigned_url
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -189,14 +191,11 @@ async def logout(response: Response) -> dict:
     _clear_auth_cookies(response)
     return {"ok": True, "message": "Logged out"}
 
-@router.get("/me")
 async def get_me(user: User = Depends(get_current_user)):
-    return {
-        "id": user.id,
-        "username": user.username,
-        "email": user.email,
-        "is_verified": user.is_verified,
-    }
+    user_out = UserOut.model_validate(user)
+    if user.profile_photo_key:
+        user_out.profile_photo_url = generate_user_presigned_url(user.profile_photo_key)
+    return user_out
     
 @router.get("/verify-email")
 async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
