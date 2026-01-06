@@ -1,6 +1,8 @@
 import json
 import logging
 import secrets
+import re
+
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
 
 from app.db.session import get_db
-from app.db.models import PreInfluencer
+from app.db.models import PreInfluencer, Influencer
 from app.schemas.pre_influencer import (
     PreInfluencerRegisterRequest,
     PreInfluencerRegisterResponse,
@@ -31,10 +33,9 @@ from app.schemas.pre_influencer import (
     SurveyPromptResponse,
 )
 from app.core.config import settings
-from app.utils.email import send_profile_survey_email
+from app.utils.email import send_profile_survey_email, send_new_influencer_email
 from app.utils.s3 import save_influencer_photo_to_s3, generate_presigned_url, delete_file_from_s3
 from app.services.firstpromoter import fp_create_promoter, fp_find_promoter_id_by_ref_token
-
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/pre-influencers", tags=["pre-influencers"])
@@ -259,11 +260,9 @@ async def register_pre_influencer(
 
             log.info("FP promoter created id=%s ref_id=%s", pre.fp_promoter_id, pre.fp_ref_id)
             
-
     except Exception as e:
         log.exception("FirstPromoter create promoter failed: %s", e)
-        
-
+    
     send_profile_survey_email(
         pre.email,
         verify_token,
@@ -483,3 +482,82 @@ async def delete_influencer_audio(
     await delete_file_from_s3(key)
 
     return {"ok": True}
+
+@router.get("")
+async def list_pre_influencers(status: str | None = None, db: AsyncSession = Depends(get_db)):
+    q = select(PreInfluencer)
+    if status:
+        q = q.where(PreInfluencer.status == status)
+    rows = (await db.execute(q)).scalars().all()
+    return rows
+
+def normalize_influencer_id(username: str) -> str:
+    return re.sub(r"[^a-z0-9_]", "", username.lower())
+
+@router.post("/{pre_id}/approve")
+async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)):
+    pre = await db.get(PreInfluencer, pre_id)
+    if not pre:
+        raise HTTPException(404, "PreInfluencer not found")
+
+    if not pre.username:
+        raise HTTPException(400, "PreInfluencer username missing")
+
+    influencer_id = normalize_influencer_id(pre.username.strip())
+    if not influencer_id:
+        raise HTTPException(400, "Invalid influencer id")
+
+    influencer = await db.get(Influencer, influencer_id)
+
+    DEFAULT_VOICE_ID = "YKG78i9n8ybMZ42crVbJ"
+    DEFAULT_PROMPT_TEMPLATE = "Update this prompt based on the influencer's personality and preferences."
+
+    if not influencer:
+        influencer = Influencer(
+            id=influencer_id,
+            display_name=pre.full_name or pre.username,
+            prompt_template=DEFAULT_PROMPT_TEMPLATE,
+            owner_id=None,
+            voice_id=DEFAULT_VOICE_ID,
+            fp_promoter_id=pre.fp_promoter_id,
+            fp_ref_id=pre.fp_ref_id,
+        )
+        db.add(influencer)
+    else:
+        if not influencer.display_name:
+            influencer.display_name = pre.full_name or pre.username
+        if not influencer.prompt_template:
+            influencer.prompt_template = DEFAULT_PROMPT_TEMPLATE
+        if not influencer.voice_id:
+            influencer.voice_id = DEFAULT_VOICE_ID
+
+        influencer.fp_promoter_id = pre.fp_promoter_id
+        influencer.fp_ref_id = pre.fp_ref_id
+        db.add(influencer)
+
+    pre.status = "approved"
+    db.add(pre)
+
+    await db.commit()
+    await db.refresh(influencer)
+
+    send_new_influencer_email(
+        to_email=pre.email,
+        influencer_username=influencer.id,
+        fp_ref_id=influencer.fp_ref_id,
+    )
+
+    return {
+        "ok": True,
+        "influencer_id": influencer.id,
+        "fp_ref_id": influencer.fp_ref_id,
+        "fp_promoter_id": influencer.fp_promoter_id,
+    }
+
+@router.get("")
+async def list_pre_influencers(status: str | None = None, db: AsyncSession = Depends(get_db)):
+    q = select(PreInfluencer)
+    if status:
+        q = q.where(PreInfluencer.status == status)
+    rows = (await db.execute(q)).scalars().all()
+    return rows

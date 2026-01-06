@@ -9,7 +9,7 @@ from sqlalchemy.future import select
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 from app.db.session import get_db
-from app.db.models import User
+from app.db.models import User, Influencer
 from app.schemas.auth import RegisterRequest, LoginRequest, Token, PasswordResetRequest
 from app.core.config import settings
 from app.utils.deps import get_current_user
@@ -17,6 +17,8 @@ from app.utils.email import send_verification_email, send_password_reset_email
 from app.utils.auth import create_token
 from app.api.notify_ws import notify_email_verified
 from app.services.firstpromoter import fp_track_signup
+from app.schemas.user import UserOut
+from app.utils.s3 import generate_user_presigned_url
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -71,14 +73,13 @@ async def register(data: RegisterRequest, request: Request, db: AsyncSession = D
     if existing_user.scalar():
         raise HTTPException(status_code=200, detail="Username or email already registered")
 
-    verify_token = secrets.token_urlsafe(32)
+    verify_token = secrets.token_urlsafe(32)           
 
     user = User(
         password_hash=pwd_context.hash(data.password),
         email=data.email,
         is_verified=False,
-        email_token=verify_token,
-        fp_tid=data.fp_tid,
+        email_token=verify_token
     )
     db.add(user)
     await db.commit()
@@ -86,20 +87,23 @@ async def register(data: RegisterRequest, request: Request, db: AsyncSession = D
 
     try:
         tid = getattr(data, "fp_tid", None) or request.cookies.get("_fprom_tid")
-        log.info("FP BODY fp_tid=%s cookie_tid=%s", getattr(data, "fp_tid", None), request.cookies.get("_fprom_tid"))
 
-        res = None
+        log.info(
+            "FP signup: tid_body=%s tid_cookie=%s chosen=%s",
+            getattr(data, "fp_tid", None),
+            request.cookies.get("_fprom_tid"),
+            tid,
+        )
+
         if tid:
-            res = await fp_track_signup(
+            await fp_track_signup(
                 email=user.email,
                 uid=str(user.id),
                 tid=tid,
             )
-
-        log.info("FP RESPONSE=%s", res)
-    except Exception as e:
-        log.exception("FirstPromoter track/signup failed: %s", e)
-
+    except Exception:
+        log.exception("FirstPromoter track/signup failed")
+    
     send_verification_email(user.email, verify_token)
 
     return {
@@ -188,14 +192,12 @@ async def logout(response: Response) -> dict:
     _clear_auth_cookies(response)
     return {"ok": True, "message": "Logged out"}
 
-@router.get("/me")
+@router.get("/me", response_model=UserOut)
 async def get_me(user: User = Depends(get_current_user)):
-    return {
-        "id": user.id,
-        "username": user.username,
-        "email": user.email,
-        "is_verified": user.is_verified,
-    }
+    user_out = UserOut.model_validate(user)
+    if user.profile_photo_key:
+        user_out.profile_photo_url = generate_user_presigned_url(user.profile_photo_key)
+    return user_out
     
 @router.get("/verify-email")
 async def verify_email(token: str, db: AsyncSession = Depends(get_db)):

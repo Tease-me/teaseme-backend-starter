@@ -42,7 +42,7 @@ class InfluencerOut(InfluencerBase):
     id: str
     profile_photo_key: Optional[str] = None
     profile_video_key: Optional[str] = None
-
+    fp_ref_id: Optional[str] = None
     class Config:
         from_attributes = True
 

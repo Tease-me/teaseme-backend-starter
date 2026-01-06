@@ -281,3 +281,110 @@ def send_password_reset_email(to_email: str, token: str):
     body_text = f"Reset your TeaseMe password by clicking this link: {reset_url}"
 
     return send_email_via_ses(to_email, subject, body_html, body_text)
+
+
+def send_new_influencer_email(
+    to_email: str,
+    influencer_username: str,
+    fp_ref_id: str | None = None,
+):
+    subject = "🎉 Your TeaseMe profile is live!"
+    public_url = f"https://teaseme.live/{influencer_username}"
+    referral_url = f"https://teaseme.live/{influencer_username}?fpr={fp_ref_id}" if fp_ref_id else None
+
+    logo_url = "https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/email_verify_header.png"
+
+    referral_block = ""
+    if referral_url:
+        referral_block = f"""
+          <p style="font-size:14px;color:#666;margin:8px 0 10px 0;">
+            Your referral link:
+          </p>
+          <div style="display:inline-block;padding:10px 18px;border-radius:10px;background:#f3f4ff;
+                      font-family:monospace;font-size:13px;color:#333;word-break:break-all;max-width:460px;">
+            {referral_url}
+          </div>
+          <p style="font-size:12px;color:#777;margin:10px 0 0 0;">
+            Share this link if you want your manager / parent promoter to get credit too.
+          </p>
+        """
+
+    temp_pw_block = ""
+
+    body_html = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <title>Your TeaseMe profile is live</title>
+    </head>
+    <body style="background:#f7f8fc;padding:0;margin:0;font-family:Arial,sans-serif;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f7f8fc;padding:40px 0;">
+        <tr>
+          <td align="center">
+
+            <table width="520" cellpadding="0" cellspacing="0" border="0"
+              style="background:#fff;border-radius:24px;box-shadow:0 10px 32px rgba(50,50,93,0.10),0 2px 4px rgba(0,0,0,0.07);overflow:hidden;">
+
+              <tr>
+                <td align="center" style="background:#23293b;padding:0;">
+                  <img src="{logo_url}" alt="TeaseMe"
+                    style="width:100%;max-width:520px;display:block;border-top-left-radius:24px;border-top-right-radius:24px;" />
+                </td>
+              </tr>
+
+              <tr>
+                <td align="center" style="padding:32px 30px 16px 30px;">
+                  <h2 style="font-family:'Arial Rounded MT Bold', Arial, sans-serif; font-size:30px; font-weight:bold; margin:0 0 12px 0; color:#444;">
+                    You’re live on TeaseMe 🎉
+                  </h2>
+
+                  <p style="font-size:16px;color:#666;margin:0 0 22px 0;">
+                    Your influencer profile is now active. Fans can find you and join your page instantly.
+                  </p>
+
+                  <a href="{public_url}"
+                    style="background:#FF5C74; border-radius:10px; color:#fff; text-decoration:none; display:inline-block;
+                           padding:16px 44px; font-size:20px; font-weight:bold; box-shadow:0 6px 24px #ffb5c7; margin-bottom:18px;">
+                    Open My Profile
+                  </a>
+
+                  <div style="margin-top:10px; font-size:13px; color:#777; word-break:break-all;">
+                    {public_url}
+                  </div>
+
+                  {referral_block}
+                  {temp_pw_block}
+
+                  <p style="margin:26px 0 0 0; font-size:14px; color:#bbb;">
+                    If you didn’t request this, you can safely ignore the email.<br/>
+                    Let’s get you discovered. ❤️
+                  </p>
+                </td>
+              </tr>
+
+              <tr>
+                <td align="center" style="padding:20px 0 12px 0;background:#e5e5e5;color:#bbb;font-size:14px;border-bottom-left-radius:24px;border-bottom-right-radius:24px;">
+                  © {datetime.now().year} TeaseMe. All rights reserved.
+                </td>
+              </tr>
+            </table>
+
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
+    """
+
+    body_text = f"""
+Your TeaseMe profile is live 🎉
+
+Open your profile:
+{public_url}
+""" + (f"\nReferral link:\n{referral_url}\n" if referral_url else "") + f"""
+
+© {datetime.now().year} TeaseMe. All rights reserved.
+""".strip()
+
+    return send_email_via_ses(to_email, subject, body_html, body_text)

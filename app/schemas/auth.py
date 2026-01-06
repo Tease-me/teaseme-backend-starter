@@ -7,7 +7,7 @@ class LoginRequest(BaseModel):
 class RegisterRequest(BaseModel):
     password: str
     email: str
-    fp_tid: str | None = None
+    influencer_id: str | None = None
 
 class Token(BaseModel):
     access_token: str

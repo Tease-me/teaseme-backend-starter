@@ -389,22 +389,23 @@ async def upload_knowledge_file_tool(
     processing_file_obj = io.BytesIO(content)
 
     async def process_file_task():
-        # Create a new database session for the background task
         from app.db.session import SessionLocal
-        task_db = SessionLocal()
-        try:
-            await process_knowledge_file(
-                task_db,
-                knowledge_file.id,
-                processing_file_obj,
-                file_type,
-                influencer_id
-            )
-        except Exception as e:
-            log.error(f"Background processing failed for file {knowledge_file.id}: {e}", exc_info=True)
-        finally:
-            await task_db.close()
 
+        try:
+            async with SessionLocal() as task_db:
+                await process_knowledge_file(
+                    task_db,
+                    knowledge_file.id,
+                    processing_file_obj,
+                    file_type,
+                    influencer_id,
+                )
+        except Exception as e:
+            log.error(
+                f"Background processing failed for file {knowledge_file.id}: {e}",
+                exc_info=True,
+            )
+            
     asyncio.create_task(process_file_task())
 
     return {

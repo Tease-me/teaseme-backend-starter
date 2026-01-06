@@ -11,7 +11,12 @@ from app.schemas.chat import MessageSchema
  
 log = logging.getLogger("s3")
 
-s3 = boto3.client("s3")
+s3 = boto3.client(
+    "s3",
+    aws_access_key_id=settings.S3_AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=settings.SES_AWS_SECRET_ACCESS_KEY,
+    region_name=getattr(settings, "AWS_REGION", None) or "us-east-1",
+)
 
 # Save audio file to S3 and return the S3 key
 async def save_audio_to_s3(file_obj, filename, content_type, user_id):
