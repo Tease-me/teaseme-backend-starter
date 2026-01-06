@@ -191,6 +191,7 @@ async def logout(response: Response) -> dict:
     _clear_auth_cookies(response)
     return {"ok": True, "message": "Logged out"}
 
+@router.get("/me", response_model=UserOut)
 async def get_me(user: User = Depends(get_current_user)):
     user_out = UserOut.model_validate(user)
     if user.profile_photo_key:
