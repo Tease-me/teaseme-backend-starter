@@ -42,21 +42,39 @@ async def get_balance(
     }
 
 @router.post("/topup")
-async def topup(req: TopUpRequest, db: AsyncSession = Depends(get_db)):
-    wallet = await db.get(InfluencerWallet, req.influencer_id)
+async def topup(
+    req: TopUpRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    if not req.influencer_id:
+        raise HTTPException(status_code=400, detail="Missing influencer_id")
+
+    wallet = await db.scalar(
+        select(InfluencerWallet).where(
+            InfluencerWallet.user_id == user.id,
+            InfluencerWallet.influencer_id == req.influencer_id,
+        )
+    )
+
     if not wallet:
         wallet = InfluencerWallet(
+            user_id=user.id,
             influencer_id=req.influencer_id,
-            balance_cents=0
+            balance_cents=0,
         )
         db.add(wallet)
+        await db.flush()
 
-    wallet.balance_cents += req.cents
+    wallet.balance_cents = (wallet.balance_cents or 0) + int(req.cents)
+    db.add(wallet)
+
     await db.commit()
     await db.refresh(wallet)
 
     return {
         "ok": True,
+        "user_id": user.id,
         "influencer_id": wallet.influencer_id,
         "balance_cents": wallet.balance_cents,
     }
