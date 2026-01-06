@@ -5,6 +5,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     DB_URL: str
     OPENAI_API_KEY: str
+    ANTHROPIC_API_KEY: str | None = None
+    LLM_PROVIDER: str = "claude"  # openai | claude
     REDIS_URL: str 
     MAX_HISTORY_WINDOW: int
     SCORE_TTL: int
