@@ -65,5 +65,6 @@ class Settings(BaseSettings):
     FIRSTPROMOTER_TOKEN: str | None = None
     FIRSTPROMOTER_ACCOUNT_ID: str | None = None
     FIRSTPROMOTER_API_KEY: str | None = None
+    FIRSTPROMOTER_NOTIFY_EMAIL: str | None = None
 
 settings = Settings()

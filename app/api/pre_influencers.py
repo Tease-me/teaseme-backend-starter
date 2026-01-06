@@ -3,6 +3,8 @@ import logging
 import secrets
 import re
 
+from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -33,9 +35,19 @@ from app.schemas.pre_influencer import (
     SurveyPromptResponse,
 )
 from app.core.config import settings
-from app.utils.email import send_profile_survey_email, send_new_influencer_email
+from app.utils.email import (
+    send_profile_survey_email,
+    send_new_influencer_email,
+    send_influencer_survey_completed_email_to_promoter,
+)
 from app.utils.s3 import save_influencer_photo_to_s3, generate_presigned_url, delete_file_from_s3
-from app.services.firstpromoter import fp_create_promoter, fp_find_promoter_id_by_ref_token
+from app.services.firstpromoter import (
+    fp_create_promoter,
+    fp_find_promoter_id_by_ref_token,
+    fp_get_promoter_v2,
+    fp_extract_email,
+    fp_extract_parent_promoter_id,
+)
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/pre-influencers", tags=["pre-influencers"])
@@ -47,6 +59,7 @@ SURVEY_SUMMARIZER = ChatOpenAI(
 )
 
 
+@lru_cache(maxsize=1)
 def _load_survey_questions():
     try:
         with SURVEY_QUESTIONS_PATH.open("r", encoding="utf-8") as f:
@@ -225,6 +238,7 @@ async def register_pre_influencer(
         email=data.email,
         password=data.password,
         survey_token=verify_token,
+        survey_answers={"__meta": {"parent_ref_id": data.parent_ref_id}} if data.parent_ref_id else None,
         terms_agreement=False,
     )
 
@@ -253,6 +267,18 @@ async def register_pre_influencer(
 
             pre.fp_promoter_id = str(promoter.get("id"))
             pre.fp_ref_id = promoter.get("default_ref_id") or (promoter.get("promotions") or [{}])[0].get("ref_id")
+
+            answers = pre.survey_answers or {}
+            if isinstance(answers, dict):
+                meta = answers.get("__meta")
+                if not isinstance(meta, dict):
+                    meta = {}
+                if data.parent_ref_id and "parent_ref_id" not in meta:
+                    meta["parent_ref_id"] = data.parent_ref_id
+                if parent_promoter_id and "parent_promoter_id" not in meta:
+                    meta["parent_promoter_id"] = parent_promoter_id
+                answers["__meta"] = meta
+                pre.survey_answers = answers
 
             db.add(pre)
             await db.commit()
@@ -365,6 +391,73 @@ async def generate_prompt_from_survey(
     prompt = await _generate_prompt_from_markdown(markdown, additional_prompt=additional_prompt)
     return SurveyPromptResponse(**prompt)
 
+
+def _survey_is_completed(survey_step: int, total_sections: int) -> bool:
+    if total_sections <= 0:
+        return False
+    return int(survey_step) >= max(total_sections - 1, 0)
+
+
+async def _notify_parent_promoter_if_needed(pre: PreInfluencer, db: AsyncSession) -> None:
+    answers = pre.survey_answers or {}
+    meta = answers.get("__meta") if isinstance(answers, dict) else None
+    if not isinstance(meta, dict):
+        meta = {}
+
+    if meta.get("parent_promoter_survey_completed_notified"):
+        return
+
+    parent_promoter_id: int | None = None
+    raw_parent_promoter_id = meta.get("parent_promoter_id")
+    if raw_parent_promoter_id is not None and str(raw_parent_promoter_id).isdigit():
+        parent_promoter_id = int(raw_parent_promoter_id)
+
+    if parent_promoter_id is None:
+        parent_ref_id = meta.get("parent_ref_id")
+        if isinstance(parent_ref_id, str) and parent_ref_id.strip():
+            inferred_parent = await fp_find_promoter_id_by_ref_token(parent_ref_id.strip())
+            if inferred_parent:
+                parent_promoter_id = inferred_parent
+                meta["parent_promoter_id"] = parent_promoter_id
+
+    if parent_promoter_id is None and pre.fp_promoter_id:
+        influencer_payload = await fp_get_promoter_v2(pre.fp_promoter_id)
+        inferred_parent = fp_extract_parent_promoter_id(influencer_payload)
+        if inferred_parent:
+            parent_promoter_id = inferred_parent
+            meta["parent_promoter_id"] = parent_promoter_id
+
+    to_email: str | None = None
+    if parent_promoter_id is not None:
+        parent_payload = await fp_get_promoter_v2(parent_promoter_id)
+        to_email = fp_extract_email(parent_payload)
+
+    if not to_email:
+        to_email = settings.FIRSTPROMOTER_NOTIFY_EMAIL
+
+    if not to_email:
+        answers["__meta"] = meta
+        pre.survey_answers = answers
+        db.add(pre)
+        await db.commit()
+        return
+
+    resp = send_influencer_survey_completed_email_to_promoter(
+        to_email=to_email,
+        influencer_username=pre.username,
+        influencer_full_name=pre.full_name,
+        influencer_email=pre.email,
+    )
+    if resp:
+        meta["parent_promoter_survey_completed_notified"] = True
+        meta["parent_promoter_survey_completed_notified_at"] = datetime.now(timezone.utc).isoformat()
+
+    answers["__meta"] = meta
+    pre.survey_answers = answers
+    db.add(pre)
+    await db.commit()
+
+
 @router.put("/{pre_id}/survey", response_model=SurveyState)
 async def save_survey_state(
     pre_id: int,
@@ -379,11 +472,29 @@ async def save_survey_state(
     if not pre:
         raise HTTPException(status_code=404, detail="Pre-influencer not found")
 
-    pre.survey_answers = data.survey_answers
+    incoming_answers: dict = data.survey_answers or {}
+    existing_answers = pre.survey_answers or {}
+    if isinstance(existing_answers, dict) and "__meta" in existing_answers and "__meta" not in incoming_answers:
+        incoming_answers["__meta"] = existing_answers.get("__meta")
+
+    pre.survey_answers = incoming_answers
     pre.survey_step = data.survey_step
+
+    try:
+        total_sections = len(_load_survey_questions())
+        completed = _survey_is_completed(int(data.survey_step), total_sections)
+    except Exception:
+        completed = False
 
     await db.commit()
     await db.refresh(pre)
+
+    if completed:
+        try:
+            await _notify_parent_promoter_if_needed(pre, db)
+        except Exception:
+            log.exception("Failed to notify FirstPromoter on survey completion pre_id=%s", pre.id)
+        await db.refresh(pre)
 
     return SurveyState(
         pre_influencer_id=pre.id,
