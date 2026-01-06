@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.mcp.server import mcp_server
 from app.mcp.types import MCPTool
 from app.services.billing import can_afford, get_remaining_units
-from app.db.models import User, CreditWallet
+from app.db.models import User, InfluencerWallet
 from sqlalchemy import select
 from typing import Any
 
@@ -13,40 +13,21 @@ log = logging.getLogger("mcp.tools.user")
 
 
 # Tool: Check User Credits
-async def check_user_credits_tool(
-    user_id: int,
-    feature: str = "text",
-    db: AsyncSession = None
-) -> dict[str, Any]:
-    """
-    Check user's credit balance and availability for a feature.
+async def check_user_credits_tool(user_id: int, influencer_id: str, feature: str="text", db: AsyncSession=None):
+    wallet = await db.scalar(select(InfluencerWallet).where(
+        InfluencerWallet.user_id == user_id,
+        InfluencerWallet.influencer_id == influencer_id,
+    ))
+    balance_cents = wallet.balance_cents if wallet else 0
 
-    Args:
-        user_id: User ID
-        feature: Feature name (text, voice, live_chat) - default: "text"
-        db: Database session (injected by dependency)
-
-    Returns:
-        Dictionary with credit information
-    """
-    if not db:
-        raise ValueError("Database session required")
-
-    # Get wallet balance
-    wallet = await db.get(CreditWallet, user_id)
-    balance_cents = wallet.balance_cents if wallet and wallet.balance_cents else 0
-
-    # Check affordability for 1 unit
-    ok, cost_cents, free_left = await can_afford(db, user_id=user_id, feature=feature, units=1)
-
-    # Get remaining units
-    remaining_units = await get_remaining_units(db, user_id, feature)
+    ok, cost_cents, free_left = await can_afford(db, user_id=user_id, influencer_id=influencer_id, feature=feature, units=1)
+    remaining_units = await get_remaining_units(db, user_id, influencer_id, feature)
 
     return {
         "user_id": user_id,
+        "influencer_id": influencer_id,
         "feature": feature,
         "balance_cents": balance_cents,
-        "balance_dollars": balance_cents / 100.0,
         "can_afford_one_unit": ok,
         "cost_for_one_unit_cents": cost_cents,
         "free_allowance_remaining": free_left,
@@ -77,38 +58,18 @@ CHECK_USER_CREDITS_SCHEMA = MCPTool(
 
 
 # Tool: Get User Info
-async def get_user_info_tool(
-    user_id: int,
-    db: AsyncSession = None
-) -> dict[str, Any]:
-    """
-    Get basic user information.
-
-    Args:
-        user_id: User ID
-        db: Database session (injected by dependency)
-
-    Returns:
-        Dictionary with user information
-    """
-    if not db:
-        raise ValueError("Database session required")
-
+async def get_user_info_tool(user_id: int, influencer_id: str, db: AsyncSession=None):
     user = await db.get(User, user_id)
-    if not user:
-        raise ValueError(f"User {user_id} not found")
-
-    wallet = await db.get(CreditWallet, user_id)
-    balance_cents = wallet.balance_cents if wallet and wallet.balance_cents else 0
-
-    return {
-        "user_id": user.id,
-        "email": user.email,
-        "balance_cents": balance_cents,
-        "balance_dollars": balance_cents / 100.0,
-        "created_at": user.created_at.isoformat() if user.created_at else None,
-    }
-
+    wallet = await db.scalar(select(InfluencerWallet).where(
+        InfluencerWallet.user_id == user_id,
+        InfluencerWallet.influencer_id == influencer_id,
+    ))
+    balance_cents = wallet.balance_cents if wallet else 0
+    return {"user_id": user.id, 
+            "email": user.email, 
+            "influencer_id": influencer_id, 
+            "balance_cents": balance_cents
+            }
 
 GET_USER_INFO_SCHEMA = MCPTool(
     name="get_user_info",

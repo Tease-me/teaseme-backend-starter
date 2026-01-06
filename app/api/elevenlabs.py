@@ -18,7 +18,7 @@ from app.core.config import settings
 from app.db.models import Influencer, Chat, Message, CallRecord
 from app.db.session import get_db
 from app.schemas.elevenlabs import FinalizeConversationBody, RegisterConversationBody, UpdatePromptBody
-from app.services.billing import charge_feature
+from app.services.billing import charge_feature,_get_influencer_id_from_chat
 from sqlalchemy import insert, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.services.billing import can_afford, get_remaining_units
@@ -1060,7 +1060,7 @@ async def get_signed_url(
     greeting_mode: str = Query("random", pattern="^(random|rr)$"),
 ):
     ok, cost_cents, free_left = await can_afford(
-        db, user_id=user_id, feature="live_chat", units=10
+        db, user_id=user_id,influencer_id=influencer_id, feature="live_chat", units=10
     )
 
     if not ok:
@@ -1073,7 +1073,7 @@ async def get_signed_url(
             },
         )
     
-    credits_remainder_secs = await get_remaining_units(db, user_id, feature="live_chat")
+    credits_remainder_secs = await get_remaining_units(db, user_id,influencer_id, feature="live_chat")
 
     agent_id = await get_agent_id_from_influencer(db, influencer_id)
     chat_id = await get_or_create_chat(db, user_id, influencer_id)
@@ -1104,7 +1104,7 @@ async def get_conversation_token(
     db: AsyncSession = Depends(get_db),
 ):
     ok, cost_cents, free_left = await can_afford(
-        db, user_id=user_id, feature="live_chat", units=10
+        db, user_id=user_id,influencer_id=influencer_id, feature="live_chat", units=10
     )
 
     if not ok:
@@ -1214,7 +1214,7 @@ async def get_conversation_token(
         raise HTTPException(status_code=502, detail="Token not returned by ElevenLabs")
     
     chat_id = await get_or_create_chat(db, user_id, influencer_id)
-    credits_remainder_secs = await get_remaining_units(db, user_id, feature="live_chat")
+    credits_remainder_secs = await get_remaining_units(db, user_id,influencer_id, feature="live_chat")
 
     greeting: Optional[str] = await _generate_contextual_greeting(db, chat_id, influencer_id)
     
@@ -1472,7 +1472,21 @@ async def finalize_conversation(
         }
 
     if body.charge_if_not_billed and not await was_already_billed(db, conversation_id):
-        charge_feature(db, body.user_id, "live_chat", math.ceil(total_seconds), meta=meta)
+        
+        chat_id = meta.get("chat_id") if isinstance(meta, dict) else None
+        if not chat_id:
+            raise HTTPException(400, "Missing chat_id in meta for billing")
+
+        influencer_id = await _get_influencer_id_from_chat(db, chat_id)
+
+        await charge_feature(
+            db,
+            user_id=body.user_id,
+            influencer_id=influencer_id,
+            feature="live_chat",
+            units=math.ceil(total_seconds),
+            meta=meta,
+        )
         return {
             "ok": True,
             "conversation_id": conversation_id,

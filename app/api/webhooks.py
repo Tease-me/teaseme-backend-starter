@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.session import get_db
-from app.services.billing import charge_feature
+from app.services.billing import charge_feature, _get_influencer_id_from_chat
 from app.api.elevenlabs import _extract_total_seconds
 from sqlalchemy import select
 from app.db.models import CallRecord, Chat, Influencer
@@ -173,9 +173,16 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
         )
         try:
             # Important: charge_feature must be idempotent by conversation_id
+            chat_id = meta.get("chat_id") if isinstance(meta, dict) else None
+            if not chat_id:
+                raise HTTPException(400, "Missing chat_id in meta for billing")
+
+            influencer_id = await _get_influencer_id_from_chat(db, chat_id)
+
             await charge_feature(
                 db,
                 user_id=user_id,
+                influencer_id=influencer_id,
                 feature="live_chat",
                 units=int(total_seconds),
                 meta=meta,
