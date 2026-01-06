@@ -92,7 +92,6 @@ async def list_relationships(user_id: int, db: AsyncSession = Depends(get_db)):
             "safety": r.safety,
             "state": r.state,
             "stage_points": r.stage_points,
-            "sentiment_score": r.sentiment_score,
             "sentiment": sentiment_label(r.sentiment_score),
             "exclusive_agreed": r.exclusive_agreed,
             "girlfriend_confirmed": r.girlfriend_confirmed,

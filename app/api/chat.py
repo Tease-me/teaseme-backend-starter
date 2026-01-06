@@ -9,7 +9,7 @@ from typing import Dict, List, Optional
 from fastapi import APIRouter, WebSocket, Depends, File, UploadFile, HTTPException, Form, Query
 from app.agents.turn_handler import handle_turn
 from app.db.session import get_db
-from app.db.models import Message
+from app.db.models import Message, Chat
 from jose import jwt
 from app.api.utils import get_embedding
 from starlette.websockets import WebSocketDisconnect
@@ -21,7 +21,7 @@ from app.schemas.chat import ChatCreateRequest,PaginatedMessages
 from app.core.config import settings
 from app.utils.chat import transcribe_audio, synthesize_audio_with_elevenlabs_V3, synthesize_audio_with_bland_ai, get_ai_reply_via_websocket
 from app.utils.s3 import save_audio_to_s3, save_ia_audio_to_s3, generate_presigned_url, message_to_schema_with_presigned
-from app.services.billing import charge_feature, get_duration_seconds, can_afford
+from app.services.billing import charge_feature, get_duration_seconds, can_afford, _get_influencer_id_from_chat
 
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = settings.ALGORITHM
@@ -152,20 +152,22 @@ async def _flush_buffer(
         await charge_feature(
             db,
             user_id=user_id,
+            influencer_id=influencer_id,
             feature="text",
             units=1,
-            meta={"chat_id": chat_id, "burst": True},
+            meta={"chat_id": chat_id},
         )
         # ⚠ If charge_feature() commits internally, don't commit here.
         # If it does NOT commit, you may commit here with a guarded commit.
         # await db.commit()
     except Exception:
-        # Avoid rollback conflict if callee already committed/rolled back
         try:
             await db.rollback()
         except Exception:
             pass
         log.exception("[BUF %s] Billing error", chat_id)
+        await ws.send_json({"error": "⚠️ Billing error. Please try again."})
+        return
 
     # 2) Get LLM reply
     try:
@@ -183,7 +185,7 @@ async def _flush_buffer(
         log.exception("[BUF %s] handle_turn error", chat_id)
         # try to tell the client but don't crash if socket closed
         try:
-            await ws.send_json({"reply": "Sorry, something went wrong. 😔"})
+            await ws.send_json({"error": "Sorry, something went wrong. 😔"})
         except Exception:
             pass
         return
@@ -243,7 +245,7 @@ async def websocket_chat(
             chat_id = raw.get("chat_id") or f"{user_id}_{influencer_id}"
 
             # 🔒 PRE-CHECK: deny if user cannot afford a burst (1 unit)
-            ok, cost, free_left = await can_afford(db, user_id=user_id, feature="text", units=1)
+            ok, cost, free_left = await can_afford(db, user_id=user_id,influencer_id=influencer_id, feature="text", units=1)
             if not ok:
                 # send a structured error and DO NOT save/enqueue
                 await ws.send_json({
@@ -322,94 +324,149 @@ async def get_chat_history(
         messages=messages_schema
     )
 
-@router.post("/chat_audio/")
+@router.post("/chat_audio")
 async def chat_audio(
     file: UploadFile = File(...),
     chat_id: str = Form(...),
-    influencer_id: str = Form("default"),
-    token: str = Form(""),    
-    db=Depends(get_db)
+    influencer_id: str = Form(""),
+    token: str = Form(""),
+    db: AsyncSession = Depends(get_db),
 ):
-    if not token:
-        raise HTTPException(status_code=400, detail="Token missing")
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id = int(payload.get("sub"))
-    except Exception as e:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    
-    file_bytes = await file.read()
-    if not file_bytes:
-        raise HTTPException(status_code=400, detail="Audio File empty.")
-    
-    seconds = get_duration_seconds(file_bytes, file.content_type)
+        if not token:
+            raise HTTPException(status_code=400, detail="Token missing")
 
-     # 🔒 PRE-CHECK: deny if cannot afford 'seconds' of voice
-    ok, cost, free_left = await can_afford(db, user_id=user_id, feature="voice", units=int(seconds))
-    if not ok:
-        # 402 Payment Required with structured detail
-        raise HTTPException(
-            status_code=402,
-            detail={
-                "error": "INSUFFICIENT_CREDITS",
-                "message": "You’re out of free voice and credits. Please top up to continue.",
-                "needed_cents": cost,
-                "free_left": free_left,
-            },
+        # ✅ resolve influencer_id from chat if missing
+        if not influencer_id:
+            chat = await db.get(Chat, chat_id)
+            if not chat or not chat.influencer_id:
+                raise HTTPException(status_code=400, detail="Missing influencer context")
+            influencer_id = chat.influencer_id
+
+        # ✅ decode token
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            user_id = int(payload.get("sub"))
+        except Exception:
+            raise HTTPException(status_code=401, detail="Invalid token")
+
+        # ✅ read audio
+        file_bytes = await file.read()
+        if not file_bytes:
+            raise HTTPException(status_code=400, detail="Audio file empty")
+
+        seconds = int(get_duration_seconds(file_bytes, file.content_type))
+
+        # ✅ PRE-CHECK (influencer-based now)
+        ok, cost, free_left = await can_afford(
+            db,
+            user_id=user_id,
+            influencer_id=influencer_id,
+            feature="voice",
+            units=seconds,
         )
-    
-    # ◆ charge before heavy calls
-    await charge_feature(
-        db, user_id=user_id, feature="voice",
-        units=int(seconds), meta={"chat_id": chat_id}
-    )
+        if not ok:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "error": "INSUFFICIENT_CREDITS",
+                    "message": "You’re out of free voice and credits. Please top up to continue.",
+                    "needed_cents": cost,
+                    "free_left": free_left,
+                },
+            )
 
-    user_audio_url = await save_audio_to_s3(io.BytesIO(file_bytes), file.filename, file.content_type, user_id)
+        # ✅ CHARGE before expensive calls
+        await charge_feature(
+            db,
+            user_id=user_id,
+            influencer_id=influencer_id,
+            feature="voice",
+            units=seconds,
+            meta={"chat_id": chat_id, "seconds": seconds},
+        )
 
-    transcript = await transcribe_audio(io.BytesIO(file_bytes), file.filename, file.content_type)
-    if not transcript or "error" in transcript:
-        raise HTTPException(status_code=422, detail=transcript.get("error", "Transcription error"))
+        # ✅ upload user audio (expect S3 KEY back)
+        user_audio_key = await save_audio_to_s3(
+            io.BytesIO(file_bytes),
+            file.filename,
+            file.content_type,
+            user_id,
+        )
 
-    transcript_text = transcript["text"]
+        transcript = await transcribe_audio(
+            io.BytesIO(file_bytes),
+            file.filename,
+            file.content_type,
+        )
+        if not transcript or "error" in transcript:
+            raise HTTPException(status_code=422, detail=(transcript or {}).get("error", "Transcription error"))
 
-    # 3. Save user message with embedding
-    embedding = await get_embedding(transcript_text)
-    msg_user = Message(
-        chat_id=chat_id,
+        transcript_text = transcript.get("text") or ""
+        if not transcript_text.strip():
+            raise HTTPException(status_code=422, detail="Empty transcript")
+
+        # ✅ save user msg
+        embedding = await get_embedding(transcript_text)
+        msg_user = Message(
+            chat_id=chat_id,
             sender="user",
             content=transcript_text,
-            audio_url=user_audio_url,
-            embedding=embedding
+            audio_url=user_audio_key,  # store KEY in DB (recommended)
+            embedding=embedding,
         )
-    db.add(msg_user)
-    await db.commit()
+        db.add(msg_user)
+        await db.commit()
 
-    # 4. Get AI reply (via websocket or direct)
-    ai_reply = await get_ai_reply_via_websocket(chat_id,transcript["text"], influencer_id, token, db)
+        # ✅ get AI reply
+        ai_reply = await get_ai_reply_via_websocket(
+            chat_id,
+            transcript_text,
+            influencer_id,
+            user_id,
+            db,
+        )
+        if not ai_reply:
+            raise HTTPException(status_code=500, detail="No AI reply")
 
-    # 5. Synthesize reply as audio (try ElevenLabs first, then Bland as fallback)
-    audio_bytes, audio_mime = await synthesize_audio_with_elevenlabs_V3(ai_reply,db,influencer_id)
-    if not audio_bytes:
-        audio_bytes, audio_mime = await synthesize_audio_with_bland_ai(ai_reply)
+        # ✅ TTS
+        audio_bytes, audio_mime = await synthesize_audio_with_elevenlabs_V3(ai_reply, db, influencer_id)
         if not audio_bytes:
-            raise HTTPException(status_code=500, detail="No audio returned from any TTS provider.")
-        
-    # 6. Save AI audio to S3
-    ai_audio_url = await save_ia_audio_to_s3(audio_bytes, user_id)
+            audio_bytes, audio_mime = await synthesize_audio_with_bland_ai(ai_reply)
+            if not audio_bytes:
+                raise HTTPException(status_code=500, detail="No audio returned from any TTS provider")
 
-    # 7. Save AI message with audio URL
-    msg_ai = Message(
-        chat_id=chat_id,
-        sender="ai",
-        content=ai_reply,
-        audio_url=ai_audio_url
-    )
-    db.add(msg_ai)
-    await db.commit()
-    
-    return {
-        "ai_text": ai_reply,
-        "ai_audio_url": generate_presigned_url(ai_audio_url),
-        "user_audio_url": generate_presigned_url(user_audio_url),
-        "transcript": transcript_text
-    }
+        # ✅ upload AI audio (expect S3 KEY back)
+        ai_audio_key = await save_ia_audio_to_s3(audio_bytes, user_id)
+
+        # ✅ save AI msg
+        msg_ai = Message(
+            chat_id=chat_id,
+            sender="ai",
+            content=ai_reply,
+            audio_url=ai_audio_key,  # store KEY
+        )
+        db.add(msg_ai)
+        await db.commit()
+
+        # ✅ return presigned URLs (ONLY if keys)
+        return {
+            "ai_text": ai_reply,
+            "ai_audio_url": generate_presigned_url(ai_audio_key),
+            "user_audio_url": generate_presigned_url(user_audio_key),
+            "transcript": transcript_text,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        err = traceback.format_exc()
+        log.error("chat_audio 500: %r\n%s", e, err)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": repr(e),
+                "trace": err.splitlines()[-30:],
+            },
+        )
