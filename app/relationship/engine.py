@@ -68,10 +68,10 @@ def update_relationship(trust, closeness, attraction, safety, sig: Signals) -> R
 
     def cap(x, max_val): return min(x, max_val)
 
-    trust_pos  = cap(trust_pos, 4.0); trust_neg  = cap(trust_neg, 6.0)
-    close_pos  = cap(close_pos, 4.0); close_neg  = cap(close_neg, 5.0)
-    attr_pos   = cap(attr_pos, 3.0);  attr_neg   = cap(attr_neg, 6.0)
-    safety_pos = cap(safety_pos, 2.0); safety_neg = cap(safety_neg, 6.0)
+    trust_pos  = cap(trust_pos, 3.0); trust_neg  = cap(trust_neg, 5.0)
+    close_pos  = cap(close_pos, 3.0); close_neg  = cap(close_neg, 4.0)
+    attr_pos   = cap(attr_pos, 2.5);  attr_neg   = cap(attr_neg, 5.0)
+    safety_pos = cap(safety_pos, 2.0); safety_neg = cap(safety_neg, 5.0)
 
     trust = sat_up(trust, trust_pos); trust = sat_down(trust, trust_neg)
     closeness = sat_up(closeness, close_pos); closeness = sat_down(closeness, close_neg)
