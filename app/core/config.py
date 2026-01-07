@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     SES_SERVER: str
     SES_AWS_ACCESS_KEY_ID: str
     SES_AWS_SECRET_ACCESS_KEY: str
+    S3_AWS_ACCESS_KEY_ID: str
+    S3_AWS_SECRET_ACCESS_KEY: str
 
     PUBLIC_BASE_URL: str
 

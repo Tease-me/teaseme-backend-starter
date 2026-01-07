@@ -101,6 +101,7 @@ async def process_relationship_turn(
     Returns the updated RelationshipState plus derived metadata.
     """
     now = datetime.now(timezone.utc)
+    log.info("[REL %s] START user_id=%s influencer_id=%s", cid, user_id, influencer_id)
 
     # 1) Load relationship row from DB
     rel = await get_or_create_relationship(db, int(user_id), influencer_id)
@@ -202,9 +203,30 @@ async def process_relationship_turn(
     rel.last_interaction_at = now
     rel.updated_at = now
 
+    log.info(
+        "[REL %s] BEFORE COMMIT id=%s user=%s infl=%s trust=%.4f close=%.4f attr=%.4f safe=%.4f sp=%.2f state=%s sent=%.2f",
+        cid,
+        getattr(rel, "id", None),
+        rel.user_id,
+        rel.influencer_id,
+        rel.trust, rel.closeness, rel.attraction, rel.safety,
+        float(rel.stage_points or 0.0),
+        rel.state,
+        float(rel.sentiment_score or 0.0),
+    )
+
     db.add(rel)
     await db.commit()
     await db.refresh(rel)
+
+    log.info(
+        "[REL %s] AFTER COMMIT updated_at=%s trust=%.4f sp=%.2f state=%s",
+        cid,
+        rel.updated_at,
+        rel.trust,
+        float(rel.stage_points or 0.0),
+        rel.state,
+    )
 
     return {
         "rel": rel,

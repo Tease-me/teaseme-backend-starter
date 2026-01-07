@@ -11,7 +11,12 @@ from app.schemas.chat import MessageSchema
  
 log = logging.getLogger("s3")
 
-s3 = boto3.client("s3")
+s3 = boto3.client(
+    "s3",
+    aws_access_key_id=settings.S3_AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=settings.SES_AWS_SECRET_ACCESS_KEY,
+    region_name=getattr(settings, "AWS_REGION", None) or "us-east-1",
+)
 
 # Save audio file to S3 and return the S3 key
 async def save_audio_to_s3(file_obj, filename, content_type, user_id):
@@ -81,12 +86,10 @@ async def delete_file_from_s3(key: str) -> None:
         code = error.get("Code")
         msg = error.get("Message")
 
-        # se for só arquivo que já não existe, tudo bem
         if code == "NoSuchKey":
             log.info(f"S3 key {key} not found when deleting, ignoring.")
             return
 
-        # qualquer outro erro (AccessDenied, etc.) a gente loga forte e relança
         log.error(f"Failed to delete S3 file {key}: {code} - {msg}")
         raise
     except Exception as e:

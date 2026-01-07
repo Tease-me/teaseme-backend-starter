@@ -1,5 +1,5 @@
 from sqlalchemy.orm import DeclarativeBase, mapped_column, Mapped, relationship
-from sqlalchemy import Integer, String, Boolean, Text, ForeignKey, DateTime, JSON, Index, Float
+from sqlalchemy import Integer, String, Boolean, Text, ForeignKey, DateTime, JSON, Index, Float, UniqueConstraint
 from typing import Optional, List
 from sqlalchemy.dialects.postgresql import JSONB
 
@@ -60,7 +60,6 @@ class User(Base):
     profile_photo_key: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     chats = relationship("Chat", back_populates="user")
-    fp_ref_id: Mapped[str | None] = mapped_column(String, nullable=True)
     following_influencers: Mapped[List["InfluencerFollower"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
@@ -121,12 +120,43 @@ class Pricing(Base):
     free_allowance: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool]  = mapped_column(Boolean, default=True)
 
-class CreditWallet(Base):
-    """User's prepaid balance (>= 0)."""
-    __tablename__ = "credit_wallets"
-    user_id: Mapped[int]     = mapped_column(ForeignKey("users.id"), primary_key=True)
-    balance_cents: Mapped[int] = mapped_column(Integer, default=0)
+class InfluencerWallet(Base):
+    __tablename__ = "influencer_wallets"
 
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    influencer_id: Mapped[str] = mapped_column(
+        ForeignKey("influencers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    balance_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "influencer_id", name="uq_user_influencer_wallet"),
+        Index("ix_infl_wallet_user_infl", "user_id", "influencer_id"),
+    )
+    
 class CreditTransaction(Base):
     """Immutable ledger of debits and credits."""
     __tablename__ = "credit_transactions"
@@ -137,6 +167,29 @@ class CreditTransaction(Base):
     amount_cents: Mapped[int] = mapped_column(Integer)    # -5, -60, +1000 …
     meta: Mapped[dict]       = mapped_column(JSON, nullable=True)
     ts: Mapped[datetime]     = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class InfluencerCreditTransaction(Base):
+    __tablename__ = "influencer_credit_transactions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    influencer_id: Mapped[str] = mapped_column(ForeignKey("influencers.id", ondelete="CASCADE"), index=True)
+
+    feature: Mapped[str] = mapped_column(String)      # text/voice/topup/refund
+    units: Mapped[int] = mapped_column(Integer)
+    amount_cents: Mapped[int] = mapped_column(Integer)
+
+    meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        Index("ix_infl_tx_user_infl_ts", "user_id", "influencer_id", "created_at"),
+    )
 
 class DailyUsage(Base):
     """Daily counter that resets at midnight UTC (for free tier usage)."""
@@ -341,6 +394,13 @@ class PayPalTopUp(Base):
     status: Mapped[str] = mapped_column(String, default="CREATED")  # CREATED | COMPLETED | FAILED
     credited: Mapped[bool] = mapped_column(Boolean, default=False)
     fp_tracked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    influencer_id: Mapped[str | None] = mapped_column(
+        ForeignKey("influencers.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
