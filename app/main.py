@@ -20,6 +20,7 @@ from app.api.follow import router as follow_router
 from app.api.pre_influencers import router as pre_influencers_router
 from app.api.social import router as social_router
 from app.api.admin import router as admin_router
+from app.api.relationship import router as relationship_router
 
 from app.api import system_prompts as system_prompts_router
 
@@ -64,3 +65,4 @@ app.include_router(system_prompts_router.router)
 app.include_router(pre_influencers_router)
 app.include_router(social_router)
 app.include_router(admin_router)
+app.include_router(relationship_router)
