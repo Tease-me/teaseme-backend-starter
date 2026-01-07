@@ -4,6 +4,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.chat import router
+from app.api.chat_18 import router as chat_18_router
 from app.api.auth import router as auth_router
 from app.api.push import router as push_router 
 from app.api import billing
@@ -66,3 +67,4 @@ app.include_router(pre_influencers_router)
 app.include_router(social_router)
 app.include_router(admin_router)
 app.include_router(relationship_router)
+app.include_router(chat_18_router)

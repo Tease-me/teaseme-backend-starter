@@ -108,7 +108,7 @@ class Message18(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     chat_id: Mapped[str] = mapped_column(ForeignKey("chats_18.id"), index=True)
     sender: Mapped[str] = mapped_column(String)
-    channel: Mapped[str] = mapped_column(String, default="text")
+    channel: Mapped[str] = mapped_column(String, default="text_18")
     content: Mapped[str] = mapped_column(Text)
     audio_url: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

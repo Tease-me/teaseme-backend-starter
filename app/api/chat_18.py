@@ -7,7 +7,7 @@ import asyncio
 
 from typing import Dict, List, Optional
 from fastapi import APIRouter, WebSocket, Depends, File, UploadFile, HTTPException, Form, Query
-from app.agents.turn_handler import handle_turn
+from app.agents.turn_handler_18 import handle_turn_18
 from app.db.session import get_db
 from app.db.models import Message18, Chat18
 from jose import jwt
@@ -152,7 +152,7 @@ async def _flush_buffer(
             db,
             user_id=user_id,
             influencer_id=influencer_id,
-            feature="text",
+            feature="text_18",
             units=1,
             meta={"chat_id": chat_id},
         )
@@ -171,7 +171,7 @@ async def _flush_buffer(
     # 2) Get LLM reply
     try:
         log.info("[BUF %s] calling handle_turn()", chat_id)
-        reply = await handle_turn(
+        reply = await handle_turn_18(
             message=user_text,
             chat_id=chat_id,
             influencer_id=influencer_id,
@@ -179,9 +179,9 @@ async def _flush_buffer(
             db=db,
             is_audio=False,
         )
-        log.info("[BUF %s] handle_turn ok (reply_len=%d)", chat_id, len(reply or ""))
+        log.info("[BUF %s] handle_turn_18 ok (reply_len=%d)", chat_id, len(reply or ""))
     except Exception:
-        log.exception("[BUF %s] handle_turn error", chat_id)
+        log.exception("[BUF %s] handle_turn_18 error", chat_id)
         # try to tell the client but don't crash if socket closed
         try:
             await ws.send_json({"error": "Sorry, something went wrong. 😔"})
@@ -337,7 +337,7 @@ async def chat_audio(
 
         # ✅ resolve influencer_id from chat if missing
         if not influencer_id:
-            chat = await db.get(Chat, chat_id)
+            chat = await db.get(Chat18, chat_id)
             if not chat or not chat.influencer_id:
                 raise HTTPException(status_code=400, detail="Missing influencer context")
             influencer_id = chat.influencer_id
@@ -380,7 +380,7 @@ async def chat_audio(
             db,
             user_id=user_id,
             influencer_id=influencer_id,
-            feature="voice",
+            feature="voice_18",
             units=seconds,
             meta={"chat_id": chat_id, "seconds": seconds},
         )
@@ -411,7 +411,7 @@ async def chat_audio(
             chat_id=chat_id,
             sender="user",
             content=transcript_text,
-            audio_url=user_audio_key,  # store KEY in DB (recommended)
+            audio_url=user_audio_key,
             embedding=embedding,
         )
         db.add(msg_user)
