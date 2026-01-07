@@ -50,6 +50,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(router)
+app.include_router(chat_18_router)
 app.include_router(push_router)
 app.include_router(notify_ws_router)
 app.include_router(billing.router)
@@ -67,4 +68,3 @@ app.include_router(pre_influencers_router)
 app.include_router(social_router)
 app.include_router(admin_router)
 app.include_router(relationship_router)
-app.include_router(chat_18_router)
