@@ -91,6 +91,29 @@ class Message(Base):
     chat = relationship("Chat", back_populates="messages")
     conversation_id: Mapped[str | None] = mapped_column(ForeignKey("calls.conversation_id"), nullable=True)
 
+class Chat18(Base):
+    __tablename__ = "chats_18"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)  # UUID
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    influencer_id: Mapped[str] = mapped_column(ForeignKey("influencers.id"))
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+class Message18(Base):
+    __tablename__ = "messages_18"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[str] = mapped_column(ForeignKey("chats_18.id"), index=True)
+    sender: Mapped[str] = mapped_column(String)
+    channel: Mapped[str] = mapped_column(String, default="text")
+    content: Mapped[str] = mapped_column(Text)
+    audio_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(1536), nullable=True)
+
 class Memory(Base):
     __tablename__ = "memories"
     id = mapped_column(Integer, primary_key=True)
@@ -156,17 +179,7 @@ class InfluencerWallet(Base):
         UniqueConstraint("user_id", "influencer_id", name="uq_user_influencer_wallet"),
         Index("ix_infl_wallet_user_infl", "user_id", "influencer_id"),
     )
-    
-class CreditTransaction(Base):
-    """Immutable ledger of debits and credits."""
-    __tablename__ = "credit_transactions"
-    id: Mapped[int]          = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int]     = mapped_column(ForeignKey("users.id"))
-    feature: Mapped[str]     = mapped_column(String)      # text / voice / live_chat / topup / refund
-    units: Mapped[int]       = mapped_column(Integer)     # -1 msg, -30 secs, +10000 topup
-    amount_cents: Mapped[int] = mapped_column(Integer)    # -5, -60, +1000 …
-    meta: Mapped[dict]       = mapped_column(JSON, nullable=True)
-    ts: Mapped[datetime]     = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
 
 class InfluencerCreditTransaction(Base):
     __tablename__ = "influencer_credit_transactions"
