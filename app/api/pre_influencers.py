@@ -614,6 +614,10 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
 
     DEFAULT_VOICE_ID = "YKG78i9n8ybMZ42crVbJ"
     DEFAULT_PROMPT_TEMPLATE = "Update this prompt based on the influencer's personality and preferences."
+    answers = pre.survey_answers or {}
+    photo_key = answers.get("profile_picture_key")
+    if photo_key and not influencer.profile_photo_key:
+            influencer.profile_photo_key = photo_key
 
     if not influencer:
         influencer = Influencer(
