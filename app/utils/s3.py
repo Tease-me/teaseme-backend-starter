@@ -86,12 +86,10 @@ async def delete_file_from_s3(key: str) -> None:
         code = error.get("Code")
         msg = error.get("Message")
 
-        # se for só arquivo que já não existe, tudo bem
         if code == "NoSuchKey":
             log.info(f"S3 key {key} not found when deleting, ignoring.")
             return
 
-        # qualquer outro erro (AccessDenied, etc.) a gente loga forte e relança
         log.error(f"Failed to delete S3 file {key}: {code} - {msg}")
         raise
     except Exception as e:
