@@ -36,7 +36,7 @@ async def start_chat(
     data: ChatCreateRequest, 
     db: AsyncSession = Depends(get_db)
 ):
-    chat_id = await get_or_create_chat(db, data.user_id, data.influencer_id)
+    chat_id = await get_or_create_chat18(db, data.user_id, data.influencer_id)
     return {"chat_id": chat_id}
 
 # ---------- Buffer state ----------
