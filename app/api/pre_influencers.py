@@ -644,6 +644,13 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
         influencer.fp_ref_id = pre.fp_ref_id
         db.add(influencer)
 
+    # Update photo key if available
+    answers = pre.survey_answers or {}
+    photo_key = answers.get("profile_picture_key")
+    if photo_key and not influencer.profile_photo_key:
+        influencer.profile_photo_key = photo_key
+
+
     pre.status = "approved"
     db.add(pre)
 
