@@ -15,7 +15,7 @@ from app.api.utils import get_embedding
 from starlette.websockets import WebSocketDisconnect
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.services.chat_service import get_or_create_chat
+from app.services.chat_service import get_or_create_chat18
 from app.schemas.chat import ChatCreateRequest,PaginatedMessages
 
 from app.core.config import settings

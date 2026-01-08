@@ -64,6 +64,7 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    is_18_selected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     
 class Chat(Base):
     __tablename__ = "chats"
