@@ -35,6 +35,8 @@ async def charge_feature(
         "text": usage.text_count or 0,
         "voice": usage.voice_secs or 0,
         "live_chat": usage.live_secs or 0,
+        "text_18": usage.text_count or 0,
+        "voice_18": usage.voice_secs or 0,
     }[feature]
 
     free_left = max((price.free_allowance or 0) - used, 0)
@@ -193,12 +195,6 @@ def get_duration_seconds(file_bytes: bytes, mime: str | None = None) -> int:
         duration = 10.0
     return max(1, math.ceil(duration))
 
-# map feature -> which counter to read on DailyUsage
-_USAGE_FIELD = {
-    "text": "text_count",
-    "voice": "voice_secs",
-    "live_chat": "live_secs",
-}
 
 async def can_afford(
     db: AsyncSession,

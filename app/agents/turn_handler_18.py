@@ -4,24 +4,36 @@ from uuid import uuid4
 from fastapi import HTTPException
 from sqlalchemy import select
 
+from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
+
 from app.db.models import Influencer, Message18
 from app.agents.prompt_utils import get_global_prompt, get_today_script, build_relationship_prompt
 from app.agents.prompts import MODEL
+from app.utils.tts_sanitizer import sanitize_tts_text
 
 log = logging.getLogger("teaseme-turn-18")
 
 
-def _render_recent_ctx(rows: list[Message18]) -> str:
-    lines = []
+def _render_recent_ctx(rows: list[Message18]) -> list[BaseMessage]:
+    """
+    IMPORTANT: LangChain expects history as a list of BaseMessage, not a string.
+    """
+    msgs: list[BaseMessage] = []
     for m in rows:
-        role = "user" if (m.sender or "").lower() == "user" else "ai"
+        role = (m.sender or "").lower()
         txt = (m.content or "").strip()
-        if txt:
-            lines.append(f"{role}: {txt}")
-    return "\n".join(lines)
+        if not txt:
+            continue
+
+        if role == "user":
+            msgs.append(HumanMessage(content=txt))
+        else:
+            msgs.append(AIMessage(content=txt))
+
+    return msgs
 
 
-async def _load_recent_ctx_18(db, chat_id: str, limit: int = 12) -> str:
+async def _load_recent_ctx_18(db, chat_id: str, limit: int = 12) -> list[BaseMessage]:
     q = (
         select(Message18)
         .where(Message18.chat_id == chat_id)
@@ -41,13 +53,14 @@ async def handle_turn_18(
     influencer_id: str,
     user_id: int,  # kept for signature compatibility, not used
     db,
+    is_audio: bool = False,
 ) -> str:
     cid = uuid4().hex[:8]
     log.info("[%s] START(18) persona=%s chat=%s user=%s", cid, influencer_id, chat_id, user_id)
 
     influencer, prompt_template, daily_context, recent_ctx = await asyncio.gather(
         db.get(Influencer, influencer_id),
-        get_global_prompt(db, is_audio=False),
+        get_global_prompt(db, False),
         get_today_script(db=db, influencer_id=influencer_id),
         _load_recent_ctx_18(db, chat_id, limit=12),
     )
@@ -63,8 +76,7 @@ async def handle_turn_18(
     if not isinstance(stages, dict):
         stages = {}
 
-    # ✅ We reuse build_relationship_prompt, but with a "fake" lightweight rel object
-    # so we don't need RelationshipState at all.
+    # fake lightweight rel (no RelationshipState)
     class _Rel:
         state = "STRANGERS"
         trust = 0.0
@@ -78,7 +90,7 @@ async def handle_turn_18(
 
     prompt = build_relationship_prompt(
         prompt_template,
-        rel=_Rel(),                 # <-- no DB row
+        rel=_Rel(),
         days_idle=0,
         dtr_goal="",
         personality_rules=personality_rules,
@@ -93,15 +105,16 @@ async def handle_turn_18(
         persona_rules=getattr(influencer, "prompt_template", "") or "",
     )
 
-    # Add DB history into the input (so the model has context)
-    # If your prompt template already consumes "history", keep this.
     chain = prompt | MODEL
 
     try:
-        result = await chain.ainvoke(
-            {"input": message, "history": recent_ctx}
-        )
+        # ✅ history is now list[BaseMessage]
+        result = await chain.ainvoke({"input": message, "history": recent_ctx})
         reply = getattr(result, "content", None) or str(result)
+
+        if is_audio:
+            return sanitize_tts_text(reply)
+
         return reply
     except Exception as e:
         log.error("[%s] LLM error: %s", cid, e, exc_info=True)

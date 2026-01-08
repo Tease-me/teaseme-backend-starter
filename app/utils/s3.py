@@ -62,6 +62,23 @@ def message_to_schema_with_presigned(msg):
         conversation_id=msg.conversation_id,
     )
 
+def message18_to_schema_with_presigned(msg):
+    audio_url = msg.audio_url
+    if audio_url:
+        audio_url = generate_presigned_url(audio_url)
+
+    # MessageSchema expects fields that Message18 may not have.
+    # So we fill what exists and set missing ones to defaults.
+    return MessageSchema(
+        id=msg.id,
+        chat_id=msg.chat_id,
+        sender=msg.sender,
+        content=msg.content,
+        created_at=msg.created_at,
+        audio_url=audio_url,
+        channel=getattr(msg, "channel", "text"),          # default
+        conversation_id=getattr(msg, "conversation_id", None),  # Message18 doesn't have it
+    )
 # Save knowledge file to S3 and return the S3 key
 async def save_knowledge_file_to_s3(file_obj, filename: str, content_type: str, influencer_id: str) -> str:
     """Save a knowledge file (PDF, DOCX, TXT) to S3"""
