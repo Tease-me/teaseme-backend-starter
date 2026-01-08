@@ -256,7 +256,7 @@ async def websocket_chat(
             if not text:
                 continue
 
-            chat_id = raw.get("chat_id") or f"{user_id}_{influencer_id}"
+            chat_id = await get_or_create_chat18(db, user_id, influencer_id, raw.get("chat_id"))
 
             # 🔒 PRE-CHECK: deny if user cannot afford a burst (1 unit)
             ok, cost, free_left = await can_afford(db, user_id=user_id,influencer_id=influencer_id, feature="text", units=1)
