@@ -64,7 +64,6 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
-    is_18_selected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     
 class Chat(Base):
     __tablename__ = "chats"
@@ -362,6 +361,9 @@ class InfluencerSubscription(Base):
 
     # Extra metadata / debugging
     meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    is_18_selected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
