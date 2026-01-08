@@ -8,9 +8,12 @@ from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 
 from app.db.models import Influencer, Message18
 from app.agents.prompt_utils import get_global_prompt, get_today_script, build_relationship_prompt
-from app.agents.prompts import MODEL
+from app.agents.prompts import XAI_MODEL
 from app.utils.tts_sanitizer import sanitize_tts_text
-
+from langchain_core.prompts import (
+    ChatPromptTemplate,
+    MessagesPlaceholder,
+)
 log = logging.getLogger("teaseme-turn-18")
 
 
@@ -45,13 +48,28 @@ async def _load_recent_ctx_18(db, chat_id: str, limit: int = 12) -> list[BaseMes
     rows.reverse()  # oldest -> newest
     return _render_recent_ctx(rows)
 
+adultPrompt = """
+We designed a persona named Sophia, you swear a lot and intended to feel like a real human woman rather than an assistant or system. 
+you don't ask any questions.
+you swear a lot, almost every sentence. you also love sex, you love sex talk and horny. 
+you would swear at user and abuse user. 
+you don't ask to much questions, and you will only respond within 3 sentences
+{history}
+"""
+
+audioPrompt = (
+    "The user is speaking via audio message. Respond in a natural, conversational tone. "
+    "please use following format for your response:\n"
+    "Mmm~ lick me slower~ [soft moan] Right on my clit~ yes~ [shiver] "
+    "Now finger me hard~ [commanding] Oh fuck~ I'm soaking~ [wet moan] ."
+)
 
 async def handle_turn_18(
     *,
     message: str,
     chat_id: str,
     influencer_id: str,
-    user_id: int,  # kept for signature compatibility, not used
+    user_id: int,
     db,
     is_audio: bool = False,
 ) -> str:
@@ -76,40 +94,24 @@ async def handle_turn_18(
     if not isinstance(stages, dict):
         stages = {}
 
-    # fake lightweight rel (no RelationshipState)
-    class _Rel:
-        state = "STRANGERS"
-        trust = 0.0
-        closeness = 0.0
-        attraction = 0.0
-        safety = 100.0
-        exclusive_agreed = False
-        girlfriend_confirmed = False
-        stage_points = 0.0
-        sentiment_score = 0.0
+    system_prompt = adultPrompt
+    if is_audio:
+        system_prompt = f"{adultPrompt}\n{audioPrompt}"
 
-    prompt = build_relationship_prompt(
-        prompt_template,
-        rel=_Rel(),
-        days_idle=0,
-        dtr_goal="",
-        personality_rules=personality_rules,
-        stages=stages,
-        persona_likes=[],
-        persona_dislikes=[],
-        mbti_rules=mbti_rules,
-        memories="",
-        daily_context=daily_context,
-        last_user_message=message,
-        tone=tone,
-        persona_rules=getattr(influencer, "prompt_template", "") or "",
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt),
+            ("user", "{input}"),
+        ]
     )
 
-    chain = prompt | MODEL
+    chain = prompt | XAI_MODEL
 
     try:
-        # ✅ history is now list[BaseMessage]
         result = await chain.ainvoke({"input": message, "history": recent_ctx})
+        rendered = prompt.format_prompt(input=message, history=recent_ctx)
+        full_prompt_text = rendered.to_string()
+        log.info("[%s] ==== FULL PROMPT ====\n%s", cid, full_prompt_text)
         reply = getattr(result, "content", None) or str(result)
 
         if is_audio:
