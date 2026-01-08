@@ -64,6 +64,7 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    is_18_selected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     
 class Chat(Base):
     __tablename__ = "chats"
@@ -293,6 +294,169 @@ class InfluencerKnowledgeChunk(Base):
     
     __table_args__ = (
         Index("idx_knowledge_chunks_influencer", "influencer_id"),
+    )
+
+    from datetime import datetime, timezone
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import (
+    Integer, String, DateTime, ForeignKey, Boolean,
+    UniqueConstraint, Index, JSON, Text
+)
+from app.db.models import Base  # use seu Base
+
+# -----------------------------
+# InfluencerSubscription
+# -----------------------------
+class InfluencerSubscription(Base):
+    """
+    One paid subscription per (user_id, influencer_id).
+    Holds the current state of the subscription.
+    """
+    __tablename__ = "influencer_subscriptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    influencer_id: Mapped[str] = mapped_column(
+        ForeignKey("influencers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Money / Plan
+    price_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String, nullable=False, default="AUD")
+
+    interval: Mapped[str] = mapped_column(String, nullable=False, default="monthly")
+    # interval: "weekly" | "monthly" | "yearly"
+
+    # Status lifecycle
+    status: Mapped[str] = mapped_column(String, nullable=False, default="active")
+    # status: "active" | "paused" | "canceled" | "expired"
+
+    # Dates
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    current_period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    last_payment_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_payment_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    canceled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancel_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    # Provider refs (super important)
+    provider: Mapped[str | None] = mapped_column(String, nullable=True)  # "paypal" | "stripe"
+    provider_customer_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    provider_subscription_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+
+    # Extra metadata / debugging
+    meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    # relationships
+    payments = relationship(
+        "InfluencerSubscriptionPayment",
+        back_populates="subscription",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "influencer_id", name="uq_user_influencer_subscription"),
+        Index("ix_inf_sub_user_infl", "user_id", "influencer_id"),
+        Index("ix_inf_sub_status_nextpay", "status", "next_payment_at"),
+    )
+
+
+# -----------------------------
+# SubscriptionPayment (ledger)
+# -----------------------------
+class InfluencerSubscriptionPayment(Base):
+    """
+    Immutable ledger of payment attempts/events for a subscription.
+    Every capture / refund / failed payment becomes a row here.
+    """
+    __tablename__ = "influencer_subscription_payments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    subscription_id: Mapped[int] = mapped_column(
+        ForeignKey("influencer_subscriptions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    influencer_id: Mapped[str] = mapped_column(
+        ForeignKey("influencers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Amount
+    amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String, nullable=False, default="AUD")
+
+    # Type + status
+    kind: Mapped[str] = mapped_column(String, nullable=False, default="charge")
+    # kind: "charge" | "refund" | "chargeback"
+
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    # status: "pending" | "succeeded" | "failed" | "refunded"
+
+    # Provider refs
+    provider: Mapped[str | None] = mapped_column(String, nullable=True)  # "paypal"
+    provider_event_id: Mapped[str | None] = mapped_column(String, nullable=True, unique=True, index=True)
+    # ex: PayPal capture_id OR PayPal order_id OR webhook event id
+
+    provider_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    failure_code: Mapped[str | None] = mapped_column(String, nullable=True)
+    failure_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        index=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    subscription = relationship("InfluencerSubscription", back_populates="payments")
+
+    __table_args__ = (
+        Index("ix_inf_sub_pay_user_infl_time", "user_id", "influencer_id", "occurred_at"),
     )
 
 class SystemPrompt(Base):

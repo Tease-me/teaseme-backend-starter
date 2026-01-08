@@ -31,7 +31,7 @@ async def get_balance(
 
     wallet = await db.scalar(
         select(InfluencerWallet).where(
-            InfluencerWallet.user_id == user.user_id,
+            InfluencerWallet.user_id == user.id,
             InfluencerWallet.influencer_id == influencer_id,
         )
     )

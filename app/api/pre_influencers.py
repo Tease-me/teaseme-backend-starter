@@ -3,6 +3,8 @@ import logging
 import secrets
 import re
 
+from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +21,7 @@ from fastapi import (
 from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
+from app.services.system_prompt_service import get_system_prompt
 
 from app.db.session import get_db
 from app.db.models import PreInfluencer, Influencer
@@ -33,9 +36,19 @@ from app.schemas.pre_influencer import (
     SurveyPromptResponse,
 )
 from app.core.config import settings
-from app.utils.email import send_profile_survey_email, send_new_influencer_email
+from app.utils.email import (
+    send_profile_survey_email,
+    send_new_influencer_email,
+    send_influencer_survey_completed_email_to_promoter,
+)
 from app.utils.s3 import save_influencer_photo_to_s3, generate_presigned_url, delete_file_from_s3
-from app.services.firstpromoter import fp_create_promoter, fp_find_promoter_id_by_ref_token
+from app.services.firstpromoter import (
+    fp_create_promoter,
+    fp_find_promoter_id_by_ref_token,
+    fp_get_promoter_v2,
+    fp_extract_email,
+    fp_extract_parent_promoter_id,
+)
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/pre-influencers", tags=["pre-influencers"])
@@ -47,6 +60,7 @@ SURVEY_SUMMARIZER = ChatOpenAI(
 )
 
 
+@lru_cache(maxsize=1)
 def _load_survey_questions():
     try:
         with SURVEY_QUESTIONS_PATH.open("r", encoding="utf-8") as f:
@@ -114,20 +128,11 @@ def _unwrap_json(raw: str) -> str:
     return text.strip()
 
 
-async def _generate_prompt_from_markdown(markdown: str, additional_prompt: str | None) -> str:
+async def _generate_prompt_from_markdown(markdown: str, additional_prompt: str | None, db:AsyncSession) -> str:
 
-    sys_msg = (
-        "You are a prompt engineer. Read the survey markdown and output only JSON matching this schema exactly: "
-        "{ likes: string[], dislikes: string[], mbti_architype: string, mbti_rules: string, personality_rules: string, tone: string, "
-        "stages: { hate: string, dislike: string, strangers: string, talking: string, flirting: string, dating: string, in_love: string } }."
-        "Fill likes/dislikes from foods, hobbies, entertainment, routines, and anything the user enjoys or hates. "
-        "mbti_architype should select one of: ISTJ, ISFJ, INFJ, INTJ, ISTP, ISFP, INFP, INTP, ESTP, ESFP, ENFP, ENTP, ESTJ, ESFJ, ENFJ, ENTJ. "
-        "mbti_rules should use mbti_architype to summarize decision style, social energy, planning habits. "
-        "personality_rules should use mbti_architype to summarize overall personality, humor, boundaries, relationship vibe. "
-        "tone should use mbti_architype to describe speaking style in a short sentence. "
-        "Each stage string should describe how the persona behaves toward the user at that relationship stage. These should be influenced by mbti_architype."
-        "Keep strings concise (1-2 sentences). If unclear, use an empty string. No extra keys, no prose."
-    )
+    sys_msg = await get_system_prompt(db, "SURVEY_PROMPT_JSON_SCHEMA")
+    if not sys_msg:
+        raise HTTPException(500, "Missing system prompt: SURVEY_PROMPT_JSON_SCHEMA")
     user_msg = f"Survey markdown:\n{markdown}\n\nExtra instructions for style/tone:\n{additional_prompt or '(none)'}"
 
     try:
@@ -225,6 +230,7 @@ async def register_pre_influencer(
         email=data.email,
         password=data.password,
         survey_token=verify_token,
+        survey_answers={"__meta": {"parent_ref_id": data.parent_ref_id}} if data.parent_ref_id else None,
         terms_agreement=False,
     )
 
@@ -253,6 +259,18 @@ async def register_pre_influencer(
 
             pre.fp_promoter_id = str(promoter.get("id"))
             pre.fp_ref_id = promoter.get("default_ref_id") or (promoter.get("promotions") or [{}])[0].get("ref_id")
+
+            answers = pre.survey_answers or {}
+            if isinstance(answers, dict):
+                meta = answers.get("__meta")
+                if not isinstance(meta, dict):
+                    meta = {}
+                if data.parent_ref_id and "parent_ref_id" not in meta:
+                    meta["parent_ref_id"] = data.parent_ref_id
+                if parent_promoter_id and "parent_promoter_id" not in meta:
+                    meta["parent_promoter_id"] = parent_promoter_id
+                answers["__meta"] = meta
+                pre.survey_answers = answers
 
             db.add(pre)
             await db.commit()
@@ -362,8 +380,75 @@ async def generate_prompt_from_survey(
 
     sections = _load_survey_questions()
     markdown = _format_survey_markdown(sections, pre.survey_answers or {}, pre.username)
-    prompt = await _generate_prompt_from_markdown(markdown, additional_prompt=additional_prompt)
+    prompt = await _generate_prompt_from_markdown(markdown, additional_prompt=additional_prompt, db=db)
     return SurveyPromptResponse(**prompt)
+
+
+def _survey_is_completed(survey_step: int, total_sections: int) -> bool:
+    if total_sections <= 0:
+        return False
+    return int(survey_step) >= max(total_sections - 1, 0)
+
+
+async def _notify_parent_promoter_if_needed(pre: PreInfluencer, db: AsyncSession) -> None:
+    answers = pre.survey_answers or {}
+    meta = answers.get("__meta") if isinstance(answers, dict) else None
+    if not isinstance(meta, dict):
+        meta = {}
+
+    if meta.get("parent_promoter_survey_completed_notified"):
+        return
+
+    parent_promoter_id: int | None = None
+    raw_parent_promoter_id = meta.get("parent_promoter_id")
+    if raw_parent_promoter_id is not None and str(raw_parent_promoter_id).isdigit():
+        parent_promoter_id = int(raw_parent_promoter_id)
+
+    if parent_promoter_id is None:
+        parent_ref_id = meta.get("parent_ref_id")
+        if isinstance(parent_ref_id, str) and parent_ref_id.strip():
+            inferred_parent = await fp_find_promoter_id_by_ref_token(parent_ref_id.strip())
+            if inferred_parent:
+                parent_promoter_id = inferred_parent
+                meta["parent_promoter_id"] = parent_promoter_id
+
+    if parent_promoter_id is None and pre.fp_promoter_id:
+        influencer_payload = await fp_get_promoter_v2(pre.fp_promoter_id)
+        inferred_parent = fp_extract_parent_promoter_id(influencer_payload)
+        if inferred_parent:
+            parent_promoter_id = inferred_parent
+            meta["parent_promoter_id"] = parent_promoter_id
+
+    to_email: str | None = None
+    if parent_promoter_id is not None:
+        parent_payload = await fp_get_promoter_v2(parent_promoter_id)
+        to_email = fp_extract_email(parent_payload)
+
+    if not to_email:
+        to_email = settings.FIRSTPROMOTER_NOTIFY_EMAIL
+
+    if not to_email:
+        answers["__meta"] = meta
+        pre.survey_answers = answers
+        db.add(pre)
+        await db.commit()
+        return
+
+    resp = send_influencer_survey_completed_email_to_promoter(
+        to_email=to_email,
+        influencer_username=pre.username,
+        influencer_full_name=pre.full_name,
+        influencer_email=pre.email,
+    )
+    if resp:
+        meta["parent_promoter_survey_completed_notified"] = True
+        meta["parent_promoter_survey_completed_notified_at"] = datetime.now(timezone.utc).isoformat()
+
+    answers["__meta"] = meta
+    pre.survey_answers = answers
+    db.add(pre)
+    await db.commit()
+
 
 @router.put("/{pre_id}/survey", response_model=SurveyState)
 async def save_survey_state(
@@ -379,11 +464,29 @@ async def save_survey_state(
     if not pre:
         raise HTTPException(status_code=404, detail="Pre-influencer not found")
 
-    pre.survey_answers = data.survey_answers
+    incoming_answers: dict = data.survey_answers or {}
+    existing_answers = pre.survey_answers or {}
+    if isinstance(existing_answers, dict) and "__meta" in existing_answers and "__meta" not in incoming_answers:
+        incoming_answers["__meta"] = existing_answers.get("__meta")
+
+    pre.survey_answers = incoming_answers
     pre.survey_step = data.survey_step
+
+    try:
+        total_sections = len(_load_survey_questions())
+        completed = _survey_is_completed(int(data.survey_step), total_sections)
+    except Exception:
+        completed = False
 
     await db.commit()
     await db.refresh(pre)
+
+    if completed:
+        try:
+            await _notify_parent_promoter_if_needed(pre, db)
+        except Exception:
+            log.exception("Failed to notify FirstPromoter on survey completion pre_id=%s", pre.id)
+        await db.refresh(pre)
 
     return SurveyState(
         pre_influencer_id=pre.id,
@@ -509,9 +612,14 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
 
     influencer = await db.get(Influencer, influencer_id)
 
+    
+    sections = _load_survey_questions()
+    markdown = _format_survey_markdown(sections, pre.survey_answers or {}, pre.username)
+    prompt = await _generate_prompt_from_markdown(markdown, additional_prompt=None, db=db)
+    
     DEFAULT_VOICE_ID = "YKG78i9n8ybMZ42crVbJ"
-    DEFAULT_PROMPT_TEMPLATE = "Update this prompt based on the influencer's personality and preferences."
-
+    DEFAULT_PROMPT_TEMPLATE = prompt
+    
     if not influencer:
         influencer = Influencer(
             id=influencer_id,
@@ -524,6 +632,7 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
         )
         db.add(influencer)
     else:
+        # Existing influencer, update fields if empty
         if not influencer.display_name:
             influencer.display_name = pre.full_name or pre.username
         if not influencer.prompt_template:
@@ -534,6 +643,13 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
         influencer.fp_promoter_id = pre.fp_promoter_id
         influencer.fp_ref_id = pre.fp_ref_id
         db.add(influencer)
+
+    # Update photo key if available
+    answers = pre.survey_answers or {}
+    photo_key = answers.get("profile_picture_key")
+    if photo_key and not influencer.profile_photo_key:
+        influencer.profile_photo_key = photo_key
+
 
     pre.status = "approved"
     db.add(pre)
@@ -553,11 +669,3 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
         "fp_ref_id": influencer.fp_ref_id,
         "fp_promoter_id": influencer.fp_promoter_id,
     }
-
-@router.get("")
-async def list_pre_influencers(status: str | None = None, db: AsyncSession = Depends(get_db)):
-    q = select(PreInfluencer)
-    if status:
-        q = q.where(PreInfluencer.status == status)
-    rows = (await db.execute(q)).scalars().all()
-    return rows
