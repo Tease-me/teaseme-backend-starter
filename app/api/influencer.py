@@ -212,10 +212,10 @@ async def update_influencer_profile(
         "profile_video_key": influencer.profile_video_key,
         "native_language": influencer.native_language,
         "date_of_birth": influencer.date_of_birth.isoformat() if influencer.date_of_birth else None,
-        "photo_url": generate_influencer_presigned_url(influencer.profile_photo_key)
+        "photo_url": generate_presigned_url(influencer.profile_photo_key)
         if influencer.profile_photo_key
         else None,
-        "video_url": generate_influencer_presigned_url(influencer.profile_video_key)
+        "video_url": generate_presigned_url(influencer.profile_video_key)
         if influencer.profile_video_key
         else None,
     }
