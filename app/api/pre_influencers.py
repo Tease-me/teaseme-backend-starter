@@ -61,26 +61,16 @@ SURVEY_SUMMARIZER = ChatOpenAI(
 
 
 @lru_cache(maxsize=1)
-def _load_survey_questions():
+async def _load_survey_questions(db: AsyncSession):
+    raw = await get_system_prompt(db, "SURVEY_QUESTIONS_JSON")
+    if not raw:
+        raise HTTPException(500, "Missing system prompt: SURVEY_QUESTIONS_JSON")
     try:
-        with SURVEY_QUESTIONS_PATH.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "Survey questions file missing",
-        )
-    except Exception as exc:  # pragma: no cover - defensive
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            f"Failed to load survey questions: {exc}",
-        )
-
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(500, f"Survey questions JSON invalid: {exc}")
     if not isinstance(data, list):
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "Survey questions file is malformed",
-        )
+        raise HTTPException(500, "Survey questions JSON must be a list")
     return data
 
 
@@ -344,8 +334,8 @@ async def open_survey(token: str, db: AsyncSession = Depends(get_db)):
     )
 
 @router.get("/survey/questions", response_model=SurveyQuestionsResponse)
-async def get_survey_questions():
-    return SurveyQuestionsResponse(sections=_load_survey_questions())
+async def get_survey_questions(db: AsyncSession = Depends(get_db)):
+    return SurveyQuestionsResponse(sections=await _load_survey_questions(db))
 
 @router.get("/{pre_id}/survey/markdown")
 async def get_survey_markdown(
@@ -360,7 +350,8 @@ async def get_survey_markdown(
     if not pre:
         raise HTTPException(status_code=404, detail="Pre-influencer not found")
 
-    sections = _load_survey_questions()
+    sections = await _load_survey_questions(db)
+
     markdown = _format_survey_markdown(sections, pre.survey_answers or {}, pre.username)
     return Response(content=markdown, media_type="text/markdown")
 
@@ -378,9 +369,9 @@ async def generate_prompt_from_survey(
     if not pre:
         raise HTTPException(status_code=404, detail="Pre-influencer not found")
 
-    sections = _load_survey_questions()
+    sections = await _load_survey_questions(db)
     markdown = _format_survey_markdown(sections, pre.survey_answers or {}, pre.username)
-    prompt = await _generate_prompt_from_markdown(markdown, additional_prompt=additional_prompt)
+    prompt = await _generate_prompt_from_markdown(markdown, additional_prompt=additional_prompt, db=db)
     return SurveyPromptResponse(**prompt)
 
 
@@ -473,7 +464,7 @@ async def save_survey_state(
     pre.survey_step = data.survey_step
 
     try:
-        total_sections = len(_load_survey_questions())
+        total_sections = len(await _load_survey_questions(db))
         completed = _survey_is_completed(int(data.survey_step), total_sections)
     except Exception:
         completed = False
