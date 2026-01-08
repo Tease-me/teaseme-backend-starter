@@ -22,6 +22,7 @@ from app.core.config import settings
 from app.utils.chat import transcribe_audio, synthesize_audio_with_elevenlabs_V3, synthesize_audio_with_bland_ai, get_ai_reply_via_websocket
 from app.utils.s3 import save_audio_to_s3, save_ia_audio_to_s3, generate_presigned_url, message_to_schema_with_presigned
 from app.services.billing import charge_feature, get_duration_seconds, can_afford, _get_influencer_id_from_chat
+from app.services.influencerSubscriptions import require_active_subscription
 
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = settings.ALGORITHM
@@ -232,6 +233,20 @@ async def websocket_chat(
     except Exception as e:
         await ws.close(code=4002)
         log.error("[WS] JWT decode error: %s", e)
+        return
+
+    try:
+        await require_active_subscription(db, user_id=user_id, influencer_id=influencer_id)
+    except Exception as e:
+        # You can be more specific here if your function raises custom errors
+        await ws.send_json({
+            "ok": False,
+            "type": "subscription_error",
+            "error": "SUBSCRIPTION_REQUIRED",
+            "message": "You need an active subscription for this influencer.",
+        })
+        SUBSCRIPTION_REQUIRED_CLOSE_CODE = 4403
+        await ws.close(code=SUBSCRIPTION_REQUIRED_CLOSE_CODE)
         return
 
     try:
