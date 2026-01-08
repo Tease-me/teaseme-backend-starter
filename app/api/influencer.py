@@ -33,28 +33,32 @@ def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
-@router.get("", response_model=List[InfluencerOut])
+async def _build_influencer_detail(influencer: Influencer) -> InfluencerDetail:
+    profile_json = await get_influencer_profile_from_s3(influencer.id)
+    photo_url = generate_presigned_url(influencer.profile_photo_key) if influencer.profile_photo_key else None
+    video_url = generate_presigned_url(influencer.profile_video_key) if influencer.profile_video_key else None
+
+    about_text = profile_json.get("about") if isinstance(profile_json, dict) else None
+    detail = InfluencerDetail.model_validate(influencer)
+    detail.about = about_text
+    detail.photo_url = photo_url
+    detail.video_url = video_url
+    return detail
+
+
+@router.get("", response_model=List[InfluencerDetail])
 async def list_influencers(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Influencer))
-    return result.scalars().all()
+    influencers = result.scalars().all()
+    return [await _build_influencer_detail(influencer) for influencer in influencers]
 
 @router.get("/{id}", response_model=InfluencerDetail)
 async def get_influencer(id: str, db: AsyncSession = Depends(get_db)):
     influencer = await db.get(Influencer, id)
     if not influencer:
         raise HTTPException(404, "Influencer not found")
-    
-    profile_json = await get_influencer_profile_from_s3(id)
-    photo_url = generate_presigned_url(influencer.profile_photo_key) if influencer.profile_photo_key else None
-    video_url = generate_presigned_url(influencer.profile_video_key) if influencer.profile_video_key else None
-    
-    about_text = profile_json.get("about") if isinstance(profile_json, dict) else None
-    detail = InfluencerDetail.model_validate(influencer)
-    detail.about = about_text
-    detail.photo_url = photo_url
-    detail.video_url = video_url
-    
-    return detail
+
+    return await _build_influencer_detail(influencer)
 
 @router.post("", response_model=InfluencerOut, status_code=201)
 async def create_influencer(data: InfluencerCreate, db: AsyncSession = Depends(get_db)):
