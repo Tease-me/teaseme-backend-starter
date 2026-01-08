@@ -612,8 +612,14 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
 
     influencer = await db.get(Influencer, influencer_id)
 
+    
+    sections = _load_survey_questions()
+    markdown = _format_survey_markdown(sections, pre.survey_answers or {}, pre.username)
+    prompt = await _generate_prompt_from_markdown(markdown, additional_prompt=None, db=db)
+    
     DEFAULT_VOICE_ID = "YKG78i9n8ybMZ42crVbJ"
-    DEFAULT_PROMPT_TEMPLATE = "Update this prompt based on the influencer's personality and preferences."
+    DEFAULT_PROMPT_TEMPLATE = prompt
+    
     answers = pre.survey_answers or {}
     photo_key = answers.get("profile_picture_key")
     if photo_key and not influencer.profile_photo_key:

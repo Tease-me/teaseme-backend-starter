@@ -9,7 +9,6 @@ from app.db.models import Influencer
 from app.db.session import get_db
 from app.schemas.influencer import InfluencerCreate, InfluencerOut, InfluencerUpdate, InfluencerDetail
 from app.utils.s3 import (
-    generate_influencer_presigned_url,
     generate_presigned_url,
     get_influencer_audio_download_url,
     get_influencer_profile_from_s3,
@@ -46,8 +45,8 @@ async def get_influencer(id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(404, "Influencer not found")
     
     profile_json = await get_influencer_profile_from_s3(id)
-    photo_url = generate_influencer_presigned_url(influencer.profile_photo_key) if influencer.profile_photo_key else None
-    video_url = generate_influencer_presigned_url(influencer.profile_video_key) if influencer.profile_video_key else None
+    photo_url = generate_presigned_url(influencer.profile_photo_key) if influencer.profile_photo_key else None
+    video_url = generate_presigned_url(influencer.profile_video_key) if influencer.profile_video_key else None
     
     about_text = profile_json.get("about") if isinstance(profile_json, dict) else None
     detail = InfluencerDetail.model_validate(influencer)
