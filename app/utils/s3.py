@@ -40,13 +40,6 @@ def generate_presigned_url(key: str, expires: int = 3600) -> str:
         ExpiresIn=expires
     )
 
-def generate_influencer_presigned_url(key: str, expires: int = 3600) -> str:
-    return s3.generate_presigned_url(
-        "get_object",
-        Params={"Bucket": settings.BUCKET_NAME, "Key": key},
-        ExpiresIn=expires,
-    )
-
 def message_to_schema_with_presigned(msg):
     audio_url = msg.audio_url
     if audio_url:

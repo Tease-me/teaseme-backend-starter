@@ -380,7 +380,7 @@ async def generate_prompt_from_survey(
 
     sections = _load_survey_questions()
     markdown = _format_survey_markdown(sections, pre.survey_answers or {}, pre.username)
-    prompt = await _generate_prompt_from_markdown(markdown, additional_prompt=additional_prompt)
+    prompt = await _generate_prompt_from_markdown(markdown, additional_prompt=additional_prompt, db=db)
     return SurveyPromptResponse(**prompt)
 
 
@@ -612,9 +612,14 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
 
     influencer = await db.get(Influencer, influencer_id)
 
+    
+    sections = _load_survey_questions()
+    markdown = _format_survey_markdown(sections, pre.survey_answers or {}, pre.username)
+    prompt = await _generate_prompt_from_markdown(markdown, additional_prompt=None, db=db)
+    
     DEFAULT_VOICE_ID = "YKG78i9n8ybMZ42crVbJ"
-    DEFAULT_PROMPT_TEMPLATE = "Update this prompt based on the influencer's personality and preferences."
-
+    DEFAULT_PROMPT_TEMPLATE = prompt
+    
     if not influencer:
         influencer = Influencer(
             id=influencer_id,
@@ -627,6 +632,7 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
         )
         db.add(influencer)
     else:
+        # Existing influencer, update fields if empty
         if not influencer.display_name:
             influencer.display_name = pre.full_name or pre.username
         if not influencer.prompt_template:
@@ -637,6 +643,13 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
         influencer.fp_promoter_id = pre.fp_promoter_id
         influencer.fp_ref_id = pre.fp_ref_id
         db.add(influencer)
+
+    # Update photo key if available
+    answers = pre.survey_answers or {}
+    photo_key = answers.get("profile_picture_key")
+    if photo_key and not influencer.profile_photo_key:
+        influencer.profile_photo_key = photo_key
+
 
     pre.status = "approved"
     db.add(pre)
@@ -656,11 +669,3 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
         "fp_ref_id": influencer.fp_ref_id,
         "fp_promoter_id": influencer.fp_promoter_id,
     }
-
-@router.get("")
-async def list_pre_influencers(status: str | None = None, db: AsyncSession = Depends(get_db)):
-    q = select(PreInfluencer)
-    if status:
-        q = q.where(PreInfluencer.status == status)
-    rows = (await db.execute(q)).scalars().all()
-    return rows
