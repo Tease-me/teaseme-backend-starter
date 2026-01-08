@@ -19,7 +19,7 @@ from app.services.chat_service import get_or_create_chat18
 from app.schemas.chat import ChatCreateRequest,PaginatedMessages
 
 from app.core.config import settings
-from app.utils.chat import transcribe_audio, synthesize_audio_with_elevenlabs_V3, synthesize_audio_with_bland_ai, get_ai_reply_via_websocket
+from app.utils.chat import transcribe_audio, synthesize_audio_with_elevenlabs_V3, synthesize_audio_with_bland_ai
 from app.utils.s3 import save_audio_to_s3, save_ia_audio_to_s3, generate_presigned_url, message18_to_schema_with_presigned
 from app.services.billing import charge_feature, get_duration_seconds, can_afford
 from app.services.influencer_subscriptions import require_active_subscription
@@ -171,7 +171,7 @@ async def _flush_buffer(
 
     # 2) Get LLM reply
     try:
-        log.info("[BUF %s] calling handle_turn()", chat_id)
+        log.info("[BUF %s] calling handle_turn_18()", chat_id)
         reply = await handle_turn_18(
             message=user_text,
             chat_id=chat_id,
@@ -484,3 +484,27 @@ async def chat_audio(
                 "trace": err.splitlines()[-30:],
             },
         )
+
+async def get_ai_reply_via_websocket(
+    chat_id: str,
+    message: str,
+    influencer_id: str,
+    user_id: int,
+    db: AsyncSession,
+) -> str:
+    """
+    Get AI reply using handle_turn function.
+    This function should be called with a validated user_id from the token.
+    """
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID is required")
+    
+    reply = await handle_turn_18(
+        message=message,
+        chat_id=chat_id,
+        influencer_id=influencer_id,
+        user_id=user_id,
+        db=db,
+        is_audio=True
+    )
+    return reply

@@ -5,6 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     DB_URL: str
     OPENAI_API_KEY: str
+    XAI_API_KEY: str
     REDIS_URL: str 
     MAX_HISTORY_WINDOW: int
     SCORE_TTL: int

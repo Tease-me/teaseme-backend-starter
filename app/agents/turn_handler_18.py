@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 
 from app.db.models import Influencer, Message18
 from app.agents.prompt_utils import get_global_prompt, get_today_script, build_relationship_prompt
-from app.agents.prompts import MODEL
+from app.agents.prompts import XAI_MODEL
 from app.utils.tts_sanitizer import sanitize_tts_text
 
 log = logging.getLogger("teaseme-turn-18")
@@ -105,10 +105,11 @@ async def handle_turn_18(
         persona_rules=getattr(influencer, "prompt_template", "") or "",
     )
 
-    chain = prompt | MODEL
+    chain = prompt | XAI_MODEL
 
     try:
         # ✅ history is now list[BaseMessage]
+        print("Using XAI_MODEL for turn handler 18")
         result = await chain.ainvoke({"input": message, "history": recent_ctx})
         reply = getattr(result, "content", None) or str(result)
 
