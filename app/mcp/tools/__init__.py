@@ -3,6 +3,6 @@
 from app.mcp.server import mcp_server
 
 # Import all tool modules to trigger registration
-from app.mcp.tools import chat_tools, user_tools, influencer_tools, knowledge_tools  # noqa: F401
+from app.mcp.tools import chat_tools, user_tools, influencer_tools  # noqa: F401
 
-__all__ = ["chat_tools", "user_tools", "influencer_tools", "knowledge_tools"]
+__all__ = ["chat_tools", "user_tools", "influencer_tools"]

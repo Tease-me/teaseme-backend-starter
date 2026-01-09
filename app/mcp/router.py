@@ -12,7 +12,7 @@ from app.mcp.types import ToolCallRequest, ToolCallResponse, MCPPrompt
 from app.db.session import get_db
 
 # Import tools to trigger auto-registration
-from app.mcp.tools import chat_tools, user_tools, influencer_tools, knowledge_tools  # noqa: F401
+from app.mcp.tools import chat_tools, user_tools, influencer_tools  # noqa: F401
 
 log = logging.getLogger("mcp.router")
 
