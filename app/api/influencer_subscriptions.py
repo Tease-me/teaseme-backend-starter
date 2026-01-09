@@ -99,55 +99,6 @@ async def paypal_capture_subscription(
 
     return {"status": "payment recorded"}
 
-@router.get("/me")
-async def my_subscriptions(
-    db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user),
-):
-    res = await db.execute(
-        select(InfluencerSubscription)
-        .where(InfluencerSubscription.user_id == user.id)
-        .order_by(InfluencerSubscription.created_at.desc())
-    )
-    subs = res.scalars().all()
-
-    return [
-        {
-            "id": s.id,
-            "influencer_id": s.influencer_id,
-            "status": s.status,
-            "price_cents": s.price_cents,
-            "next_payment_at": s.next_payment_at,
-        }
-        for s in subs
-    ]
-
-@router.get("/me/{influencer_id}")
-async def my_subscription_for_influencer(
-    influencer_id: str,
-    db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user),
-):
-    res = await db.execute(
-        select(InfluencerSubscription).where(
-            InfluencerSubscription.user_id == user.id,
-            InfluencerSubscription.influencer_id == influencer_id,
-        )
-    )
-    sub = res.scalar_one_or_none()
-
-    if not sub:
-        raise HTTPException(404, "Not subscribed")
-
-    return {
-        "id": sub.id,
-        "status": sub.status,
-        "price_cents": sub.price_cents,
-        "started_at": sub.started_at,
-        "current_period_end": sub.current_period_end,
-        "next_payment_at": sub.next_payment_at,
-    }
-
 
 def _now():
     return datetime.now(timezone.utc)
