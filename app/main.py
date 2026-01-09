@@ -11,12 +11,11 @@ from app.api import billing
 
 from app.api.notify_ws import router as notify_ws_router
 from app.api.influencer import router as influencer_router
-from app.api.influencerSubscriptions import router as influencer_subscriptions_router
+from app.api.influencer_subscriptions import router as influencer_subscriptions_router
 from app.api.user import router as user_router
 from app.api.elevenlabs import router as elevenlabs_router
 from app.api.webhooks import router as webhooks_router
 
-from app.api.persona_import import router as persona_import_router
 from app.api.influencer_knowledge import router as influencer_knowledge_router
 from app.api.follow import router as follow_router
 from app.api.pre_influencers import router as pre_influencers_router
@@ -61,7 +60,6 @@ app.include_router(elevenlabs_router)
 app.include_router(follow_router)
 app.include_router(influencer_subscriptions_router)
 app.include_router(health_router.router)
-app.include_router(persona_import_router)
 app.include_router(webhooks_router)
 app.include_router(mcp_router)
 app.include_router(influencer_knowledge_router)

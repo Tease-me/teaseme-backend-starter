@@ -15,14 +15,14 @@ from app.api.utils import get_embedding
 from starlette.websockets import WebSocketDisconnect
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.services.chat_service import get_or_create_chat
+from app.services.chat_service import get_or_create_chat18
 from app.schemas.chat import ChatCreateRequest,PaginatedMessages
 
 from app.core.config import settings
-from app.utils.chat import transcribe_audio, synthesize_audio_with_elevenlabs_V3, synthesize_audio_with_bland_ai, get_ai_reply_via_websocket
-from app.utils.s3 import save_audio_to_s3, save_ia_audio_to_s3, generate_presigned_url, message_to_schema_with_presigned
-from app.services.billing import charge_feature, get_duration_seconds, can_afford, _get_influencer_id_from_chat
-from app.services.influencerSubscriptions import require_active_subscription
+from app.utils.chat import transcribe_audio, synthesize_audio_with_elevenlabs_V3, synthesize_audio_with_bland_ai
+from app.utils.s3 import save_audio_to_s3, save_ia_audio_to_s3, generate_presigned_url, message18_to_schema_with_presigned
+from app.services.billing import charge_feature, get_duration_seconds, can_afford
+from app.services.influencer_subscriptions import require_active_subscription
 
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = settings.ALGORITHM
@@ -36,7 +36,7 @@ async def start_chat(
     data: ChatCreateRequest, 
     db: AsyncSession = Depends(get_db)
 ):
-    chat_id = await get_or_create_chat(db, data.user_id, data.influencer_id)
+    chat_id = await get_or_create_chat18(db, data.user_id, data.influencer_id)
     return {"chat_id": chat_id}
 
 # ---------- Buffer state ----------
@@ -171,7 +171,7 @@ async def _flush_buffer(
 
     # 2) Get LLM reply
     try:
-        log.info("[BUF %s] calling handle_turn()", chat_id)
+        log.info("[BUF %s] calling handle_turn_18()", chat_id)
         reply = await handle_turn_18(
             message=user_text,
             chat_id=chat_id,
@@ -256,7 +256,7 @@ async def websocket_chat(
             if not text:
                 continue
 
-            chat_id = raw.get("chat_id") or f"{user_id}_{influencer_id}"
+            chat_id = await get_or_create_chat18(db, user_id, influencer_id, raw.get("chat_id"))
 
             # 🔒 PRE-CHECK: deny if user cannot afford a burst (1 unit)
             ok, cost, free_left = await can_afford(db, user_id=user_id,influencer_id=influencer_id, feature="text", units=1)
@@ -327,7 +327,7 @@ async def get_chat_history(
     )
     messages = messages_result.scalars().all()
     messages_schema = [
-        message_to_schema_with_presigned(msg)
+        message18_to_schema_with_presigned(msg)
         for msg in messages
     ]
 
@@ -484,3 +484,27 @@ async def chat_audio(
                 "trace": err.splitlines()[-30:],
             },
         )
+
+async def get_ai_reply_via_websocket(
+    chat_id: str,
+    message: str,
+    influencer_id: str,
+    user_id: int,
+    db: AsyncSession,
+) -> str:
+    """
+    Get AI reply using handle_turn function.
+    This function should be called with a validated user_id from the token.
+    """
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID is required")
+    
+    reply = await handle_turn_18(
+        message=message,
+        chat_id=chat_id,
+        influencer_id=influencer_id,
+        user_id=user_id,
+        db=db,
+        is_audio=True
+    )
+    return reply
