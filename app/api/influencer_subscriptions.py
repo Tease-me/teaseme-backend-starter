@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from datetime import datetime, timedelta, timezone
+from pydantic import BaseModel
 
 from app.db.session import get_db
 from app.utils.deps import get_current_user
@@ -9,6 +10,8 @@ from app.db.models import (
     InfluencerSubscription,
     InfluencerSubscriptionPayment,
 )
+from app.services.influencer_subscriptions import require_active_subscription
+
 
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
 
@@ -168,3 +171,55 @@ async def expire_subscriptions(db: AsyncSession = Depends(get_db)):
     )
     await db.commit()
     return {"ok": True}
+
+class Set18Req(BaseModel):
+    is_18_selected: bool
+@router.post("/{influencer_id}/18")
+async def set_18_mode(
+    influencer_id: str,
+    req: Set18Req,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    sub = await require_active_subscription(
+        db,
+        user_id=user.id,
+        influencer_id=influencer_id,
+    )
+
+    sub.is_18_selected = bool(req.is_18_selected)
+    db.add(sub)
+    await db.commit()
+    await db.refresh(sub)
+
+    return {
+        "ok": True,
+        "influencer_id": influencer_id,
+        "is_18_selected": sub.is_18_selected,
+    }
+
+@router.get("/{influencer_id}")
+async def get_subscription_for_influencer(
+    influencer_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    sub = await db.scalar(
+        select(InfluencerSubscription).where(
+            InfluencerSubscription.user_id == user.id,
+            InfluencerSubscription.influencer_id == influencer_id,
+        )
+    )
+
+    if not sub:
+        return {
+            "has_subscription": False,
+            "is_18_selected": False,
+        }
+
+    return {
+        "has_subscription": True,
+        "status": sub.status,
+        "current_period_end": sub.current_period_end,
+        "is_18_selected": sub.is_18_selected,
+    }

@@ -199,7 +199,6 @@ async def get_me(user: User = Depends(get_current_user)):
     if user.profile_photo_key:
         user_out.profile_photo_url = generate_user_presigned_url(user.profile_photo_key)
     return user_out
-
     
 @router.get("/verify-email")
 async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
