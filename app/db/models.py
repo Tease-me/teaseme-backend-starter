@@ -5,6 +5,12 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from datetime import datetime, timezone
 from pgvector.sqlalchemy import Vector
+from datetime import datetime, timezone
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import (
+Integer, String, DateTime, ForeignKey, Boolean,
+UniqueConstraint, Index, JSON, Text
+)
 
 class Base(DeclarativeBase):
     """Common base class – can host __repr__ or metadata config later."""
@@ -160,6 +166,13 @@ class InfluencerWallet(Base):
         index=True,
     )
 
+    is_18: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+
     balance_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     created_at: Mapped[datetime] = mapped_column(
@@ -209,6 +222,13 @@ class DailyUsage(Base):
     __tablename__ = "daily_usage"
     user_id: Mapped[int]     = mapped_column(ForeignKey("users.id"), primary_key=True)
     date:    Mapped[datetime]= mapped_column(DateTime, primary_key=True)  # YYYY-MM-DD 00:00 UTC
+    is_18: Mapped[bool] = mapped_column(
+        Boolean,
+        primary_key=True,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
     free_allowance: Mapped[int] = mapped_column(Integer, default=0)
     text_count: Mapped[int]  = mapped_column(Integer, default=0)
     voice_secs: Mapped[int]  = mapped_column(Integer, default=0)
@@ -258,13 +278,7 @@ class InfluencerFollower(Base):
         Index("ix_influencer_followers_user_id", "user_id"),
     )
 
-from datetime import datetime, timezone
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import (
-Integer, String, DateTime, ForeignKey, Boolean,
-UniqueConstraint, Index, JSON, Text
-)
-from app.db.models import Base  # use seu Base
+
 
 # -----------------------------
 # InfluencerSubscription
