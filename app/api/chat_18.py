@@ -259,7 +259,7 @@ async def websocket_chat(
             chat_id = await get_or_create_chat18(db, user_id, influencer_id, raw.get("chat_id"))
 
             # 🔒 PRE-CHECK: deny if user cannot afford a burst (1 unit)
-            ok, cost, free_left = await can_afford(db, user_id=user_id,influencer_id=influencer_id, feature="text", units=1)
+            ok, cost, free_left = await can_afford(db, user_id=user_id,influencer_id=influencer_id, feature="text_18", units=1,is_18=True)
             if not ok:
                 # send a structured error and DO NOT save/enqueue
                 await ws.send_json({
@@ -376,8 +376,9 @@ async def chat_audio(
             db,
             user_id=user_id,
             influencer_id=influencer_id,
-            feature="voice",
+            feature="voice_18",
             units=seconds,
+            is_18=True,
         )
         if not ok:
             raise HTTPException(

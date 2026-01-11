@@ -9,6 +9,7 @@ from app.utils.deps import get_current_user
 from app.db.models import (
     InfluencerSubscription,
     InfluencerSubscriptionPayment,
+    InfluencerWallet,
 )
 from app.services.influencer_subscriptions import require_active_subscription
 
@@ -72,8 +73,25 @@ async def paypal_capture_subscription(
     if not sub or sub.user_id != user.id:
         raise HTTPException(404, "Subscription not found")
 
+    existing_payment = await db.scalar(
+        select(InfluencerSubscriptionPayment).where(
+            InfluencerSubscriptionPayment.provider == "paypal",
+            InfluencerSubscriptionPayment.provider_event_id == order_id,
+        )
+    )
+    if existing_payment:
+        return {"status": "already recorded"}
+
     now = datetime.now(timezone.utc)
-    next_period = (sub.current_period_end or now) + timedelta(days=30)
+
+    base = sub.current_period_end or now
+    next_period = base + timedelta(days=30)
+
+    sub.last_payment_at = now
+    sub.current_period_start = sub.current_period_end or now
+    sub.current_period_end = next_period
+    sub.next_payment_at = next_period
+    sub.status = "active"
 
     payment = InfluencerSubscriptionPayment(
         subscription_id=sub.id,
@@ -86,19 +104,39 @@ async def paypal_capture_subscription(
         provider_payload=payload,
         occurred_at=now,
     )
-
-    sub.last_payment_at = now
-    sub.current_period_start = sub.current_period_end or now
-    sub.current_period_end = next_period
-    sub.next_payment_at = next_period
-    sub.status = "active"
-
     db.add(payment)
+
+    wallet = await db.scalar(
+        select(InfluencerWallet).where(
+            InfluencerWallet.user_id == user.id,
+            InfluencerWallet.influencer_id == sub.influencer_id,
+            InfluencerWallet.is_18 == True,
+        )
+    )
+
+    if not wallet:
+        wallet = InfluencerWallet(
+            user_id=user.id,
+            influencer_id=sub.influencer_id,
+            balance_cents=0,
+            is_18=True,
+        )
+        db.add(wallet)
+        await db.flush()
+
+    wallet.balance_cents = (wallet.balance_cents or 0) + int(amount_cents)
+    db.add(wallet)
+
     db.add(sub)
     await db.commit()
 
-    return {"status": "payment recorded"}
-
+    return {
+        "status": "payment recorded",
+        "subscription_id": sub.id,
+        "influencer_id": sub.influencer_id,
+        "current_period_end": sub.current_period_end.isoformat() if sub.current_period_end else None,
+        "wallet_balance_cents": wallet.balance_cents,
+    }
 
 def _now():
     return datetime.now(timezone.utc)

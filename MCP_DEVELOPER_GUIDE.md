@@ -31,7 +31,6 @@ curl -k https://localhost:8080/mcp/tools | jq
 
 ### 3. User Tools
 
-- `check_user_credits` - Check user's credit balance
 - `get_user_info` - Get user information
 
 ### 4. Influencer Tools
