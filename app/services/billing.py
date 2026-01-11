@@ -294,6 +294,7 @@ async def get_remaining_units(db: AsyncSession, user_id: int, influencer_id: str
         select(InfluencerWallet).where(
             InfluencerWallet.user_id == user_id,
             InfluencerWallet.influencer_id == influencer_id,
+            InfluencerWallet.is_18 == False,
         )
     )
     balance_cents = wallet.balance_cents if wallet and wallet.balance_cents is not None else 0
