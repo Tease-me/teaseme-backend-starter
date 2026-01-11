@@ -1,19 +1,16 @@
-from fastapi import APIRouter, HTTPException, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from bs4 import BeautifulSoup
+from typing import Optional
+import httpx
+import re
+import json
+
 from app.db.session import get_db
 from app.db.models import PreInfluencer
 from app.core.config import settings
-from typing import Optional
-
-import httpx
-
-
-from pydantic import BaseModel
-from bs4 import BeautifulSoup
-import re
-import json
 
 router = APIRouter(prefix="/social", tags=["social"])
 
@@ -169,134 +166,107 @@ async def fetch_followers(service: str, username: str) -> int:
 
 async def get_instagram_followers(username: str) -> int:
     """
-    Get Instagram follower count using multiple methods
-    Note: Instagram heavily restricts scraping. For production, use Instagram Graph API.
-    This function tries multiple methods to extract follower count.
+    Get Instagram follower count using curl_cffi to bypass TLS fingerprinting.
+    
+    Uses Instagram's internal API with Chrome TLS impersonation to avoid
+    being detected as a bot. Implements exponential backoff on rate limits.
+    
+    For production with high volume, use Instagram Graph API with OAuth tokens.
     """
-    """
-    Get Instagram follower count
-    Note: Instagram requires official API access or scraping
-    For production, use Instagram Basic Display API or Graph API
-    """
-    try:
-        url = f"https://www.instagram.com/{username}/"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate',
-            'Connection': 'keep-alive',
-        }
-        async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
-            response = await client.get(url, headers=headers)
-            response.raise_for_status()
+    import asyncio
+    import random
+    import logging
+    from curl_cffi import requests as curl_requests
+    
+    log = logging.getLogger(__name__)
+    
+    # Instagram's internal API endpoint (more reliable than web scraping)
+    api_url = f"https://i.instagram.com/api/v1/users/web_profile_info/?username={username}"
+    
+    # Required headers - x-ig-app-id is critical for API access
+    headers = {
+        'x-ig-app-id': '936619743392459',  # Instagram Web App ID
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Origin': 'https://www.instagram.com',
+        'Referer': f'https://www.instagram.com/{username}/',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-site',
+    }
+    
+    max_retries = 3
+    
+    for attempt in range(max_retries):
+        try:
+            # Add random delay to appear more human-like (2-5 seconds with variance)
+            if attempt > 0:
+                await asyncio.sleep(random.uniform(2.0, 4.0))
             
-            html = response.text
+            # Use curl_cffi with Chrome impersonation to bypass TLS fingerprinting
+            # This runs in a thread since curl_cffi is synchronous
+            def fetch_with_curl():
+                return curl_requests.get(
+                    api_url,
+                    headers=headers,
+                    impersonate="chrome120",  # Bypass TLS fingerprinting
+                    timeout=15.0,
+                )
             
-            # Method 1: Look for JSON-LD structured data
-            soup = BeautifulSoup(html, 'html.parser')
-            json_scripts = soup.find_all('script', type='application/ld+json')
+            response = await asyncio.to_thread(fetch_with_curl)
             
-            for script in json_scripts:
-                try:
-                    data = json.loads(script.string)
-                    if isinstance(data, dict) and 'mainEntityofPage' in data:
-                        interaction_stat = data.get('mainEntityofPage', {}).get('interactionStatistic', {})
-                        if 'userInteractionCount' in interaction_stat:
-                            count = int(interaction_stat['userInteractionCount'])
-                            if count > 0:
-                                return count
-                except:
+            if response.status_code == 429:
+                # Rate limited - exponential backoff: 2s, 4s, 8s
+                wait_time = 2 ** (attempt + 1)
+                log.warning(f"Instagram rate limited, waiting {wait_time}s before retry {attempt + 1}/{max_retries}")
+                await asyncio.sleep(wait_time)
+                continue
+            
+            if response.status_code == 404:
+                raise ValueError(f"Instagram user @{username} not found")
+            
+            if response.status_code == 401 or response.status_code == 403:
+                log.warning(f"Instagram API returned {response.status_code} - may need proxy rotation")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(random.uniform(3.0, 6.0))
                     continue
+                raise ValueError(
+                    f"Instagram blocked the request (HTTP {response.status_code}). "
+                    "Consider using residential proxies or Instagram Graph API with OAuth."
+                )
             
-            # Method 2: Look for window._sharedData or similar JSON in script tags
-            scripts = soup.find_all('script')
-            for script in scripts:
-                if script.string and ('_sharedData' in script.string or 'profilePage' in script.string):
-                    # Try to extract JSON data
-                    try:
-                        # Find JSON object in script
-                        json_match = re.search(r'window\._sharedData\s*=\s*({.+?});', script.string, re.DOTALL)
-                        if json_match:
-                            data = json.loads(json_match.group(1))
-                            # Navigate through the data structure
-                            entry_data = data.get('entry_data', {})
-                            profile_page = entry_data.get('ProfilePage', [])
-                            if profile_page:
-                                user = profile_page[0].get('graphql', {}).get('user', {})
-                                edge_followed_by = user.get('edge_followed_by', {})
-                                count = edge_followed_by.get('count', 0)
-                                if count > 0:
-                                    return count
-                    except:
-                        continue
+            if response.status_code == 200:
+                data = response.json()
+                user_data = data.get('data', {}).get('user', {})
+                
+                if not user_data:
+                    raise ValueError(f"No user data returned for @{username}")
+                
+                edge_followed_by = user_data.get('edge_followed_by', {})
+                count = edge_followed_by.get('count', 0)
+                
+                if count >= 0:
+                    log.info(f"Successfully fetched follower count for @{username}: {count}")
+                    return count
             
-            # Method 3: Look for meta tags with og:description or similar
-            meta_tags = soup.find_all('meta')
-            for meta in meta_tags:
-                property_attr = meta.get('property', '')
-                content = meta.get('content', '')
-                if 'followers' in property_attr.lower() or 'followers' in content.lower():
-                    numbers = re.findall(r'([\d,]+)\s*followers?', content, re.I)
-                    if numbers:
-                        return int(numbers[0].replace(',', ''))
+            # Unexpected status code
+            log.error(f"Instagram API returned unexpected status {response.status_code}")
             
-            # Method 4: Search in page text for follower patterns
-            page_text = soup.get_text()
-            # Look for patterns like "1,234 followers" or "1.2M followers"
-            patterns = [
-                r'([\d,]+)\s*followers?',
-                r'([\d.]+[KMB]?)\s*followers?',
-            ]
-            for pattern in patterns:
-                matches = re.findall(pattern, page_text, re.I)
-                if matches:
-                    count_str = matches[0].replace(',', '').upper()
-                    # Handle K, M, B suffixes
-                    if 'K' in count_str:
-                        return int(float(count_str.replace('K', '')) * 1000)
-                    elif 'M' in count_str:
-                        return int(float(count_str.replace('M', '')) * 1000000)
-                    elif 'B' in count_str:
-                        return int(float(count_str.replace('B', '')) * 1000000000)
-                    else:
-                        return int(count_str)
-            
-            # Method 5: Try using Instagram's public API endpoint
-            try:
-                api_url = f"https://www.instagram.com/api/v1/users/web_profile_info/?username={username}"
-                api_headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'X-IG-App-ID': '936619743392459',
-                    'Accept': '*/*',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Origin': 'https://www.instagram.com',
-                    'Referer': f'https://www.instagram.com/{username}/',
-                }
-                async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as api_client:
-                    api_response = await api_client.get(api_url, headers=api_headers)
-                    if api_response.status_code == 200:
-                        api_data = api_response.json()
-                        user_data = api_data.get('data', {}).get('user', {})
-                        edge_followed_by = user_data.get('edge_followed_by', {})
-                        count = edge_followed_by.get('count', 0)
-                        if count > 0:
-                            return count
-            except Exception as api_error:
-                # If API fails, continue to error message
-                pass
-            
-            # If nothing found, raise an informative error
-            raise ValueError(
-                f"Could not extract follower count for @{username}. "
-                "Instagram requires official API access for reliable data. "
-                "Please configure INSTAGRAM_ACCESS_TOKEN in .env file. "
-                "See README.md for setup instructions."
-            )
-    except ValueError:
-        raise
-    except Exception as e:
-        raise Exception(f"Failed to fetch Instagram data: {str(e)}")
+        except ValueError:
+            raise
+        except Exception as e:
+            log.error(f"Instagram fetch attempt {attempt + 1} failed: {e}")
+            if attempt == max_retries - 1:
+                raise Exception(f"Failed to fetch Instagram data after {max_retries} attempts: {str(e)}")
+            continue
+    
+    raise ValueError(
+        f"Could not extract follower count for @{username}. "
+        "Instagram requires official API access for reliable data. "
+        "Please use Instagram Graph API with OAuth for production."
+    )
 
 async def get_twitter_followers(username: str) -> int:
     """
