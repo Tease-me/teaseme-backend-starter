@@ -21,13 +21,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # 1) add column (default false for existing rows)
-    op.add_column(
-        "daily_usage",
-        sa.Column("is_18", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+    op.execute(
+        "ALTER TABLE daily_usage "
+        "ADD COLUMN IF NOT EXISTS is_18 BOOLEAN NOT NULL DEFAULT false"
     )
 
     # 2) drop old PK (usually daily_usage_pkey)
-    op.execute("ALTER TABLE daily_usage DROP CONSTRAINT daily_usage_pkey")
+    op.execute("ALTER TABLE daily_usage DROP CONSTRAINT IF EXISTS daily_usage_pkey")
 
     # 3) create new PK including is_18
     op.create_primary_key("daily_usage_pkey", "daily_usage", ["user_id", "date", "is_18"])
@@ -38,8 +38,8 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # reverse the PK back
-    op.execute("ALTER TABLE daily_usage DROP CONSTRAINT daily_usage_pkey")
+    op.execute("ALTER TABLE daily_usage DROP CONSTRAINT IF EXISTS daily_usage_pkey")
     op.create_primary_key("daily_usage_pkey", "daily_usage", ["user_id", "date"])
 
-    op.drop_column("daily_usage", "is_18")
+    op.execute("ALTER TABLE daily_usage DROP COLUMN IF EXISTS is_18")
     
