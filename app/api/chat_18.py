@@ -155,6 +155,7 @@ async def _flush_buffer(
             influencer_id=influencer_id,
             feature="text_18",
             units=1,
+            is_18=True,
             meta={"chat_id": chat_id},
         )
         # ⚠ If charge_feature() commits internally, don't commit here.
@@ -398,6 +399,7 @@ async def chat_audio(
             influencer_id=influencer_id,
             feature="voice_18",
             units=seconds,
+            is_18=True,
             meta={"chat_id": chat_id, "seconds": seconds},
         )
 

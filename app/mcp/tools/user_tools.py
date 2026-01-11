@@ -4,7 +4,6 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.mcp.server import mcp_server
 from app.mcp.types import MCPTool
-from app.services.billing import can_afford, get_remaining_units
 from app.db.models import User, InfluencerWallet
 from sqlalchemy import select
 from typing import Any
