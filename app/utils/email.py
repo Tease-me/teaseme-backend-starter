@@ -388,3 +388,72 @@ Open your profile:
 """.strip()
 
     return send_email_via_ses(to_email, subject, body_html, body_text)
+
+def send_influencer_survey_completed_email_to_promoter(
+    *,
+    to_email: str,
+    influencer_username: str,
+    influencer_full_name: str | None = None,
+    influencer_email: str | None = None,
+):
+    subject = "Influencer completed TeaseMe survey"
+    public_url = f"https://teaseme.live/{influencer_username}"
+
+    influencer_line = influencer_username
+    if influencer_full_name:
+        influencer_line = f"{influencer_full_name} (@{influencer_username})"
+
+    body_html = f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Influencer survey completed</title>
+</head>
+<body style="background:#f7f8fc;padding:0;margin:0;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f7f8fc;padding:40px 0;">
+    <tr>
+      <td align="center">
+        <table width="520" cellpadding="0" cellspacing="0" border="0"
+          style="background:#fff;border-radius:24px;box-shadow:0 10px 32px rgba(50,50,93,0.10),0 2px 4px rgba(0,0,0,0.07);overflow:hidden;">
+          <tr>
+            <td align="center" style="padding:28px 30px 10px 30px;">
+              <h2 style="font-family:'Arial Rounded MT Bold', Arial, sans-serif; font-size:26px; font-weight:bold; margin:0 0 12px 0; color:#444;">
+                Influencer survey completed
+              </h2>
+              <p style="font-size:16px;color:#666;margin:0 0 16px 0;">
+                {influencer_line} has finished their TeaseMe profile survey.
+              </p>
+              <p style="font-size:14px;color:#666;margin:0 0 16px 0;">
+                Profile link: <a href="{public_url}" style="color:#FF5C74;text-decoration:none;">{public_url}</a>
+              </p>
+              {f'<p style="font-size:14px;color:#666;margin:0 0 16px 0;">Influencer email: {influencer_email}</p>' if influencer_email else ''}
+              <p style="margin:22px 0 0 0; font-size:12px; color:#999;">
+                This is an automated message from TeaseMe.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:18px 0 12px 0;background:#e5e5e5;color:#bbb;font-size:14px;border-bottom-left-radius:24px;border-bottom-right-radius:24px;">
+              © {datetime.now().year} TeaseMe. All rights reserved.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+"""
+
+    lines = [
+        "Influencer survey completed",
+        "",
+        f"Influencer: {influencer_line}",
+        f"Profile link: {public_url}",
+    ]
+    if influencer_email:
+        lines.append(f"Influencer email: {influencer_email}")
+    body_text = "\n".join(lines)
+
+    return send_email_via_ses(to_email, subject, body_html, body_text)
