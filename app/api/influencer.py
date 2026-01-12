@@ -124,31 +124,22 @@ async def update_influencer_profile(
     if not influencer:
         raise HTTPException(status_code=404, detail="Influencer not found")
 
-    # Parse form manually to handle empty string file fields (Swagger sends "" for empty files)
     form = await request.form()
     about = form.get("about")
     native_language = form.get("native_language")
     date_of_birth = form.get("date_of_birth")
     
-    # Get files - they will be UploadFile if valid, or str if empty
     photo_field = form.get("photo")
     video_field = form.get("video")
     
-    log.info(f"photo_field type: {type(photo_field)}, value: {photo_field}")
-    log.info(f"video_field type: {type(video_field)}, value: {video_field}")
-    
-    # Read file bytes to check if there's actual content
     photo_bytes = None
     video_bytes = None
     
-    # Use hasattr to check for file-like behavior instead of isinstance
     if hasattr(photo_field, 'read') and hasattr(photo_field, 'filename') and photo_field.filename:
         photo_bytes = await photo_field.read()
-        log.info(f"photo_bytes length: {len(photo_bytes) if photo_bytes else 0}")
         
     if hasattr(video_field, 'read') and hasattr(video_field, 'filename') and video_field.filename:
         video_bytes = await video_field.read()
-        log.info(f"video_bytes length: {len(video_bytes) if video_bytes else 0}")
 
     previous_photo_key = influencer.profile_photo_key
     previous_video_key = influencer.profile_video_key
@@ -156,7 +147,6 @@ async def update_influencer_profile(
     uploaded_video_key: str | None = None
 
     try:
-        # Upload media if we have actual bytes
         if photo_bytes and len(photo_bytes) > 0:
             uploaded_photo_key = await save_influencer_photo_to_s3(
                 io.BytesIO(photo_bytes),
@@ -165,7 +155,6 @@ async def update_influencer_profile(
                 influencer_id,
             )
             influencer.profile_photo_key = uploaded_photo_key
-            log.info(f"Uploaded photo: {uploaded_photo_key}")
 
         if video_bytes and len(video_bytes) > 0:
             uploaded_video_key = await save_influencer_video_to_s3(
@@ -175,7 +164,6 @@ async def update_influencer_profile(
                 influencer_id,
             )
             influencer.profile_video_key = uploaded_video_key
-            log.info(f"Uploaded video: {uploaded_video_key}")
 
         # Update metadata
         if native_language:
