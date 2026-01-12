@@ -55,8 +55,20 @@ def upgrade() -> None:
         sa.Column('date_of_birth', sa.DateTime(), nullable=True),
         sa.Column('daily_scripts', sa.JSON(), nullable=True),
         sa.Column('influencer_agent_id_third_part', sa.String(), nullable=True),
+        sa.Column('samples', postgresql.JSONB(), nullable=True),
         sa.Column('fp_promoter_id', sa.String(), nullable=True),
         sa.Column('fp_ref_id', sa.String(), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    )
+
+    # --- samples ---
+    op.create_table(
+        'samples',
+        sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
+        sa.Column('influencer_id', sa.String(), sa.ForeignKey('influencers.id', ondelete='CASCADE'), nullable=False, index=True),
+        sa.Column('s3_key', sa.String(), nullable=False),
+        sa.Column('original_filename', sa.String(), nullable=True),
+        sa.Column('content_type', sa.String(), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     )
 
@@ -344,6 +356,7 @@ def downgrade() -> None:
     op.drop_table('messages')
     op.drop_table('calls')
     op.drop_table('chats')
+    op.drop_table('samples')
     op.drop_table('influencers')
     op.drop_table('users')
     op.execute('DROP EXTENSION IF EXISTS vector')
