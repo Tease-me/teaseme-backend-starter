@@ -237,7 +237,7 @@ async def upload_influencer_audio(
 
     key = await save_influencer_audio_to_s3(
         io.BytesIO(file_bytes),
-        file.filename,
+        file.filename or "audio.webm",
         file.content_type or "audio/webm",
         influencer_id,
     )
