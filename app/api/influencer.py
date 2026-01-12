@@ -2,7 +2,7 @@ import io
 import logging
 from datetime import datetime
 from typing import List, Optional
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.db.models import Influencer, Sample
@@ -94,19 +94,61 @@ async def delete_influencer(id: str, db: AsyncSession = Depends(get_db)):
     return {"ok": True}
 
 
-@router.post("/{influencer_id}/profile")
+@router.post("/{influencer_id}/profile", 
+    description="Update influencer profile. Send photo/video as multipart form fields.",
+    openapi_extra={
+        "requestBody": {
+            "content": {
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "about": {"type": "string", "nullable": True},
+                            "native_language": {"type": "string", "nullable": True},
+                            "date_of_birth": {"type": "string", "nullable": True},
+                            "photo": {"type": "string", "format": "binary", "nullable": True},
+                            "video": {"type": "string", "format": "binary", "nullable": True},
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 async def update_influencer_profile(
     influencer_id: str,
-    about: Optional[str] = Form(None),
-    native_language: Optional[str] = Form(None),
-    date_of_birth: Optional[str] = Form(None),
-    photo: UploadFile | None = File(None),
-    video: UploadFile | None = File(None),
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     influencer = await db.get(Influencer, influencer_id)
     if not influencer:
         raise HTTPException(status_code=404, detail="Influencer not found")
+
+    # Parse form manually to handle empty string file fields (Swagger sends "" for empty files)
+    form = await request.form()
+    about = form.get("about")
+    native_language = form.get("native_language")
+    date_of_birth = form.get("date_of_birth")
+    
+    # Get files - they will be UploadFile if valid, or str if empty
+    photo_field = form.get("photo")
+    video_field = form.get("video")
+    
+    log.info(f"photo_field type: {type(photo_field)}, value: {photo_field}")
+    log.info(f"video_field type: {type(video_field)}, value: {video_field}")
+    
+    # Read file bytes to check if there's actual content
+    photo_bytes = None
+    video_bytes = None
+    
+    # Use hasattr to check for file-like behavior instead of isinstance
+    if hasattr(photo_field, 'read') and hasattr(photo_field, 'filename') and photo_field.filename:
+        photo_bytes = await photo_field.read()
+        log.info(f"photo_bytes length: {len(photo_bytes) if photo_bytes else 0}")
+        
+    if hasattr(video_field, 'read') and hasattr(video_field, 'filename') and video_field.filename:
+        video_bytes = await video_field.read()
+        log.info(f"video_bytes length: {len(video_bytes) if video_bytes else 0}")
 
     previous_photo_key = influencer.profile_photo_key
     previous_video_key = influencer.profile_video_key
@@ -114,32 +156,32 @@ async def update_influencer_profile(
     uploaded_video_key: str | None = None
 
     try:
-        # Upload media if provided
-        if photo:
+        # Upload media if we have actual bytes
+        if photo_bytes and len(photo_bytes) > 0:
             uploaded_photo_key = await save_influencer_photo_to_s3(
-                photo.file,
-                photo.filename,
-                photo.content_type or "image/jpeg",
+                io.BytesIO(photo_bytes),
+                photo_field.filename,
+                photo_field.content_type or "image/jpeg",
                 influencer_id,
             )
             influencer.profile_photo_key = uploaded_photo_key
+            log.info(f"Uploaded photo: {uploaded_photo_key}")
 
-        if video:
+        if video_bytes and len(video_bytes) > 0:
             uploaded_video_key = await save_influencer_video_to_s3(
-                video.file,
-                video.filename,
-                video.content_type or "video/mp4",
+                io.BytesIO(video_bytes),
+                video_field.filename,
+                video_field.content_type or "video/mp4",
                 influencer_id,
             )
             influencer.profile_video_key = uploaded_video_key
+            log.info(f"Uploaded video: {uploaded_video_key}")
 
         # Update metadata
         if native_language:
             influencer.native_language = native_language
 
-        dt_val = _parse_iso_datetime(date_of_birth)
-        if date_of_birth and not dt_val:
-            raise HTTPException(status_code=400, detail="Invalid date_of_birth format; use ISO 8601")
+        dt_val = _parse_iso_datetime(date_of_birth) if date_of_birth and date_of_birth not in ("", "string") else None
         if dt_val:
             influencer.date_of_birth = dt_val
 
