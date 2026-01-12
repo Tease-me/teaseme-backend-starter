@@ -1,7 +1,7 @@
 """remove fp_ref_id from users
 
 Revision ID: ece6f4e155fb
-Revises: 6f95a8a89f35
+Revises: 1153b75ea876
 Create Date: 2026-01-05 02:02:23.209964
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'ece6f4e155fb'
-down_revision: Union[str, Sequence[str], None] = '6f95a8a89f35'
+down_revision: Union[str, Sequence[str], None] = '1153b75ea876'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
