@@ -1,5 +1,6 @@
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
+from langchain_xai import ChatXAI
 from app.core.config import settings
 from app.services.system_prompt_service import get_system_prompt
 
@@ -22,6 +23,13 @@ CONVO_ANALYZER = ChatOpenAI(
     model="gpt-4o-mini",
     temperature=0.2,
     max_tokens=256,
+)
+
+XAI_MODEL = ChatXAI(
+    xai_api_key=settings.XAI_API_KEY,
+    model="grok-4-1-fast-reasoning",
+    temperature=0.7,
+    max_tokens=512,
 )
 
 async def get_fact_prompt(db) -> ChatPromptTemplate:

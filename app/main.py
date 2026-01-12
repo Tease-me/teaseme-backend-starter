@@ -4,18 +4,18 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.chat import router
+from app.api.chat_18 import router as chat_18_router
 from app.api.auth import router as auth_router
 from app.api.push import router as push_router 
 from app.api import billing
 
 from app.api.notify_ws import router as notify_ws_router
 from app.api.influencer import router as influencer_router
+from app.api.influencer_subscriptions import router as influencer_subscriptions_router
 from app.api.user import router as user_router
 from app.api.elevenlabs import router as elevenlabs_router
 from app.api.webhooks import router as webhooks_router
 
-from app.api.persona_import import router as persona_import_router
-from app.api.influencer_knowledge import router as influencer_knowledge_router
 from app.api.follow import router as follow_router
 from app.api.pre_influencers import router as pre_influencers_router
 from app.api.social import router as social_router
@@ -49,6 +49,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(router)
+app.include_router(chat_18_router)
 app.include_router(push_router)
 app.include_router(notify_ws_router)
 app.include_router(billing.router)
@@ -56,11 +57,10 @@ app.include_router(influencer_router)
 app.include_router(user_router)
 app.include_router(elevenlabs_router)
 app.include_router(follow_router)
+app.include_router(influencer_subscriptions_router)
 app.include_router(health_router.router)
-app.include_router(persona_import_router)
 app.include_router(webhooks_router)
 app.include_router(mcp_router)
-app.include_router(influencer_knowledge_router)
 app.include_router(system_prompts_router.router)
 app.include_router(pre_influencers_router)
 app.include_router(social_router)

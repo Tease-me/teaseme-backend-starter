@@ -23,6 +23,7 @@ async def get_balance(
     influencer_id: str = Query(...),
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
+    is_18: bool = True,
 ):
     # optional: validate influencer exists
     infl = await db.get(Influencer, influencer_id)
@@ -31,8 +32,9 @@ async def get_balance(
 
     wallet = await db.scalar(
         select(InfluencerWallet).where(
-            InfluencerWallet.user_id == user.user_id,
+            InfluencerWallet.user_id == user.id,
             InfluencerWallet.influencer_id == influencer_id,
+            InfluencerWallet.is_18.is_(is_18),
         )
     )
 
@@ -54,6 +56,7 @@ async def topup(
         select(InfluencerWallet).where(
             InfluencerWallet.user_id == user.id,
             InfluencerWallet.influencer_id == req.influencer_id,
+            InfluencerWallet.is_18 == False,
         )
     )
 
@@ -128,6 +131,7 @@ async def paypal_create_order(req: PayPalCreateReq, db: AsyncSession = Depends(g
 class PayPalCaptureReq(BaseModel):
     order_id: str
     influencer_id: str | None = None
+
 @router.post("/paypal/capture")
 async def paypal_capture(
     req: PayPalCaptureReq,
@@ -147,6 +151,7 @@ async def paypal_capture(
         wallet = await db.scalar(select(InfluencerWallet).where(
             InfluencerWallet.user_id == user.id,
             InfluencerWallet.influencer_id == row.influencer_id,
+            InfluencerWallet.is_18 == False,
         ))
         return {"ok": True, "credited": True, "new_balance_cents": wallet.balance_cents if wallet else 0}
 

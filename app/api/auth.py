@@ -9,7 +9,8 @@ from sqlalchemy.future import select
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 from app.db.session import get_db
-from app.db.models import User, Influencer
+from app.db.models import User
+from pydantic import BaseModel
 from app.schemas.auth import RegisterRequest, LoginRequest, Token, PasswordResetRequest
 from app.core.config import settings
 from app.utils.deps import get_current_user

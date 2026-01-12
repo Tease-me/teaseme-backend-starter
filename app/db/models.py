@@ -5,6 +5,12 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from datetime import datetime, timezone
 from pgvector.sqlalchemy import Vector
+from datetime import datetime, timezone
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import (
+Integer, String, DateTime, ForeignKey, Boolean,
+UniqueConstraint, Index, JSON, Text
+)
 
 class Base(DeclarativeBase):
     """Common base class – can host __repr__ or metadata config later."""
@@ -91,6 +97,29 @@ class Message(Base):
     chat = relationship("Chat", back_populates="messages")
     conversation_id: Mapped[str | None] = mapped_column(ForeignKey("calls.conversation_id"), nullable=True)
 
+class Chat18(Base):
+    __tablename__ = "chats_18"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)  # UUID
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    influencer_id: Mapped[str] = mapped_column(ForeignKey("influencers.id"))
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+class Message18(Base):
+    __tablename__ = "messages_18"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[str] = mapped_column(ForeignKey("chats_18.id"), index=True)
+    sender: Mapped[str] = mapped_column(String)
+    channel: Mapped[str] = mapped_column(String, default="text_18")
+    content: Mapped[str] = mapped_column(Text)
+    audio_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(1536), nullable=True)
+
 class Memory(Base):
     __tablename__ = "memories"
     id = mapped_column(Integer, primary_key=True)
@@ -137,6 +166,13 @@ class InfluencerWallet(Base):
         index=True,
     )
 
+    is_18: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+
     balance_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     created_at: Mapped[datetime] = mapped_column(
@@ -156,17 +192,7 @@ class InfluencerWallet(Base):
         UniqueConstraint("user_id", "influencer_id", name="uq_user_influencer_wallet"),
         Index("ix_infl_wallet_user_infl", "user_id", "influencer_id"),
     )
-    
-class CreditTransaction(Base):
-    """Immutable ledger of debits and credits."""
-    __tablename__ = "credit_transactions"
-    id: Mapped[int]          = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int]     = mapped_column(ForeignKey("users.id"))
-    feature: Mapped[str]     = mapped_column(String)      # text / voice / live_chat / topup / refund
-    units: Mapped[int]       = mapped_column(Integer)     # -1 msg, -30 secs, +10000 topup
-    amount_cents: Mapped[int] = mapped_column(Integer)    # -5, -60, +1000 …
-    meta: Mapped[dict]       = mapped_column(JSON, nullable=True)
-    ts: Mapped[datetime]     = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
 
 class InfluencerCreditTransaction(Base):
     __tablename__ = "influencer_credit_transactions"
@@ -196,6 +222,13 @@ class DailyUsage(Base):
     __tablename__ = "daily_usage"
     user_id: Mapped[int]     = mapped_column(ForeignKey("users.id"), primary_key=True)
     date:    Mapped[datetime]= mapped_column(DateTime, primary_key=True)  # YYYY-MM-DD 00:00 UTC
+    is_18: Mapped[bool] = mapped_column(
+        Boolean,
+        primary_key=True,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
     free_allowance: Mapped[int] = mapped_column(Integer, default=0)
     text_count: Mapped[int]  = mapped_column(Integer, default=0)
     voice_secs: Mapped[int]  = mapped_column(Integer, default=0)
@@ -245,41 +278,164 @@ class InfluencerFollower(Base):
         Index("ix_influencer_followers_user_id", "user_id"),
     )
 
-class InfluencerKnowledgeFile(Base):
-    """Metadata for uploaded knowledge files (PDF, Word, etc.)"""
-    __tablename__ = "influencer_knowledge_files"
-    
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    influencer_id: Mapped[str] = mapped_column(ForeignKey("influencers.id", ondelete="CASCADE"), index=True)
-    filename: Mapped[str] = mapped_column(String, nullable=False)
-    file_type: Mapped[str] = mapped_column(String, nullable=False)  # 'pdf', 'docx', 'txt'
-    s3_key: Mapped[str] = mapped_column(String, nullable=False)
-    file_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    uploaded_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    status: Mapped[str] = mapped_column(String, default="processing")  # processing, completed, failed
-    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    
-    chunks: Mapped[List["InfluencerKnowledgeChunk"]] = relationship(back_populates="file", cascade="all, delete-orphan")
 
-class InfluencerKnowledgeChunk(Base):
-    """Chunked and embedded content from knowledge files"""
-    __tablename__ = "influencer_knowledge_chunks"
-    
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    file_id: Mapped[int] = mapped_column(ForeignKey("influencer_knowledge_files.id", ondelete="CASCADE"), index=True)
-    influencer_id: Mapped[str] = mapped_column(ForeignKey("influencers.id", ondelete="CASCADE"), index=True)
-    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    embedding: Mapped[list[float]] = mapped_column(Vector(1536), nullable=False)
-    chunk_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # page number, section, etc.
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    
-    file: Mapped["InfluencerKnowledgeFile"] = relationship(back_populates="chunks")
-    
+
+# -----------------------------
+# InfluencerSubscription
+# -----------------------------
+class InfluencerSubscription(Base):
+    """
+    One paid subscription per (user_id, influencer_id).
+    Holds the current state of the subscription.
+    """
+    __tablename__ = "influencer_subscriptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    influencer_id: Mapped[str] = mapped_column(
+        ForeignKey("influencers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Money / Plan
+    price_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String, nullable=False, default="AUD")
+
+    interval: Mapped[str] = mapped_column(String, nullable=False, default="monthly")
+    # interval: "weekly" | "monthly" | "yearly"
+
+    # Status lifecycle
+    status: Mapped[str] = mapped_column(String, nullable=False, default="active")
+    # status: "active" | "paused" | "canceled" | "expired"
+
+    # Dates
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    current_period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    last_payment_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_payment_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    canceled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancel_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    # Provider refs (super important)
+    provider: Mapped[str | None] = mapped_column(String, nullable=True)  # "paypal" | "stripe"
+    provider_customer_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    provider_subscription_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+
+    # Extra metadata / debugging
+    meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    is_18_selected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    # relationships
+    payments = relationship(
+        "InfluencerSubscriptionPayment",
+        back_populates="subscription",
+        cascade="all, delete-orphan",
+    )
+
     __table_args__ = (
-        Index("idx_knowledge_chunks_influencer", "influencer_id"),
+        UniqueConstraint("user_id", "influencer_id", name="uq_user_influencer_subscription"),
+        Index("ix_inf_sub_user_infl", "user_id", "influencer_id"),
+        Index("ix_inf_sub_status_nextpay", "status", "next_payment_at"),
+    )
+
+
+# -----------------------------
+# SubscriptionPayment (ledger)
+# -----------------------------
+class InfluencerSubscriptionPayment(Base):
+    """
+    Immutable ledger of payment attempts/events for a subscription.
+    Every capture / refund / failed payment becomes a row here.
+    """
+    __tablename__ = "influencer_subscription_payments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    subscription_id: Mapped[int] = mapped_column(
+        ForeignKey("influencer_subscriptions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    influencer_id: Mapped[str] = mapped_column(
+        ForeignKey("influencers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Amount
+    amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String, nullable=False, default="AUD")
+
+    # Type + status
+    kind: Mapped[str] = mapped_column(String, nullable=False, default="charge")
+    # kind: "charge" | "refund" | "chargeback"
+
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    # status: "pending" | "succeeded" | "failed" | "refunded"
+
+    # Provider refs
+    provider: Mapped[str | None] = mapped_column(String, nullable=True)  # "paypal"
+    provider_event_id: Mapped[str | None] = mapped_column(String, nullable=True, unique=True, index=True)
+    # ex: PayPal capture_id OR PayPal order_id OR webhook event id
+
+    provider_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    failure_code: Mapped[str | None] = mapped_column(String, nullable=True)
+    failure_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        index=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    subscription = relationship("InfluencerSubscription", back_populates="payments")
+
+    __table_args__ = (
+        Index("ix_inf_sub_pay_user_infl_time", "user_id", "influencer_id", "occurred_at"),
     )
 
 class SystemPrompt(Base):

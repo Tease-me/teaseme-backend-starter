@@ -20,6 +20,20 @@ PRICING_ROWS = [
         "free_allowance": 120,  # e.g., first 2 minutes/day free
         "is_active": True,
     },
+     {
+        "feature": "text_18",
+        "unit": "message",
+        "price_cents": 5,   # $0.05 per message
+        "free_allowance": 100,  # e.g., first 100 messages/day free
+        "is_active": True,
+    },
+    {
+        "feature": "voice_18",
+        "unit": "second",
+        "price_cents": 2,   # $0.02 per second of audio
+        "free_allowance": 120,  # e.g., first 2 minutes/day free
+        "is_active": True,
+    },
     {
         "feature": "live_chat",
         "unit": "second",
