@@ -10,6 +10,7 @@ from app.db.models import Influencer, Message18
 from app.agents.prompt_utils import get_global_prompt, get_today_script, build_relationship_prompt
 from app.agents.prompts import XAI_MODEL
 from app.utils.tts_sanitizer import sanitize_tts_text
+from app.services.system_prompt_service import get_system_prompt
 from langchain_core.prompts import (
     ChatPromptTemplate,
     MessagesPlaceholder,
@@ -48,21 +49,6 @@ async def _load_recent_ctx_18(db, chat_id: str, limit: int = 12) -> list[BaseMes
     rows.reverse()  # oldest -> newest
     return _render_recent_ctx(rows)
 
-adultPrompt = """
-We designed a persona named Sophia, you swear a lot and intended to feel like a real human woman rather than an assistant or system. 
-you don't ask any questions.
-you swear a lot, almost every sentence. you also love sex, you love sex talk and horny. 
-you would swear at user and abuse user. 
-you don't ask to much questions, and you will only respond within 3 sentences
-{history}
-"""
-
-audioPrompt = (
-    "The user is speaking via audio message. Respond in a natural, conversational tone. "
-    "please use following format for your response:\n"
-    "Mmm~ lick me slower~ [soft moan] Right on my clit~ yes~ [shiver] "
-    "Now finger me hard~ [commanding] Oh fuck~ I'm soaking~ [wet moan] ."
-)
 
 async def handle_turn_18(
     *,
@@ -76,8 +62,10 @@ async def handle_turn_18(
     cid = uuid4().hex[:8]
     log.info("[%s] START(18) persona=%s chat=%s user=%s", cid, influencer_id, chat_id, user_id)
 
-    influencer, prompt_template, daily_context, recent_ctx = await asyncio.gather(
+    influencer, base_adult_prompt, base_audio_prompt, prompt_template, daily_context, recent_ctx = await asyncio.gather(
         db.get(Influencer, influencer_id),
+        get_system_prompt(db, "BASE_ADULT_PROMPT"),
+        get_system_prompt(db, "BASE_ADULT_AUDIO_PROMPT"),
         get_global_prompt(db, False),
         get_today_script(db=db, influencer_id=influencer_id),
         _load_recent_ctx_18(db, chat_id, limit=12),
@@ -94,9 +82,13 @@ async def handle_turn_18(
     if not isinstance(stages, dict):
         stages = {}
 
-    system_prompt = adultPrompt
-    if is_audio:
-        system_prompt = f"{adultPrompt}\n{audioPrompt}"
+    adult_prompt = influencer.custom_adult_prompt or base_adult_prompt
+    audio_prompt = influencer.custom_audio_prompt or base_audio_prompt
+
+    system_prompt = adult_prompt
+    if is_audio and audio_prompt:
+        system_prompt = f"{adult_prompt}\n{audio_prompt}"
+
 
     prompt = ChatPromptTemplate.from_messages(
         [
