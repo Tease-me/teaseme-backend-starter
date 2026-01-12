@@ -39,10 +39,9 @@ from app.core.config import settings
 from app.utils.email import (
     send_profile_survey_email,
     send_new_influencer_email,
+    send_influencer_survey_completed_email_to_promoter
 )
-from app.api.pre_influencers import (
-    send_influencer_survey_completed_email_to_promoter,
-)
+
 from app.utils.s3 import save_influencer_photo_to_s3, generate_presigned_url, delete_file_from_s3
 from app.services.firstpromoter import (
     fp_create_promoter,
