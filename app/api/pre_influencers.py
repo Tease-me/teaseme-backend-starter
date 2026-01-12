@@ -277,12 +277,21 @@ async def register_pre_influencer(
     )
 
 @router.post("/resend-survey")
-async def resend_pre_influencer_survey_by_username(
-    username: str,
+async def resend_pre_influencer_survey(
+    identifier: str,
     db: AsyncSession = Depends(get_db),
 ):
+    """
+    identifier = username OR email
+    """
+
     result = await db.execute(
-        select(PreInfluencer).where(PreInfluencer.username == username)
+        select(PreInfluencer).where(
+            or_(
+                PreInfluencer.username == identifier,
+                PreInfluencer.email == identifier,
+            )
+        )
     )
     pre = result.scalar_one_or_none()
 
