@@ -131,6 +131,14 @@ async def save_influencer_ia_audio_to_s3(audio_bytes: bytes, influencer_id: str)
     return key
 
 
+async def save_sample_audio_to_s3(file_obj, filename: str, content_type: str, influencer_id: str) -> str:
+    ext = filename.split(".")[-1].lower() if "." in filename else "mp3"
+    key = f"samples/{influencer_id}/{uuid.uuid4()}.{ext}"
+    file_obj.seek(0)
+    s3.upload_fileobj(file_obj, settings.BUCKET_NAME, key, ExtraArgs={"ContentType": content_type})
+    return key
+
+
 def get_influencer_audio_download_url(key: str, expires: int = 3600) -> str:
     return generate_presigned_url(key, expires)
 

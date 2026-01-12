@@ -5,7 +5,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from app.db.models import Influencer
+from app.db.models import Influencer, Sample
 from app.db.session import get_db
 from app.schemas.influencer import InfluencerCreate, InfluencerOut, InfluencerUpdate, InfluencerDetail
 from app.utils.s3 import (
@@ -267,3 +267,30 @@ async def list_influencer_audio(influencer_id: str):
         "files": files,
     }
 
+
+@router.get("/{influencer_id}/samples")
+async def list_influencer_samples(influencer_id: str, db: AsyncSession = Depends(get_db)):
+    influencer = await db.get(Influencer, influencer_id)
+    if not influencer:
+        raise HTTPException(status_code=404, detail="Influencer not found")
+
+    result = await db.execute(
+        select(Sample).where(Sample.influencer_id == influencer_id).order_by(Sample.created_at.desc())
+    )
+    samples = result.scalars().all()
+
+    return {
+        "influencer_id": influencer_id,
+        "count": len(samples),
+        "samples": [
+            {
+                "id": s.id,
+                "s3_key": s.s3_key,
+                "original_filename": s.original_filename,
+                "content_type": s.content_type,
+                "url": generate_presigned_url(s.s3_key),
+                "created_at": s.created_at.isoformat() if s.created_at else None,
+            }
+            for s in samples
+        ],
+    }
