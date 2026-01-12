@@ -46,7 +46,7 @@ def upgrade() -> None:
         INSERT INTO system_prompts (key, prompt, description, created_at, updated_at)
         VALUES 
             ('BASE_ADULT_PROMPT', $prompt${ADULT_PROMPT}$prompt$, 'Base adult persona prompt for 18+ content', NOW(), NOW()),
-            ('BASE_AUDIO_PROMPT', $prompt${AUDIO_PROMPT}$prompt$, 'Base audio response format prompt', NOW(), NOW())
+            ('BASE_ADULT_AUDIO_PROMPT', $prompt${AUDIO_PROMPT}$prompt$, 'Base adult audio response format prompt', NOW(), NOW())
         ON CONFLICT (key) DO NOTHING;
         """
     )
@@ -62,6 +62,6 @@ def downgrade() -> None:
     op.execute(
         """
         DELETE FROM system_prompts 
-        WHERE key IN ('BASE_ADULT_PROMPT', 'BASE_AUDIO_PROMPT');
+        WHERE key IN ('BASE_ADULT_PROMPT', 'BASE_ADULT_AUDIO_PROMPT');
         """
     )

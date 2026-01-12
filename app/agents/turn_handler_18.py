@@ -65,7 +65,7 @@ async def handle_turn_18(
     influencer, base_adult_prompt, base_audio_prompt, prompt_template, daily_context, recent_ctx = await asyncio.gather(
         db.get(Influencer, influencer_id),
         get_system_prompt(db, "BASE_ADULT_PROMPT"),
-        get_system_prompt(db, "BASE_AUDIO_PROMPT"),
+        get_system_prompt(db, "BASE_ADULT_AUDIO_PROMPT"),
         get_global_prompt(db, False),
         get_today_script(db=db, influencer_id=influencer_id),
         _load_recent_ctx_18(db, chat_id, limit=12),
