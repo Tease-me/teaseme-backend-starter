@@ -24,8 +24,6 @@ class Settings(BaseSettings):
     COOKIE_SECURE: bool = False
     COOKIE_SAMESITE: str = "lax"
 
-    BLAND_API_KEY: str
-    BLAND_VOICE_ID: str
     ELEVENLABS_API_KEY: str
     ELEVEN_BASE_URL: str 
     ELEVENLABS_VOICE_ID: str
