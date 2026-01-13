@@ -1,6 +1,7 @@
 import subprocess
 import tempfile
 import os
+import math
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date
@@ -149,8 +150,6 @@ def get_audio_duration_ffmpeg(file_bytes: bytes) -> float:
         return 10.0  # fallback
     
 
-import subprocess, tempfile, math
-
 MIME_TO_SUFFIX = {
     "audio/webm": ".webm",
     "audio/wav":  ".wav",
@@ -159,6 +158,10 @@ MIME_TO_SUFFIX = {
     "audio/mpeg": ".mp3",
     "audio/ogg":  ".ogg",
     "audio/x-m4a": ".m4a",
+    "audio/m4a": ".m4a",
+    "audio/mp4": ".m4a",
+    "audio/aac": ".aac",
+    "audio/x-aac": ".aac",
 }
 
 def _duration_via_ffprobe(data: bytes, suffix: str) -> float:
@@ -181,8 +184,28 @@ def _duration_via_ffprobe(data: bytes, suffix: str) -> float:
         try:
             duration = float(output)
         except Exception:
-            print(f"[WARN] ffprobe failed: {output!r}")
             duration = 0.0
+            if output in ("", "N/A", "nan", "NaN"):
+                result = subprocess.run(
+                    [
+                        "ffprobe", "-v", "error",
+                        "-select_streams", "a:0",
+                        "-show_entries", "stream=duration",
+                        "-of", "default=noprint_wrappers=1:nokey=1",
+                        tmp_path,
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                )
+                output = result.stdout.decode().strip()
+                try:
+                    duration = float(output)
+                except Exception:
+                    duration = 0.0
+            if duration <= 0.0:
+                duration = _duration_via_ffmpeg_decode(tmp_path)
+            if duration <= 0.0:
+                print(f"[WARN] ffprobe failed: {output!r}")
         return duration
     finally:
         try:
@@ -190,11 +213,38 @@ def _duration_via_ffprobe(data: bytes, suffix: str) -> float:
         except Exception:
             pass
 
+def _duration_via_ffmpeg_decode(tmp_path: str) -> float:
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-i", tmp_path, "-f", "null", "-"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        return 0.0
+
+    text = result.stderr.decode(errors="ignore")
+    last_time = None
+    for line in text.splitlines():
+        if "time=" in line:
+            parts = line.split("time=")
+            if len(parts) > 1:
+                last_time = parts[-1].split()[0]
+    if not last_time:
+        return 0.0
+
+    try:
+        h, m, s = last_time.split(":")
+        return (float(h) * 3600.0) + (float(m) * 60.0) + float(s)
+    except Exception:
+        return 0.0
+
 def get_duration_seconds(file_bytes: bytes, mime: str | None = None) -> int:
     """
     Returns duration in whole seconds (>=1), fallback 10s if ffprobe fails.
     """
-    suffix = MIME_TO_SUFFIX.get(mime or "", ".wav")
+    normalized_mime = (mime or "").split(";")[0].strip().lower()
+    suffix = MIME_TO_SUFFIX.get(normalized_mime, ".wav")
     duration = _duration_via_ffprobe(file_bytes, suffix)
     if duration <= 0:
         duration = 10.0
