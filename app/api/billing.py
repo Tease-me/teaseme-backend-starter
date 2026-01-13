@@ -93,7 +93,6 @@ async def get_usage(
         }
 
     normal_text = calc_remaining(normal_wallet, normal_usage, "text", "text_count")
-    normal_voice = calc_remaining(normal_wallet, normal_usage, "voice", "voice_secs")
     normal_live = calc_remaining(normal_wallet, normal_usage, "live_chat", "live_secs")
 
     adult_text = calc_remaining(adult_wallet, adult_usage, "text_18", "text_count")
@@ -109,14 +108,6 @@ async def get_usage(
                 "paid_available": normal_text["paid_units_available"],
                 "used_today": normal_text["used_today"],
                 "price_per_message_cents": normal_text["price_cents"],
-            },
-            "voice": {
-                "seconds_remaining": normal_voice["total_remaining"],
-                "minutes_remaining": round(normal_voice["total_remaining"] / 60, 2),
-                "free_left": normal_voice["free_left"],
-                "paid_available": normal_voice["paid_units_available"],
-                "used_today": normal_voice["used_today"],
-                "price_per_second_cents": normal_voice["price_cents"],
             },
             "live_chat": {
                 "seconds_remaining": normal_live["total_remaining"],
