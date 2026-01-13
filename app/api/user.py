@@ -21,6 +21,7 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/user", tags=["user"])
 
+
 @router.get("/{id}", response_model=UserOut)
 async def get_user_by_id(
     id: int,
@@ -37,7 +38,25 @@ async def get_user_by_id(
         
     return user_out
 
-@router.patch("/{id}", response_model=UserOut)
+
+@router.get("/{id}", response_model=UserOut)
+async def get_user_by_id(
+    id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this profile")
+
+    user_out = UserOut.model_validate(current_user)
+
+    if current_user.profile_photo_key:
+        user_out.profile_photo_url = generate_user_presigned_url(current_user.profile_photo_key)
+
+    return user_out
+
+
+@router.patch("/{id}/usage", response_model=UserOut)
 async def update_user(
     id: int,
     user_in: UserUpdate,

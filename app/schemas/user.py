@@ -1,6 +1,7 @@
 from pydantic import BaseModel, field_validator
 from typing import List, Optional
 from datetime import datetime, timezone
+
 class UserBase(BaseModel):
     full_name: Optional[str] = None
     gender: Optional[str] = None
@@ -21,6 +22,5 @@ class UserRead(UserBase):
     
     class Config:
         from_attributes = True
-
 # Alias for backward compatibility or clarity
 UserOut = UserRead
