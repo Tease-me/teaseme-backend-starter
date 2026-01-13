@@ -62,32 +62,19 @@ async def handle_turn_18(
     cid = uuid4().hex[:8]
     log.info("[%s] START(18) persona=%s chat=%s user=%s", cid, influencer_id, chat_id, user_id)
 
-    influencer, base_adult_prompt, base_audio_prompt, prompt_template, daily_context, recent_ctx = await asyncio.gather(
+    influencer, base_adult_prompt, base_audio_prompt, recent_ctx = await asyncio.gather(
         db.get(Influencer, influencer_id),
         get_system_prompt(db, "BASE_ADULT_PROMPT"),
         get_system_prompt(db, "BASE_ADULT_AUDIO_PROMPT"),
-        get_global_prompt(db, False),
-        get_today_script(db=db, influencer_id=influencer_id),
         _load_recent_ctx_18(db, chat_id, limit=12),
     )
 
     if not influencer:
         raise HTTPException(404, "Influencer not found")
 
-    bio = influencer.bio_json or {}
-    tone = bio.get("tone", "")
-    mbti_rules = bio.get("mbti_rules", "")
-    personality_rules = bio.get("personality_rules", "")
-    stages = bio.get("stages", {})
-    if not isinstance(stages, dict):
-        stages = {}
-
-    adult_prompt = influencer.custom_adult_prompt or base_adult_prompt
-    audio_prompt = influencer.custom_audio_prompt or base_audio_prompt
-
-    system_prompt = adult_prompt
-    if is_audio and audio_prompt:
-        system_prompt = f"{adult_prompt}\n{audio_prompt}"
+    system_prompt = base_adult_prompt
+    if is_audio and base_audio_prompt:
+        system_prompt = f"{base_adult_prompt}\n{base_audio_prompt}"
 
 
     prompt = ChatPromptTemplate.from_messages(
@@ -96,12 +83,12 @@ async def handle_turn_18(
             ("user", "{input}"),
         ]
     )
-
+    prompt = prompt.partial(main_prompt=influencer.custom_adult_prompt, history=recent_ctx)
     chain = prompt | XAI_MODEL
 
     try:
-        result = await chain.ainvoke({"input": message, "history": recent_ctx})
-        rendered = prompt.format_prompt(input=message, history=recent_ctx)
+        result = await chain.ainvoke({"input": message})
+        rendered = prompt.format_prompt(input=message, history=recent_ctx, main_prompt=influencer.custom_adult_prompt)
         full_prompt_text = rendered.to_string()
         log.info("[%s] ==== FULL PROMPT ====\n%s", cid, full_prompt_text)
         reply = getattr(result, "content", None) or str(result)
