@@ -107,8 +107,8 @@ async def delete_file_from_s3(key: str) -> None:
         log.error(f"Unexpected error deleting S3 file {key}: {e}", exc_info=True)
         raise
 
-async def save_influencer_audio_to_s3(file_obj, filename: str, content_type: str, influencer_id: str) -> str:
-    ext = filename.split(".")[-1] if "." in filename else "webm"
+async def save_influencer_audio_to_s3(file_obj, filename: str | None, content_type: str, influencer_id: str) -> str:
+    ext = (filename.split(".")[-1] if filename and "." in filename else "webm").lower()
     key = f"influencer-audio/{influencer_id}/{uuid.uuid4()}.{ext}"
     file_obj.seek(0)
     s3.upload_fileobj(
@@ -128,6 +128,14 @@ async def save_influencer_ia_audio_to_s3(audio_bytes: bytes, influencer_id: str)
         key,
         ExtraArgs={"ContentType": "audio/mpeg"},
     )
+    return key
+
+
+async def save_sample_audio_to_s3(file_obj, filename: str | None, content_type: str, influencer_id: str) -> str:
+    ext = (filename.split(".")[-1].lower() if filename and "." in filename else "mp3")
+    key = f"samples/{influencer_id}/{uuid.uuid4()}.{ext}"
+    file_obj.seek(0)
+    s3.upload_fileobj(file_obj, settings.BUCKET_NAME, key, ExtraArgs={"ContentType": content_type})
     return key
 
 
@@ -168,15 +176,15 @@ def _normalize_image_ext(filename: str | None, content_type: str | None) -> str:
 
     return "jpg"
 
-async def save_influencer_photo_to_s3(file_obj, filename: str, content_type: str, influencer_id: str) -> str:
+async def save_influencer_photo_to_s3(file_obj, filename: str | None, content_type: str, influencer_id: str) -> str:
     ext = _normalize_image_ext(filename, content_type)
     key = _influencer_key(influencer_id, f"profile.{ext}")
     file_obj.seek(0)
     s3.upload_fileobj(file_obj, settings.BUCKET_NAME, key, ExtraArgs={"ContentType": content_type})
     return key
 
-async def save_influencer_video_to_s3(file_obj, filename: str, content_type: str, influencer_id: str) -> str:
-    ext = (filename.rsplit(".", 1)[-1] if "." in filename else "mp4").lower()
+async def save_influencer_video_to_s3(file_obj, filename: str | None, content_type: str, influencer_id: str) -> str:
+    ext = (filename.rsplit(".", 1)[-1] if filename and "." in filename else "mp4").lower()
     key = _influencer_key(influencer_id, f"video.{ext}")
     file_obj.seek(0)
     s3.upload_fileobj(file_obj, settings.BUCKET_NAME, key, ExtraArgs={"ContentType": content_type})

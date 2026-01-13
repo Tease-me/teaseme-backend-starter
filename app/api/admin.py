@@ -1,5 +1,6 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+import io
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,7 +9,8 @@ from app.db.models import CallRecord, Message, Memory, Message18
 from app.db.session import get_db
 
 from sqlalchemy import select
-from app.db.models import RelationshipState, User
+from app.db.models import RelationshipState, User, Influencer, Sample
+from app.utils.s3 import save_sample_audio_to_s3, generate_presigned_url, delete_file_from_s3
 
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
@@ -278,3 +280,80 @@ async def update_relationship(payload: RelationshipPatch, db: AsyncSession = Dep
     await db.refresh(rel)
 
     return {"ok": True}
+
+
+@router.post("/influencer/{influencer_id}/samples")
+async def upload_influencer_sample(
+    influencer_id: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    influencer = await db.get(Influencer, influencer_id)
+    if not influencer:
+        raise HTTPException(status_code=404, detail="Influencer not found")
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    s3_key = await save_sample_audio_to_s3(
+        io.BytesIO(file_bytes),
+        file.filename or "sample.mp3",
+        file.content_type or "audio/mpeg",
+        influencer_id,
+    )
+
+    sample = Sample(
+        influencer_id=influencer_id,
+        s3_key=s3_key,
+        original_filename=file.filename,
+        content_type=file.content_type,
+    )
+    db.add(sample)
+
+    sample_entry = {
+        "s3_key": s3_key,
+        "original_filename": file.filename,
+        "content_type": file.content_type,
+    }
+    if influencer.samples is None:
+        influencer.samples = [sample_entry]
+    else:
+        influencer.samples = influencer.samples + [sample_entry]
+
+    await db.commit()
+    await db.refresh(sample)
+
+    return {
+        "id": sample.id,
+        "s3_key": s3_key,
+        "original_filename": file.filename,
+        "content_type": file.content_type,
+        "url": generate_presigned_url(s3_key),
+        "created_at": sample.created_at.isoformat() if sample.created_at else None,
+    }
+
+
+@router.delete("/influencer/{influencer_id}/samples/{sample_id}")
+async def delete_influencer_sample(
+    influencer_id: str,
+    sample_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    sample = await db.get(Sample, sample_id)
+    if not sample or sample.influencer_id != influencer_id:
+        raise HTTPException(status_code=404, detail="Sample not found")
+
+    influencer = await db.get(Influencer, influencer_id)
+    if influencer and influencer.samples:
+        influencer.samples = [s for s in influencer.samples if s.get("s3_key") != sample.s3_key]
+
+    try:
+        await delete_file_from_s3(sample.s3_key)
+    except Exception:
+        log.warning("Failed to delete S3 sample file %s", sample.s3_key, exc_info=True)
+
+    await db.delete(sample)
+    await db.commit()
+
+    return {"ok": True, "deleted_id": sample_id}
