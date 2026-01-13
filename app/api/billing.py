@@ -13,10 +13,12 @@ from pydantic import BaseModel, PositiveInt
 from sqlalchemy import select
 from app.services.paypal import paypal_access_token
 from app.services.firstpromoter import fp_track_sale_v2
-from app.db.models import PayPalTopUp, Influencer
+from app.db.models import PayPalTopUp, Influencer, Pricing, DailyUsage
 from app.core.config import settings
+from datetime import date
 
 router = APIRouter(prefix="/billing", tags=["billing"])
+
 
 @router.get("/balance")
 async def get_balance(

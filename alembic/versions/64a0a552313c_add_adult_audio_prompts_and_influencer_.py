@@ -1,7 +1,7 @@
 """add_adult_audio_prompts_and_influencer_columns
 
 Revision ID: 64a0a552313c
-Revises: 7eb6c2d3fa20
+Revises: 19d0ec0d3061
 Create Date: 2026-01-13 09:33:12.995140
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '64a0a552313c'
-down_revision: Union[str, Sequence[str], None] = '7eb6c2d3fa20'
+down_revision: Union[str, Sequence[str], None] = '19d0ec0d3061'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
