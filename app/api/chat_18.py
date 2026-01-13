@@ -19,7 +19,7 @@ from app.services.chat_service import get_or_create_chat18
 from app.schemas.chat import ChatCreateRequest,PaginatedMessages
 
 from app.core.config import settings
-from app.utils.chat import transcribe_audio, synthesize_audio_with_elevenlabs_V3, synthesize_audio_with_bland_ai
+from app.utils.chat import transcribe_audio, synthesize_audio_with_elevenlabs_V3
 from app.utils.s3 import save_audio_to_s3, save_ia_audio_to_s3, generate_presigned_url, message18_to_schema_with_presigned
 from app.services.billing import charge_feature, get_duration_seconds, can_afford
 from app.services.influencer_subscriptions import require_active_subscription
@@ -449,9 +449,7 @@ async def chat_audio(
         # ✅ TTS
         audio_bytes, audio_mime = await synthesize_audio_with_elevenlabs_V3(ai_reply, db, influencer_id)
         if not audio_bytes:
-            audio_bytes, audio_mime = await synthesize_audio_with_bland_ai(ai_reply)
-            if not audio_bytes:
-                raise HTTPException(status_code=500, detail="No audio returned from any TTS provider")
+            raise HTTPException(status_code=500, detail="No audio returned from any TTS provider")
 
         # ✅ upload AI audio (expect S3 KEY back)
         ai_audio_key = await save_ia_audio_to_s3(audio_bytes, user_id)
