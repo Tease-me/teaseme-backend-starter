@@ -4,7 +4,7 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.turn_handler import redis_history
-from app.db.models import CallRecord, Message, Memory
+from app.db.models import CallRecord, Message, Memory, Message18
 from app.db.session import get_db
 
 from sqlalchemy import select
@@ -20,23 +20,34 @@ log = logging.getLogger("admin")
 @router.delete("/chats/history/{chat_id}")
 async def clear_chat_history_admin(
     chat_id: str,
+    is_18: bool = False,
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        msg_result = await db.execute(
-            delete(Message).where(Message.chat_id == chat_id).returning(Message.id)
-        )
-        deleted_msg_ids = msg_result.scalars().all()
+        deleted_msg_ids = []
+        deleted_mem_ids = []
+        deleted_call_ids = []
 
-        mem_result = await db.execute(
-            delete(Memory).where(Memory.chat_id == chat_id).returning(Memory.id)
-        )
-        deleted_mem_ids = mem_result.scalars().all()
+        if is_18:
+            msg_result = await db.execute(
+                delete(Message18).where(Message18.chat_id == chat_id).returning(Message18.id)
+            )
+            deleted_msg_ids = msg_result.scalars().all()
+        else:
+            msg_result = await db.execute(
+                delete(Message).where(Message.chat_id == chat_id).returning(Message.id)
+            )
+            deleted_msg_ids = msg_result.scalars().all()
 
-        call_result = await db.execute(
-            delete(CallRecord).where(CallRecord.chat_id == chat_id).returning(CallRecord.conversation_id)
-        )
-        deleted_call_ids = call_result.scalars().all()
+            mem_result = await db.execute(
+                delete(Memory).where(Memory.chat_id == chat_id).returning(Memory.id)
+            )
+            deleted_mem_ids = mem_result.scalars().all()
+
+            call_result = await db.execute(
+                delete(CallRecord).where(CallRecord.chat_id == chat_id).returning(CallRecord.conversation_id)
+            )
+            deleted_call_ids = call_result.scalars().all()
 
         try:
             redis_history(chat_id).clear()
@@ -57,6 +68,7 @@ async def clear_chat_history_admin(
     return {
         "ok": True,
         "chat_id": chat_id,
+        "is_18": is_18,
         "messages_deleted": len(deleted_msg_ids),
         "memories_deleted": len(deleted_mem_ids),
         "call_records_deleted": len(deleted_call_ids),
