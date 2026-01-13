@@ -23,10 +23,9 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/user", tags=["user"])
 
 
-@router.get("/{id}")
+@router.get("/{id}/usage")
 async def get_user_usage(
     id: int,
-    influencer_id: str = Query(...),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -35,20 +34,21 @@ async def get_user_usage(
 
     today = date.today()
 
-    normal_wallet = await db.scalar(
-        select(InfluencerWallet).where(
+    normal_balance_result = await db.execute(
+        select(func.coalesce(func.sum(InfluencerWallet.balance_cents), 0)).where(
             InfluencerWallet.user_id == id,
-            InfluencerWallet.influencer_id == influencer_id,
             InfluencerWallet.is_18.is_(False),
         )
     )
-    adult_wallet = await db.scalar(
-        select(InfluencerWallet).where(
+    normal_balance = normal_balance_result.scalar() or 0
+
+    adult_balance_result = await db.execute(
+        select(func.coalesce(func.sum(InfluencerWallet.balance_cents), 0)).where(
             InfluencerWallet.user_id == id,
-            InfluencerWallet.influencer_id == influencer_id,
             InfluencerWallet.is_18.is_(True),
         )
     )
+    adult_balance = adult_balance_result.scalar() or 0
 
     normal_usage = await db.get(DailyUsage, (id, today, False))
     adult_usage = await db.get(DailyUsage, (id, today, True))
@@ -58,15 +58,14 @@ async def get_user_usage(
     )
     pricing_map = {p.feature: p for p in pricing_result.scalars().all()}
 
-    def calc(wallet, usage, feature: str, usage_field: str) -> dict:
+    def calc(balance: int, usage, feature: str, usage_field: str) -> dict:
         price = pricing_map.get(feature)
         if not price:
-            return {"remaining": 0, "free_left": 0, "balance_cents": 0}
+            return {"remaining": 0, "free_left": 0, "used_today": 0}
         
         used = getattr(usage, usage_field, 0) or 0 if usage else 0
         free_allowance = price.free_allowance or 0
         free_left = max(free_allowance - used, 0)
-        balance = wallet.balance_cents if wallet else 0
         unit_price = price.price_cents or 1
         paid_units = balance // unit_price if unit_price > 0 else 0
         
@@ -74,25 +73,28 @@ async def get_user_usage(
             "remaining": free_left + paid_units,
             "free_left": free_left,
             "used_today": used,
-            "balance_cents": balance,
         }
 
+    normal_msgs = calc(normal_balance, normal_usage, "text", "text_count")
+    normal_live = calc(normal_balance, normal_usage, "live_chat", "live_secs")
+    adult_msgs = calc(adult_balance, adult_usage, "text_18", "text_count")
+    adult_voice = calc(adult_balance, adult_usage, "voice_18", "voice_secs")
+
     return {
-        "influencer_id": influencer_id,
         "normal": {
-            "balance_cents": normal_wallet.balance_cents if normal_wallet else 0,
-            "messages": calc(normal_wallet, normal_usage, "text", "text_count"),
-            "live_chat_minutes": {
-                **calc(normal_wallet, normal_usage, "live_chat", "live_secs"),
-                "remaining_minutes": round(calc(normal_wallet, normal_usage, "live_chat", "live_secs")["remaining"] / 60, 2),
+            "balance_cents": normal_balance,
+            "messages": normal_msgs,
+            "live_chat": {
+                **normal_live,
+                "remaining_minutes": round(normal_live["remaining"] / 60, 2),
             },
         },
         "adult": {
-            "balance_cents": adult_wallet.balance_cents if adult_wallet else 0,
-            "messages": calc(adult_wallet, adult_usage, "text_18", "text_count"),
-            "voice_minutes": {
-                **calc(adult_wallet, adult_usage, "voice_18", "voice_secs"),
-                "remaining_minutes": round(calc(adult_wallet, adult_usage, "voice_18", "voice_secs")["remaining"] / 60, 2),
+            "balance_cents": adult_balance,
+            "messages": adult_msgs,
+            "voice": {
+                **adult_voice,
+                "remaining_minutes": round(adult_voice["remaining"] / 60, 2),
             },
         },
     }
