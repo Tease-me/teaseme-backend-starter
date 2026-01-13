@@ -199,23 +199,6 @@ async def get_me(user: User = Depends(get_current_user)):
     if user.profile_photo_key:
         user_out.profile_photo_url = generate_user_presigned_url(user.profile_photo_key)
     return user_out
-
-
-class Set18Req(BaseModel):
-    is_18_selected: bool
-
-@router.get("/me/preferences")
-async def get_preferences(user=Depends(get_current_user)):
-    return {"is_18_selected": bool(getattr(user, "is_18_selected", False))}
-
-@router.post("/me/preferences")
-async def set_preferences(req: Set18Req, db: AsyncSession = Depends(get_db), user=None):
-    user = user or Depends(get_current_user)
-    user.is_18_selected = req.is_18_selected
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return {"ok": True, "is_18_selected": user.is_18_selected}
     
 @router.get("/verify-email")
 async def verify_email(token: str, db: AsyncSession = Depends(get_db)):

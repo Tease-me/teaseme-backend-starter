@@ -35,7 +35,6 @@ async def require_active_subscription(
             },
         )
 
-    # Optional: also require still in paid period
     if sub.current_period_end and sub.current_period_end < _now():
         raise HTTPException(
             status_code=402,

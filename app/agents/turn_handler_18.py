@@ -10,6 +10,7 @@ from app.db.models import Influencer, Message18
 from app.agents.prompt_utils import get_global_prompt, get_today_script, build_relationship_prompt
 from app.agents.prompts import XAI_MODEL
 from app.utils.tts_sanitizer import sanitize_tts_text
+from app.services.system_prompt_service import get_system_prompt
 from langchain_core.prompts import (
     ChatPromptTemplate,
     MessagesPlaceholder,
@@ -48,21 +49,6 @@ async def _load_recent_ctx_18(db, chat_id: str, limit: int = 12) -> list[BaseMes
     rows.reverse()  # oldest -> newest
     return _render_recent_ctx(rows)
 
-adultPrompt = """
-We designed a persona named Sophia, you swear a lot and intended to feel like a real human woman rather than an assistant or system. 
-you don't ask any questions.
-you swear a lot, almost every sentence. you also love sex, you love sex talk and horny. 
-you would swear at user and abuse user. 
-you don't ask to much questions, and you will only respond within 3 sentences
-{history}
-"""
-
-audioPrompt = (
-    "The user is speaking via audio message. Respond in a natural, conversational tone. "
-    "please use following format for your response:\n"
-    "Mmm~ lick me slower~ [soft moan] Right on my clit~ yes~ [shiver] "
-    "Now finger me hard~ [commanding] Oh fuck~ I'm soaking~ [wet moan] ."
-)
 
 async def handle_turn_18(
     *,
@@ -76,27 +62,20 @@ async def handle_turn_18(
     cid = uuid4().hex[:8]
     log.info("[%s] START(18) persona=%s chat=%s user=%s", cid, influencer_id, chat_id, user_id)
 
-    influencer, prompt_template, daily_context, recent_ctx = await asyncio.gather(
+    influencer, base_adult_prompt, base_audio_prompt, recent_ctx = await asyncio.gather(
         db.get(Influencer, influencer_id),
-        get_global_prompt(db, False),
-        get_today_script(db=db, influencer_id=influencer_id),
+        get_system_prompt(db, "BASE_ADULT_PROMPT"),
+        get_system_prompt(db, "BASE_ADULT_AUDIO_PROMPT"),
         _load_recent_ctx_18(db, chat_id, limit=12),
     )
 
     if not influencer:
         raise HTTPException(404, "Influencer not found")
 
-    bio = influencer.bio_json or {}
-    tone = bio.get("tone", "")
-    mbti_rules = bio.get("mbti_rules", "")
-    personality_rules = bio.get("personality_rules", "")
-    stages = bio.get("stages", {})
-    if not isinstance(stages, dict):
-        stages = {}
+    system_prompt = base_adult_prompt
+    if is_audio and base_audio_prompt:
+        system_prompt = f"{base_adult_prompt}\n{base_audio_prompt}"
 
-    system_prompt = adultPrompt
-    if is_audio:
-        system_prompt = f"{adultPrompt}\n{audioPrompt}"
 
     prompt = ChatPromptTemplate.from_messages(
         [
@@ -104,12 +83,12 @@ async def handle_turn_18(
             ("user", "{input}"),
         ]
     )
-
+    prompt = prompt.partial(main_prompt=influencer.custom_adult_prompt, history=recent_ctx)
     chain = prompt | XAI_MODEL
 
     try:
-        result = await chain.ainvoke({"input": message, "history": recent_ctx})
-        rendered = prompt.format_prompt(input=message, history=recent_ctx)
+        result = await chain.ainvoke({"input": message})
+        rendered = prompt.format_prompt(input=message, history=recent_ctx, main_prompt=influencer.custom_adult_prompt)
         full_prompt_text = rendered.to_string()
         log.info("[%s] ==== FULL PROMPT ====\n%s", cid, full_prompt_text)
         reply = getattr(result, "content", None) or str(result)

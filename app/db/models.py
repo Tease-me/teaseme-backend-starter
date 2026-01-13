@@ -5,6 +5,12 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from datetime import datetime, timezone
 from pgvector.sqlalchemy import Vector
+from datetime import datetime, timezone
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import (
+Integer, String, DateTime, ForeignKey, Boolean,
+UniqueConstraint, Index, JSON, Text
+)
 
 class Base(DeclarativeBase):
     """Common base class – can host __repr__ or metadata config later."""
@@ -33,6 +39,9 @@ class Influencer(Base):
     
     fp_promoter_id: Mapped[str | None] = mapped_column(String, nullable=True)
     fp_ref_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    custom_adult_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    custom_audio_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at:     Mapped[datetime]     = mapped_column(
         DateTime(timezone=True),
@@ -64,7 +73,6 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
-    is_18_selected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     
 class Chat(Base):
     __tablename__ = "chats"
@@ -161,6 +169,13 @@ class InfluencerWallet(Base):
         index=True,
     )
 
+    is_18: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+
     balance_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     created_at: Mapped[datetime] = mapped_column(
@@ -210,6 +225,13 @@ class DailyUsage(Base):
     __tablename__ = "daily_usage"
     user_id: Mapped[int]     = mapped_column(ForeignKey("users.id"), primary_key=True)
     date:    Mapped[datetime]= mapped_column(DateTime, primary_key=True)  # YYYY-MM-DD 00:00 UTC
+    is_18: Mapped[bool] = mapped_column(
+        Boolean,
+        primary_key=True,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
     free_allowance: Mapped[int] = mapped_column(Integer, default=0)
     text_count: Mapped[int]  = mapped_column(Integer, default=0)
     voice_secs: Mapped[int]  = mapped_column(Integer, default=0)
@@ -259,50 +281,7 @@ class InfluencerFollower(Base):
         Index("ix_influencer_followers_user_id", "user_id"),
     )
 
-class InfluencerKnowledgeFile(Base):
-    """Metadata for uploaded knowledge files (PDF, Word, etc.)"""
-    __tablename__ = "influencer_knowledge_files"
-    
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    influencer_id: Mapped[str] = mapped_column(ForeignKey("influencers.id", ondelete="CASCADE"), index=True)
-    filename: Mapped[str] = mapped_column(String, nullable=False)
-    file_type: Mapped[str] = mapped_column(String, nullable=False)  # 'pdf', 'docx', 'txt'
-    s3_key: Mapped[str] = mapped_column(String, nullable=False)
-    file_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    uploaded_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    status: Mapped[str] = mapped_column(String, default="processing")  # processing, completed, failed
-    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    
-    chunks: Mapped[List["InfluencerKnowledgeChunk"]] = relationship(back_populates="file", cascade="all, delete-orphan")
 
-class InfluencerKnowledgeChunk(Base):
-    """Chunked and embedded content from knowledge files"""
-    __tablename__ = "influencer_knowledge_chunks"
-    
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    file_id: Mapped[int] = mapped_column(ForeignKey("influencer_knowledge_files.id", ondelete="CASCADE"), index=True)
-    influencer_id: Mapped[str] = mapped_column(ForeignKey("influencers.id", ondelete="CASCADE"), index=True)
-    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    embedding: Mapped[list[float]] = mapped_column(Vector(1536), nullable=False)
-    chunk_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # page number, section, etc.
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    
-    file: Mapped["InfluencerKnowledgeFile"] = relationship(back_populates="chunks")
-    
-    __table_args__ = (
-        Index("idx_knowledge_chunks_influencer", "influencer_id"),
-    )
-
-    from datetime import datetime, timezone
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import (
-    Integer, String, DateTime, ForeignKey, Boolean,
-    UniqueConstraint, Index, JSON, Text
-)
-from app.db.models import Base  # use seu Base
 
 # -----------------------------
 # InfluencerSubscription
@@ -362,6 +341,9 @@ class InfluencerSubscription(Base):
 
     # Extra metadata / debugging
     meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    is_18_selected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
