@@ -1,12 +1,13 @@
 import io
 import logging
-from datetime import datetime
+from datetime import datetime, date
 from typing import List, Optional
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import func
 from app.core.config import settings
-from app.db.models import User
+from app.db.models import User, InfluencerWallet, DailyUsage, Pricing
 from app.db.session import get_db
 from app.schemas.user import UserOut, UserUpdate
 from app.utils.deps import get_current_user
@@ -20,6 +21,81 @@ from app.utils.s3 import (
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/user", tags=["user"])
+
+
+@router.get("/{id}/usage")
+async def get_user_usage(
+    id: int,
+    influencer_id: str = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    today = date.today()
+
+    normal_wallet = await db.scalar(
+        select(InfluencerWallet).where(
+            InfluencerWallet.user_id == id,
+            InfluencerWallet.influencer_id == influencer_id,
+            InfluencerWallet.is_18.is_(False),
+        )
+    )
+    adult_wallet = await db.scalar(
+        select(InfluencerWallet).where(
+            InfluencerWallet.user_id == id,
+            InfluencerWallet.influencer_id == influencer_id,
+            InfluencerWallet.is_18.is_(True),
+        )
+    )
+
+    normal_usage = await db.get(DailyUsage, (id, today, False))
+    adult_usage = await db.get(DailyUsage, (id, today, True))
+
+    pricing_result = await db.execute(
+        select(Pricing).where(Pricing.is_active.is_(True))
+    )
+    pricing_map = {p.feature: p for p in pricing_result.scalars().all()}
+
+    def calc(wallet, usage, feature: str, usage_field: str) -> dict:
+        price = pricing_map.get(feature)
+        if not price:
+            return {"remaining": 0, "free_left": 0, "balance_cents": 0}
+        
+        used = getattr(usage, usage_field, 0) or 0 if usage else 0
+        free_allowance = price.free_allowance or 0
+        free_left = max(free_allowance - used, 0)
+        balance = wallet.balance_cents if wallet else 0
+        unit_price = price.price_cents or 1
+        paid_units = balance // unit_price if unit_price > 0 else 0
+        
+        return {
+            "remaining": free_left + paid_units,
+            "free_left": free_left,
+            "used_today": used,
+            "balance_cents": balance,
+        }
+
+    return {
+        "influencer_id": influencer_id,
+        "normal": {
+            "balance_cents": normal_wallet.balance_cents if normal_wallet else 0,
+            "messages": calc(normal_wallet, normal_usage, "text", "text_count"),
+            "live_chat_minutes": {
+                **calc(normal_wallet, normal_usage, "live_chat", "live_secs"),
+                "remaining_minutes": round(calc(normal_wallet, normal_usage, "live_chat", "live_secs")["remaining"] / 60, 2),
+            },
+        },
+        "adult": {
+            "balance_cents": adult_wallet.balance_cents if adult_wallet else 0,
+            "messages": calc(adult_wallet, adult_usage, "text_18", "text_count"),
+            "voice_minutes": {
+                **calc(adult_wallet, adult_usage, "voice_18", "voice_secs"),
+                "remaining_minutes": round(calc(adult_wallet, adult_usage, "voice_18", "voice_secs")["remaining"] / 60, 2),
+            },
+        },
+    }
 
 
 @router.get("/{id}", response_model=UserOut)
@@ -56,7 +132,7 @@ async def get_user_by_id(
     return user_out
 
 
-@router.patch("/{id}/usage", response_model=UserOut)
+@router.patch("/{id}/profile", response_model=UserOut)
 async def update_user(
     id: int,
     user_in: UserUpdate,

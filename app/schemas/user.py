@@ -13,6 +13,18 @@ class UserUpdate(BaseModel):
     gender: Optional[str] = None
     date_of_birth: Optional[datetime] = None
 
+    @field_validator('date_of_birth', mode='before')
+    @classmethod
+    def strip_timezone(cls, v):
+        if v is None:
+            return v
+        if isinstance(v, datetime):
+            return v.replace(tzinfo=None)
+        if isinstance(v, str):
+            dt = datetime.fromisoformat(v.replace('Z', '+00:00'))
+            return dt.replace(tzinfo=None)
+        return v
+
 class UserRead(UserBase):
     id: int
     email: str
