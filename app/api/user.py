@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/user", tags=["user"])
 
 
-@router.get("/{id}/usage")
+@router.get("/{id}")
 async def get_user_usage(
     id: int,
     influencer_id: str = Query(...),
