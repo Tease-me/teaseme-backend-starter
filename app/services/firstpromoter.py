@@ -145,6 +145,7 @@ async def fp_create_promoter(*, email: str, first_name: str, last_name: str, cus
             "first_name": first_name,
             "last_name": last_name,
             "cust_id": cust_id,
+            "website": "https://teaseme.live/join"
     }
     if parent_promoter_id:
         payload["parent_promoter_id"] = int(parent_promoter_id) 
