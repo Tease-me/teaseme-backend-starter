@@ -2,6 +2,8 @@ import asyncio
 import logging
 import math
 import random
+import json
+
 from uuid import uuid4
 from app.agents.prompt_utils import build_relationship_prompt, get_global_prompt
 from app.relationship.dtr import plan_dtr_goal
@@ -9,13 +11,13 @@ from app.relationship.inactivity import apply_inactivity_decay
 from app.relationship.repo import get_or_create_relationship
 import httpx
 from datetime import datetime, timedelta, timezone
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query
 
-from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from itertools import chain
 from typing import Any, Dict, List, Optional
 from app.core.config import settings
-from app.db.models import Influencer, Chat, Message, CallRecord
+from app.db.models import Influencer, Chat, Message, CallRecord, PreInfluencer
 from app.db.session import get_db
 from app.schemas.elevenlabs import FinalizeConversationBody, RegisterConversationBody, UpdatePromptBody
 from app.services.billing import charge_feature,_get_influencer_id_from_chat
@@ -1638,4 +1640,110 @@ async def get_call_details(
         "transcript": transcript,
         "created_at": call.created_at.isoformat() if call.created_at else None,
         "agent_id": agent_id,
+    }
+
+def _parse_labels(labels_json: str | None) -> str | None:
+    """
+    ElevenLabs expects labels as a serialized JSON object string.
+    We accept either None or a JSON string representing an object.
+    """
+    if not labels_json:
+        return None
+    try:
+        obj = json.loads(labels_json)
+        if not isinstance(obj, dict):
+            raise ValueError("labels_json must be a JSON object")
+        return json.dumps(obj)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid labels_json: {e}")
+
+
+async def _elevenlabs_create_voice(
+    *,
+    name: str,
+    description: str | None,
+    labels_str: str | None,
+    remove_background_noise: bool,
+    multipart_files: list[tuple[str, tuple[str, bytes, str]]],
+) -> dict:
+    """
+    Calls ElevenLabs /v1/voices/add.
+    multipart_files must be list of ("files[]", (filename, bytes, mime))
+    """
+    data = {
+        "name": name,
+        "remove_background_noise": "true" if remove_background_noise else "false",
+    }
+    if description is not None:
+        data["description"] = description
+    if labels_str is not None:
+        data["labels"] = labels_str
+
+    async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL, timeout=60.0) as client:
+        r = await client.post(
+            "/voices/add",
+            headers=_headers(),
+            data=data,
+            files=multipart_files,
+        )
+
+    if r.status_code >= 400:
+        log.error("ElevenLabs /v1/voices/add failed: %s %s", r.status_code, r.text[:1500])
+        raise HTTPException(status_code=r.status_code, detail=r.text)
+
+    payload = r.json() or {}
+    if not payload.get("voice_id"):
+        raise HTTPException(status_code=502, detail="ElevenLabs returned no voice_id")
+
+    return payload
+
+
+@router.post("/voices/add")
+async def eleven_create_voice_clone(
+    pre_influencer_id: int = Form(...),
+    name: str = Form(...),
+    description: str | None = Form(None),
+    labels_json: str | None = Form(None),
+    remove_background_noise: bool = Form(False),
+    files: list[UploadFile] = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    pre = await db.get(PreInfluencer, pre_influencer_id)
+    if not pre:
+        raise HTTPException(status_code=404, detail="PreInfluencer not found")
+
+    if not files:
+        raise HTTPException(status_code=400, detail="At least 1 audio file is required")
+
+    labels_str = _parse_labels(labels_json)
+
+    multipart_files: list[tuple[str, tuple[str, bytes, str]]] = []
+    for f in files:
+        b = await f.read()
+        if not b:
+            raise HTTPException(status_code=400, detail=f"Empty file: {f.filename}")
+        ctype = f.content_type or "audio/mpeg"
+        multipart_files.append(
+            ("files", (f.filename or "sample.mp3", b, ctype))
+        )
+
+    payload = await _elevenlabs_create_voice(
+        name=name,
+        description=description,
+        labels_str=labels_str,
+        remove_background_noise=remove_background_noise,
+        multipart_files=multipart_files,
+    )
+
+    pre.voice_id = payload["voice_id"]
+    db.add(pre)
+    await db.commit()
+    await db.refresh(pre)
+
+    return {
+        "ok": True,
+        "source": "upload",
+        "pre_influencer_id": pre.id,
+        "voice_id": payload["voice_id"],
+        "requires_verification": payload.get("requires_verification", False),
     }
