@@ -933,10 +933,12 @@ this is your current mood: {mood}
         "key": "BASE_ADULT_AUDIO_PROMPT",
         "description": "Base adult audio response format prompt for 18+ content.",
         "prompt": (
+            "this is your current mood: {mood}\n"
             "The user is speaking via audio message. Respond in a natural, conversational tone. "
             "please use following format for your response:\n"
             "Mmm~ lick me slower~ [soft moan] Right on my clit~ yes~ [shiver] "
             "Now finger me hard~ [commanding] Oh fuck~ I'm soaking~ [wet moan] ."
+            
         ),
     },
     {
