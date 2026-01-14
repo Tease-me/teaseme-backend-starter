@@ -41,7 +41,7 @@ from app.utils.email import (
     send_new_influencer_email,
     send_influencer_survey_completed_email_to_promoter,
 )
-from app.utils.s3 import save_influencer_photo_to_s3, generate_presigned_url, delete_file_from_s3
+from app.utils.s3 import s3,save_influencer_photo_to_s3, generate_presigned_url, delete_file_from_s3
 from app.services.firstpromoter import (
     fp_create_promoter,
     fp_find_promoter_id_by_ref_token,
@@ -585,6 +585,41 @@ async def delete_influencer_audio(
     await delete_file_from_s3(key)
 
     return {"ok": True}
+
+@router.get("/default-voices")
+async def get_default_voices(db: AsyncSession = Depends(get_db)):
+    bucket = settings.BUCKET_NAME
+    prefix = "voices_default/"
+
+    try:
+        response = s3.list_objects_v2(
+            Bucket=bucket,
+            Prefix=prefix,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    contents = response.get("Contents", [])
+    if not contents:
+        return {"voices": []}
+
+    voices = []
+    for obj in contents:
+        key = obj["Key"]
+
+        if key.endswith("/"):
+            continue
+
+        voices.append({
+            "key": key,
+            "filename": key.split("/")[-1],
+            "url": generate_presigned_url(key, expires=3600),
+        })
+
+    return {
+        "count": len(voices),
+        "voices": voices,
+    }
 
 @router.get("")
 async def list_pre_influencers(status: str | None = None, db: AsyncSession = Depends(get_db)):
