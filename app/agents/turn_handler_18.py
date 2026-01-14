@@ -1,9 +1,13 @@
 import asyncio
+import json
 import logging
+import random
+import re
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from uuid import uuid4
 from fastapi import HTTPException
 from sqlalchemy import select
-
+from datetime import datetime, timezone
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 
 from app.db.models import Influencer, Message18
@@ -17,6 +21,74 @@ from langchain_core.prompts import (
 )
 log = logging.getLogger("teaseme-turn-18")
 
+_TIME_RANGE_RE = re.compile(r"^\s*(\d{1,2})\s*(AM|PM)\s*-\s*(\d{1,2})\s*(AM|PM)\s*$", re.IGNORECASE)
+
+def _hour_from_12h(hour: int, meridiem: str) -> int:
+    hour = hour % 12
+    if meridiem.upper() == "PM":
+        hour += 12
+    return hour
+
+def _range_span(start: int, end: int) -> int:
+    if start <= end:
+        return end - start + 1
+    return (24 - start) + (end + 1)
+
+def _hour_in_range(hour: int, start: int, end: int) -> bool:
+    if start <= end:
+        return start <= hour <= end
+    return hour >= start or hour <= end
+    
+def _parse_time_range(label: str):
+    m = _TIME_RANGE_RE.match(label or "")
+    if not m:
+        return None
+    start_raw,start_ampm,end_raw,end_ampm = m.groups()
+    start = _hour_from_12h(int(start_raw), start_ampm)
+    end = _hour_from_12h(int(end_raw), end_ampm)
+
+    return (start, end)
+
+def _resolve_tz(tz_name: str | None):
+    if not tz_name:
+        return timezone.utc
+    try:
+        return ZoneInfo(tz_name)
+    except ZoneInfoNotFoundError:
+        return timezone.utc
+
+
+def pick_time_mood(time_prompt: str | None, user_timezone: str | None) -> str:
+    if not time_prompt:
+        return ""
+    try:
+        mood_map = json.loads(time_prompt)
+    except json.JSONDecodeError:
+        log.warning("Invalid ADULT_TIME_VARIABLE_PROMPT JSON; using empty mood")
+        return ""
+    if not isinstance(mood_map, dict):
+        return ""
+
+    hour = datetime.now(_resolve_tz(user_timezone)).hour
+
+    matches: list[tuple[int, list[str]]] = []
+    for label, options in mood_map.items():
+        if not isinstance(options, list) or not options:
+            continue
+        parsed = _parse_time_range(label)
+        if not parsed:
+            continue
+        start, end = parsed
+        if _hour_in_range(hour, start, end):
+            matches.append((_range_span(start, end), options))
+
+    if matches:
+        matches.sort(key=lambda item: item[0])
+        return random.choice(matches[0][1])
+
+    # fallback: any mood
+    flat = [m for opts in mood_map.values() if isinstance(opts, list) for m in opts]
+    return random.choice(flat) if flat else ""
 
 def _render_recent_ctx(rows: list[Message18]) -> list[BaseMessage]:
     """
@@ -58,14 +130,16 @@ async def handle_turn_18(
     user_id: int,
     db,
     is_audio: bool = False,
+    user_timezone: str | None = None,
 ) -> str:
     cid = uuid4().hex[:8]
     log.info("[%s] START(18) persona=%s chat=%s user=%s", cid, influencer_id, chat_id, user_id)
 
-    influencer, base_adult_prompt, base_audio_prompt, recent_ctx = await asyncio.gather(
+    influencer, base_adult_prompt, base_audio_prompt, time_prompt, recent_ctx = await asyncio.gather(
         db.get(Influencer, influencer_id),
         get_system_prompt(db, "BASE_ADULT_PROMPT"),
         get_system_prompt(db, "BASE_ADULT_AUDIO_PROMPT"),
+        get_system_prompt(db, "ADULT_TIME_VARIABLE_PROMPT"),
         _load_recent_ctx_18(db, chat_id, limit=12),
     )
 
@@ -83,7 +157,9 @@ async def handle_turn_18(
             ("user", "{input}"),
         ]
     )
-    prompt = prompt.partial(main_prompt=influencer.custom_adult_prompt, history=recent_ctx)
+    mood = pick_time_mood(time_prompt, user_timezone)
+
+    prompt = prompt.partial(main_prompt=influencer.custom_adult_prompt, history=recent_ctx, mood=mood)
     chain = prompt | XAI_MODEL
 
     try:
