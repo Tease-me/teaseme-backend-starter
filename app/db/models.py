@@ -53,30 +53,6 @@ class Influencer(Base):
         back_populates="influencer",
         cascade="all, delete-orphan",
     )
-    sample_rows: Mapped[List["Sample"]] = relationship(
-        back_populates="influencer",
-        cascade="all, delete-orphan",
-    )
-
-class Sample(Base):
-    __tablename__ = "samples"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    influencer_id: Mapped[str] = mapped_column(
-        ForeignKey("influencers.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    s3_key: Mapped[str] = mapped_column(String, nullable=False)
-    original_filename: Mapped[str | None] = mapped_column(String, nullable=True)
-    content_type: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        nullable=False,
-    )
-
-    influencer: Mapped["Influencer"] = relationship(back_populates="sample_rows")
 
 class User(Base):
     __tablename__ = "users"
