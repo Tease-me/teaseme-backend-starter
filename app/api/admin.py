@@ -9,7 +9,7 @@ from app.db.models import CallRecord, Message, Memory, Message18
 from app.db.session import get_db
 
 from sqlalchemy import select
-from app.db.models import RelationshipState, User, Influencer, Sample
+from app.db.models import RelationshipState, User, Influencer
 from app.utils.s3 import save_sample_audio_to_s3, generate_presigned_url, delete_file_from_s3
 
 from pydantic import BaseModel, Field
@@ -303,18 +303,11 @@ async def upload_influencer_sample(
         influencer_id,
     )
 
-    sample = Sample(
-        influencer_id=influencer_id,
-        s3_key=s3_key,
-        original_filename=file.filename,
-        content_type=file.content_type,
-    )
-    db.add(sample)
-
     sample_entry = {
         "s3_key": s3_key,
         "original_filename": file.filename,
         "content_type": file.content_type,
+        "created_at": datetime.now(timezone.utc).isoformat(),
     }
     if influencer.samples is None:
         influencer.samples = [sample_entry]
@@ -322,38 +315,42 @@ async def upload_influencer_sample(
         influencer.samples = influencer.samples + [sample_entry]
 
     await db.commit()
-    await db.refresh(sample)
+    await db.refresh(influencer)
 
     return {
-        "id": sample.id,
+        "id": s3_key,
         "s3_key": s3_key,
         "original_filename": file.filename,
         "content_type": file.content_type,
         "url": generate_presigned_url(s3_key),
-        "created_at": sample.created_at.isoformat() if sample.created_at else None,
+        "created_at": sample_entry["created_at"],
     }
 
 
 @router.delete("/influencer/{influencer_id}/samples/{sample_id}")
 async def delete_influencer_sample(
     influencer_id: str,
-    sample_id: int,
+    sample_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    sample = await db.get(Sample, sample_id)
-    if not sample or sample.influencer_id != influencer_id:
+    influencer = await db.get(Influencer, influencer_id)
+    if not influencer:
+        raise HTTPException(status_code=404, detail="Influencer not found")
+
+    if not influencer.samples:
         raise HTTPException(status_code=404, detail="Sample not found")
 
-    influencer = await db.get(Influencer, influencer_id)
-    if influencer and influencer.samples:
-        influencer.samples = [s for s in influencer.samples if s.get("s3_key") != sample.s3_key]
+    sample = next((s for s in influencer.samples if s.get("s3_key") == sample_id), None)
+    if not sample:
+        raise HTTPException(status_code=404, detail="Sample not found")
+
+    influencer.samples = [s for s in influencer.samples if s.get("s3_key") != sample_id]
 
     try:
-        await delete_file_from_s3(sample.s3_key)
+        await delete_file_from_s3(sample_id)
     except Exception:
-        log.warning("Failed to delete S3 sample file %s", sample.s3_key, exc_info=True)
+        log.warning("Failed to delete S3 sample file %s", sample_id, exc_info=True)
 
-    await db.delete(sample)
     await db.commit()
 
     return {"ok": True, "deleted_id": sample_id}
