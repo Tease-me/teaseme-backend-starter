@@ -319,9 +319,9 @@ async def can_afford(
     return (ok or cost_cents == 0), cost_cents, free_left
 
 
-def _today_utc_midnight() -> datetime:
+def _today_midnight_naive() -> datetime:
     d = date.today()
-    return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+    return datetime(d.year, d.month, d.day)
 
 async def get_remaining_units(
     db: AsyncSession,
