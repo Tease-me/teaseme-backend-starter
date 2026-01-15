@@ -320,7 +320,7 @@ async def can_afford(
 
 
 def _today_utc_midnight() -> datetime:
-    d = date.today()  # server date
+    d = date.today()
     return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
 
 async def get_remaining_units(
@@ -346,8 +346,6 @@ async def get_remaining_units(
             and_(
                 DailyUsage.user_id == user_id,
                 DailyUsage.date == today_dt,
-                # se o teu DailyUsage tem is_18:
-                # DailyUsage.is_18.is_(is_18),
             )
         )
     )
