@@ -1,7 +1,7 @@
 import secrets
 import logging
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -144,6 +144,9 @@ async def login(
     if not user or not pwd_context.verify(data.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     
+    if not user.is_verified:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Verify Email First")
+    
     access_token = create_token(
         {"sub": str(user.id)}, settings.SECRET_KEY, timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
@@ -241,7 +244,7 @@ async def forgot_password(email: str, db: AsyncSession = Depends(get_db)):
     if user:
         reset_token = secrets.token_urlsafe(32)
         user.password_reset_token = reset_token
-        user.password_reset_token_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        user.password_reset_token_expires_at = datetime.utcnow() + timedelta(hours=1)
         await db.commit()
 
         send_password_reset_email(user.email, reset_token)
@@ -253,7 +256,7 @@ async def reset_password(data: PasswordResetRequest, db: AsyncSession = Depends(
     result = await db.execute(select(User).where(User.password_reset_token == data.token))
     user = result.scalar_one_or_none()
 
-    if not user or user.password_reset_token_expires_at < datetime.now(timezone.utc):
+    if not user or user.password_reset_token_expires_at < datetime.utcnow():
         raise HTTPException(status_code=400, detail="Token inválido ou expirado.")
 
     user.password_hash = pwd_context.hash(data.new_password)
