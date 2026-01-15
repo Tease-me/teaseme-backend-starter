@@ -339,7 +339,7 @@ async def get_remaining_units(
     unit_price_cents = int(price.price_cents or 0)
     free_allowance = int(price.free_allowance or 0)
 
-    today_dt = _today_utc_midnight()
+    today_dt = _today_midnight_naive()
 
     usage: DailyUsage | None = await db.scalar(
         select(DailyUsage).where(
