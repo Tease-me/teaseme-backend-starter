@@ -68,7 +68,6 @@ class AudioResponse(BaseModel):
 - `get_httpx_client()`: Context manager for HTTP clients
 - `transcribe_audio()`: Improved audio transcription with error handling
 - `synthesize_audio_with_elevenlabs()`: Better error handling
-- `synthesize_audio_with_bland_ai()`: Better error handling
 - `get_ai_reply()`: Centralized AI reply generation
 - `ensure_chat_exists()`: Database chat creation helper
 

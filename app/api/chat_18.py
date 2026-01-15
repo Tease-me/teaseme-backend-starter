@@ -19,7 +19,7 @@ from app.services.chat_service import get_or_create_chat18
 from app.schemas.chat import ChatCreateRequest,PaginatedMessages
 
 from app.core.config import settings
-from app.utils.chat import transcribe_audio, synthesize_audio_with_elevenlabs_V3, synthesize_audio_with_bland_ai
+from app.utils.chat import transcribe_audio, synthesize_audio_with_elevenlabs_V3
 from app.utils.s3 import save_audio_to_s3, save_ia_audio_to_s3, generate_presigned_url, message18_to_schema_with_presigned
 from app.services.billing import charge_feature, get_duration_seconds, can_afford
 from app.services.influencer_subscriptions import require_active_subscription
@@ -41,11 +41,12 @@ async def start_chat(
 
 # ---------- Buffer state ----------
 class _Buf:
-    __slots__ = ("messages", "timer", "lock")
+    __slots__ = ("messages", "timer", "lock", "timezone")
     def __init__(self) -> None:
         self.messages: List[str] = []
         self.timer: Optional[asyncio.Task] = None
         self.lock = asyncio.Lock()
+        self.timezone: Optional[str] = None
 
 _buffers: Dict[str, _Buf] = {}  # chat_id -> _Buf
 
@@ -66,6 +67,7 @@ async def _queue_message(
     influencer_id: str,
     user_id: int,
     db: AsyncSession,
+    user_timezone: Optional[str] = None,
     timeout_sec: float = 2.5,
 ) -> None:
     buf = _buffers.setdefault(chat_id, _Buf())
@@ -74,6 +76,8 @@ async def _queue_message(
     flush_now = False
     async with buf.lock:
         buf.messages.append(msg)
+        if user_timezone is not None:
+            buf.timezone = user_timezone
         log.info("[BUF %s] queued: %r (len=%d)", chat_id, msg, len(buf.messages))
 
         # cancel previous timer if any
@@ -172,6 +176,7 @@ async def _flush_buffer(
 
     # 2) Get LLM reply
     try:
+        user_timezone = buf.timezone
         log.info("[BUF %s] calling handle_turn_18()", chat_id)
         reply = await handle_turn_18(
             message=user_text,
@@ -180,6 +185,7 @@ async def _flush_buffer(
             user_id=user_id,
             db=db,
             is_audio=False,
+            user_timezone=user_timezone,
         )
         log.info("[BUF %s] handle_turn_18 ok (reply_len=%d)", chat_id, len(reply or ""))
     except Exception:
@@ -256,6 +262,7 @@ async def websocket_chat(
             text = (raw.get("message") or "").strip()
             if not text:
                 continue
+            user_timezone = raw.get("timezone")
 
             chat_id = await get_or_create_chat18(db, user_id, influencer_id, raw.get("chat_id"))
 
@@ -285,7 +292,7 @@ async def websocket_chat(
                 log.exception("[WS %s] Failed to save user message", chat_id)
 
             # enqueue; buffer decides when to respond
-            await _queue_message(chat_id, text, ws, influencer_id, user_id, db)
+            await _queue_message(chat_id, text, ws, influencer_id, user_id, db, user_timezone=user_timezone)
 
             # optional: client can force immediate flush by sending {"final": true}
             if raw.get("final") is True:
@@ -345,6 +352,7 @@ async def chat_audio(
     chat_id: str = Form(...),
     influencer_id: str = Form(""),
     token: str = Form(""),
+    timezone: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -442,6 +450,7 @@ async def chat_audio(
             influencer_id,
             user_id,
             db,
+            user_timezone=timezone,
         )
         if not ai_reply:
             raise HTTPException(status_code=500, detail="No AI reply")
@@ -449,9 +458,7 @@ async def chat_audio(
         # ✅ TTS
         audio_bytes, audio_mime = await synthesize_audio_with_elevenlabs_V3(ai_reply, db, influencer_id)
         if not audio_bytes:
-            audio_bytes, audio_mime = await synthesize_audio_with_bland_ai(ai_reply)
-            if not audio_bytes:
-                raise HTTPException(status_code=500, detail="No audio returned from any TTS provider")
+            raise HTTPException(status_code=500, detail="No audio returned from any TTS provider")
 
         # ✅ upload AI audio (expect S3 KEY back)
         ai_audio_key = await save_ia_audio_to_s3(audio_bytes, user_id)
@@ -494,6 +501,7 @@ async def get_ai_reply_via_websocket(
     influencer_id: str,
     user_id: int,
     db: AsyncSession,
+    user_timezone: Optional[str] = None,
 ) -> str:
     """
     Get AI reply using handle_turn function.
@@ -508,6 +516,7 @@ async def get_ai_reply_via_websocket(
         influencer_id=influencer_id,
         user_id=user_id,
         db=db,
-        is_audio=True
+        is_audio=True,
+        user_timezone=user_timezone,
     )
     return reply
