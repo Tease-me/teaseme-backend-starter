@@ -25,7 +25,6 @@ async def list_prompts(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # TODO: Add admin role check when User.is_admin or User.role is implemented
     rows = await list_system_prompts(db)
     return [
         {
