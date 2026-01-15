@@ -1,14 +1,16 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+import io
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.turn_handler import redis_history
-from app.db.models import CallRecord, Message, Memory
+from app.db.models import CallRecord, Message, Memory, Message18
 from app.db.session import get_db
 
 from sqlalchemy import select
-from app.db.models import RelationshipState, User
+from app.db.models import RelationshipState, User, Influencer
+from app.utils.s3 import save_sample_audio_to_s3, generate_presigned_url, delete_file_from_s3
 
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
@@ -20,23 +22,34 @@ log = logging.getLogger("admin")
 @router.delete("/chats/history/{chat_id}")
 async def clear_chat_history_admin(
     chat_id: str,
+    is_18: bool = False,
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        msg_result = await db.execute(
-            delete(Message).where(Message.chat_id == chat_id).returning(Message.id)
-        )
-        deleted_msg_ids = msg_result.scalars().all()
+        deleted_msg_ids = []
+        deleted_mem_ids = []
+        deleted_call_ids = []
 
-        mem_result = await db.execute(
-            delete(Memory).where(Memory.chat_id == chat_id).returning(Memory.id)
-        )
-        deleted_mem_ids = mem_result.scalars().all()
+        if is_18:
+            msg_result = await db.execute(
+                delete(Message18).where(Message18.chat_id == chat_id).returning(Message18.id)
+            )
+            deleted_msg_ids = msg_result.scalars().all()
+        else:
+            msg_result = await db.execute(
+                delete(Message).where(Message.chat_id == chat_id).returning(Message.id)
+            )
+            deleted_msg_ids = msg_result.scalars().all()
 
-        call_result = await db.execute(
-            delete(CallRecord).where(CallRecord.chat_id == chat_id).returning(CallRecord.conversation_id)
-        )
-        deleted_call_ids = call_result.scalars().all()
+            mem_result = await db.execute(
+                delete(Memory).where(Memory.chat_id == chat_id).returning(Memory.id)
+            )
+            deleted_mem_ids = mem_result.scalars().all()
+
+            call_result = await db.execute(
+                delete(CallRecord).where(CallRecord.chat_id == chat_id).returning(CallRecord.conversation_id)
+            )
+            deleted_call_ids = call_result.scalars().all()
 
         try:
             redis_history(chat_id).clear()
@@ -57,6 +70,7 @@ async def clear_chat_history_admin(
     return {
         "ok": True,
         "chat_id": chat_id,
+        "is_18": is_18,
         "messages_deleted": len(deleted_msg_ids),
         "memories_deleted": len(deleted_mem_ids),
         "call_records_deleted": len(deleted_call_ids),
@@ -266,3 +280,77 @@ async def update_relationship(payload: RelationshipPatch, db: AsyncSession = Dep
     await db.refresh(rel)
 
     return {"ok": True}
+
+
+@router.post("/influencer/{influencer_id}/samples")
+async def upload_influencer_sample(
+    influencer_id: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    influencer = await db.get(Influencer, influencer_id)
+    if not influencer:
+        raise HTTPException(status_code=404, detail="Influencer not found")
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    s3_key = await save_sample_audio_to_s3(
+        io.BytesIO(file_bytes),
+        file.filename or "sample.mp3",
+        file.content_type or "audio/mpeg",
+        influencer_id,
+    )
+
+    sample_entry = {
+        "s3_key": s3_key,
+        "original_filename": file.filename,
+        "content_type": file.content_type,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if influencer.samples is None:
+        influencer.samples = [sample_entry]
+    else:
+        influencer.samples = influencer.samples + [sample_entry]
+
+    await db.commit()
+    await db.refresh(influencer)
+
+    return {
+        "id": s3_key,
+        "s3_key": s3_key,
+        "original_filename": file.filename,
+        "content_type": file.content_type,
+        "url": generate_presigned_url(s3_key),
+        "created_at": sample_entry["created_at"],
+    }
+
+
+@router.delete("/influencer/{influencer_id}/samples/{sample_id}")
+async def delete_influencer_sample(
+    influencer_id: str,
+    sample_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    influencer = await db.get(Influencer, influencer_id)
+    if not influencer:
+        raise HTTPException(status_code=404, detail="Influencer not found")
+
+    if not influencer.samples:
+        raise HTTPException(status_code=404, detail="Sample not found")
+
+    sample = next((s for s in influencer.samples if s.get("s3_key") == sample_id), None)
+    if not sample:
+        raise HTTPException(status_code=404, detail="Sample not found")
+
+    influencer.samples = [s for s in influencer.samples if s.get("s3_key") != sample_id]
+
+    try:
+        await delete_file_from_s3(sample_id)
+    except Exception:
+        log.warning("Failed to delete S3 sample file %s", sample_id, exc_info=True)
+
+    await db.commit()
+
+    return {"ok": True, "deleted_id": sample_id}

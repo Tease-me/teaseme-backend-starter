@@ -15,8 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-BLAND_API_KEY = settings.BLAND_API_KEY
-BLAND_VOICE_ID = settings.BLAND_VOICE_ID
+
 ELEVENLABS_API_KEY = settings.ELEVENLABS_API_KEY
 ELEVENLABS_VOICE_ID = settings.ELEVENLABS_VOICE_ID
 
@@ -361,33 +360,6 @@ async def synthesize_audio_with_elevenlabs_V3(text: str, db, influencer_id: str 
             logger.error(f"ElevenLabs error: {resp.status_code} - {resp.text}")
             return None, None
         return resp.content, "audio/mpeg"
-
-async def synthesize_audio_with_bland_ai(text: str):
-    url = "https://api.bland.ai/v1/speak"
-    headers = {
-        "Authorization": BLAND_API_KEY,
-        "Content-Type": "application/json",
-    }
-    data = {
-        "voice": BLAND_VOICE_ID,
-        "text": text,
-    }
-    timeout = httpx.Timeout(60.0, connect=10.0)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(url, headers=headers, json=data)
-        content_type = resp.headers.get("content-type", "")
-        
-        if resp.status_code != 200:
-            logger.error(f"Bland AI error: {resp.status_code} - {resp.text}")
-            return None, None
-        
-        if "application/json" in content_type:
-            result = resp.json()
-            logger.error(f"Bland AI returned JSON instead of audio: {result}")
-            return None, None 
-        
-        logger.info(f"Bland AI synthesis successful: {resp.status_code}, content-type: {content_type}")
-        return resp.content, content_type
 
 def pcm_bytes_to_wav_bytes(pcm_bytes, sample_rate=44100):
     wav_io = io.BytesIO()

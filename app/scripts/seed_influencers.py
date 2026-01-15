@@ -106,16 +106,23 @@ async def main():
         for influencer_id, data in PERSONAS.items():
             influencer = await db.get(Influencer, influencer_id)
             if not influencer:
-                print(f"Influencer '{influencer_id}' not found, skipping.")
-                continue
-
-            influencer.prompt_template = data["prompt_template"]
-            influencer.voice_id = data.get("voice_id", influencer.voice_id)
-            influencer.influencer_agent_id_third_part = data.get("influencer_agent_id_third_part", influencer.influencer_agent_id_third_part)
-            influencer.daily_scripts = data.get("daily_scripts", influencer.daily_scripts)
-
-            db.add(influencer)
-            print(f"Updated influencer {influencer_id}.")
+                influencer = Influencer(
+                    id=influencer_id,
+                    display_name=influencer_id.capitalize(),
+                    prompt_template=data["prompt_template"],
+                    voice_id=data.get("voice_id"),
+                    influencer_agent_id_third_part=data.get("influencer_agent_id_third_part"),
+                    daily_scripts=data.get("daily_scripts"),
+                )
+                db.add(influencer)
+                print(f"Created influencer '{influencer_id}'.")
+            else:
+                influencer.prompt_template = data["prompt_template"]
+                influencer.voice_id = data.get("voice_id", influencer.voice_id)
+                influencer.influencer_agent_id_third_part = data.get("influencer_agent_id_third_part", influencer.influencer_agent_id_third_part)
+                influencer.daily_scripts = data.get("daily_scripts", influencer.daily_scripts)
+                db.add(influencer)
+                print(f"Updated influencer '{influencer_id}'.")
 
         await db.commit()
         print("Done.")
