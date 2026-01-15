@@ -43,7 +43,6 @@ async def get_prompt(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # TODO: Add admin role check when User.is_admin or User.role is implemented
     text = await get_system_prompt(db, key)
     if not text:
         raise HTTPException(404, f"Prompt not found for key={key}")
@@ -57,7 +56,6 @@ async def upsert_prompt(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # TODO: Add admin role check when User.is_admin or User.role is implemented
     row = await update_system_prompt(
         db,
         key=key,
