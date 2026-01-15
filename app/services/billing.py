@@ -4,9 +4,10 @@ import os
 import math
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import date
+
 from fastapi import HTTPException
 from app.db.models import InfluencerWallet, InfluencerCreditTransaction, DailyUsage, Pricing, User, Chat
+from datetime import datetime, timezone, date
 
 async def charge_feature(
     db: AsyncSession,
@@ -317,39 +318,62 @@ async def can_afford(
     ok = balance >= cost_cents
     return (ok or cost_cents == 0), cost_cents, free_left
 
-async def get_remaining_units(db: AsyncSession, user_id: int, influencer_id: str, feature: str) -> int:
+
+def _today_utc_midnight() -> datetime:
+    d = date.today()  # server date
+    return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+
+async def get_remaining_units(
+    db: AsyncSession,
+    user_id: int,
+    influencer_id: str,
+    feature: str,
+    is_18: bool = False,
+) -> int:
     price: Pricing | None = await db.scalar(
         select(Pricing).where(Pricing.feature == feature, Pricing.is_active.is_(True))
     )
     if not price:
         return 0
 
-    unit_price_cents = price.price_cents or 0
-    free_allowance = price.free_allowance or 0
+    unit_price_cents = int(price.price_cents or 0)
+    free_allowance = int(price.free_allowance or 0)
 
-    today = date.today()
-    usage: DailyUsage | None = await db.get(DailyUsage, (user_id, today))
+    today_dt = _today_utc_midnight()
 
-    if "text" in feature:
-        used = getattr(usage, "text_count", 0) if usage else 0
-    elif "voice" in feature:
-        used = getattr(usage, "voice_secs", 0) if usage else 0
-    else:
-        used = getattr(usage, "live_secs", 0) if usage else 0
-        
-
-    free_left = max(free_allowance - (used or 0), 0)
-
-    wallet = await db.scalar(
-        select(InfluencerWallet).where(
-            InfluencerWallet.user_id == user_id,
-            InfluencerWallet.influencer_id == influencer_id,
-            InfluencerWallet.is_18 == False,
+    usage: DailyUsage | None = await db.scalar(
+        select(DailyUsage).where(
+            and_(
+                DailyUsage.user_id == user_id,
+                DailyUsage.date == today_dt,
+                # se o teu DailyUsage tem is_18:
+                # DailyUsage.is_18.is_(is_18),
+            )
         )
     )
-    balance_cents = wallet.balance_cents if wallet and wallet.balance_cents is not None else 0
 
+    if "text" in feature:
+        used = int(getattr(usage, "text_count", 0) if usage else 0)
+    elif "voice" in feature:
+        used = int(getattr(usage, "voice_secs", 0) if usage else 0)
+    else:
+        used = int(getattr(usage, "live_secs", 0) if usage else 0)
+
+    free_left = max(free_allowance - used, 0)
+
+    # wallet
+    wallet: InfluencerWallet | None = await db.scalar(
+        select(InfluencerWallet).where(
+            and_(
+                InfluencerWallet.user_id == user_id,
+                InfluencerWallet.influencer_id == influencer_id,
+                InfluencerWallet.is_18.is_(is_18),
+            )
+        )
+    )
+    balance_cents = int(wallet.balance_cents) if wallet and wallet.balance_cents is not None else 0
     paid = (balance_cents // unit_price_cents) if unit_price_cents > 0 else 0
+
     return int(free_left + paid)
 
 
