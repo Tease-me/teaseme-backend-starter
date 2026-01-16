@@ -69,6 +69,12 @@ class User(Base):
     password_reset_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     profile_photo_key: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    
+    moderation_status: Mapped[str] = mapped_column(String, default="CLEAN")  # CLEAN, FLAGGED, UNDER_REVIEW, BANNED
+    violation_count: Mapped[int] = mapped_column(Integer, default=0)
+    first_violation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_violation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    
     chats = relationship("Chat", back_populates="user")
     following_influencers: Mapped[List["InfluencerFollower"]] = relationship(
         back_populates="user",
@@ -569,3 +575,51 @@ class PayPalTopUp(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
+
+
+class ContentViolation(Base):
+    __tablename__ = "content_violations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    
+    chat_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    influencer_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    
+    # What they said
+    message_content: Mapped[str] = mapped_column(Text, nullable=False)
+    message_context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    
+    # Classification
+    category: Mapped[str] = mapped_column(String, nullable=False)  # CSAM, BESTIALITY, DRUGS
+    severity: Mapped[str] = mapped_column(String, nullable=False)  # LOW, MEDIUM, HIGH, CRITICAL
+    
+    # How we caught it
+    keyword_matched: Mapped[str | None] = mapped_column(String, nullable=True)
+    ai_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ai_reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    detection_tier: Mapped[str] = mapped_column(String, nullable=False)  # KEYWORD_ONLY, AI_CONFIRMED
+    
+    reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    review_action: Mapped[str | None] = mapped_column(String, nullable=True)  # CONFIRMED, FALSE_POSITIVE
+    review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        Index("ix_violations_user_created", "user_id", "created_at"),
+        Index("ix_violations_category", "category"),
+        Index("ix_violations_reviewed", "reviewed"),
+    )
+
