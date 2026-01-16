@@ -1014,5 +1014,4 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
 
-    # to run:
     # poetry run python -m app.scripts.seed_prompts
