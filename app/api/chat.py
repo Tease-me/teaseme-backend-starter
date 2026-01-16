@@ -22,6 +22,7 @@ from app.core.config import settings
 from app.utils.chat import transcribe_audio, synthesize_audio_with_elevenlabs_V3, get_ai_reply_via_websocket
 from app.utils.s3 import save_audio_to_s3, save_ia_audio_to_s3, generate_presigned_url, message_to_schema_with_presigned
 from app.services.billing import charge_feature, get_duration_seconds, can_afford, _get_influencer_id_from_chat
+from app.moderation import moderate_message, handle_violation
 
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = settings.ALGORITHM
@@ -268,6 +269,22 @@ async def websocket_chat(
             except Exception:
                 await db.rollback()
                 log.exception("[WS %s] Failed to save user message", chat_id)
+
+            try:
+                mod_result = await moderate_message(text, "", db)
+                if mod_result.action == "FLAG":
+                    await handle_violation(
+                        db=db,
+                        user_id=user_id,
+                        chat_id=chat_id,
+                        influencer_id=influencer_id,
+                        message=text,
+                        context="",
+                        result=mod_result
+                    )
+                    log.warning("Flagged user=%s category=%s", user_id, mod_result.category)
+            except Exception:
+                log.exception("Error during moderation check")
 
             # enqueue; buffer decides when to respond
             await _queue_message(chat_id, text, ws, influencer_id, user_id, db)

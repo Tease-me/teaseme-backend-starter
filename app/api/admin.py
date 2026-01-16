@@ -5,10 +5,10 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.turn_handler import redis_history
-from app.db.models import CallRecord, Message, Memory, Message18
+from app.db.models import CallRecord, Message, Memory, Message18, ContentViolation
 from app.db.session import get_db
 
-from sqlalchemy import select
+from sqlalchemy import select, func, desc
 from app.db.models import RelationshipState, User, Influencer
 from app.utils.s3 import save_sample_audio_to_s3, generate_presigned_url, delete_file_from_s3
 
@@ -354,3 +354,66 @@ async def delete_influencer_sample(
     await db.commit()
 
     return {"ok": True, "deleted_id": sample_id}
+
+@router.get("/moderation")
+async def get_moderation_dashboard(
+    page: int = 1,
+    page_size: int = 20,
+    category: str | None = None,
+    user_id: int | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    users_stmt = select(User).where(User.moderation_status != "CLEAN")
+    users_stmt = users_stmt.order_by(desc(User.last_violation_at))
+    users_result = await db.execute(users_stmt)
+    flagged_users = users_result.scalars().all()
+    
+    violations_stmt = select(ContentViolation)
+    if category:
+        violations_stmt = violations_stmt.where(ContentViolation.category == category)
+    if user_id:
+        violations_stmt = violations_stmt.where(ContentViolation.user_id == user_id)
+    
+    count_stmt = select(func.count()).select_from(violations_stmt.subquery())
+    total_violations = (await db.execute(count_stmt)).scalar() or 0
+    
+    violations_stmt = violations_stmt.order_by(desc(ContentViolation.created_at))
+    violations_stmt = violations_stmt.offset((page - 1) * page_size).limit(page_size)
+    violations_result = await db.execute(violations_stmt)
+    violations = violations_result.scalars().all()
+    
+    return {
+        "flagged_users": [
+            {
+                "id": u.id,
+                "username": u.username,
+                "email": u.email,
+                "moderation_status": u.moderation_status,
+                "violation_count": u.violation_count,
+                "first_violation_at": u.first_violation_at.isoformat() if u.first_violation_at else None,
+                "last_violation_at": u.last_violation_at.isoformat() if u.last_violation_at else None,
+            }
+            for u in flagged_users
+        ],
+        "violations": {
+            "total": total_violations,
+            "page": page,
+            "page_size": page_size,
+            "items": [
+                {
+                    "id": v.id,
+                    "user_id": v.user_id,
+                    "chat_id": v.chat_id,
+                    "influencer_id": v.influencer_id,
+                    "message_content": v.message_content,
+                    "category": v.category,
+                    "severity": v.severity,
+                    "keyword_matched": v.keyword_matched,
+                    "ai_confidence": v.ai_confidence,
+                    "detection_tier": v.detection_tier,
+                    "created_at": v.created_at.isoformat() if v.created_at else None,
+                }
+                for v in violations
+            ]
+        }
+    }
