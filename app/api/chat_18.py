@@ -23,6 +23,7 @@ from app.utils.chat import transcribe_audio, synthesize_audio_with_elevenlabs_V3
 from app.utils.s3 import save_audio_to_s3, save_ia_audio_to_s3, generate_presigned_url, message18_to_schema_with_presigned
 from app.services.billing import charge_feature, get_duration_seconds, can_afford
 from app.services.influencer_subscriptions import require_active_subscription
+from app.services.user import _get_usage_snapshot_simple
 
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = settings.ALGORITHM
@@ -208,9 +209,20 @@ async def _flush_buffer(
             pass
         log.exception("[BUF %s] Failed to save AI message", chat_id)
 
+    try:
+        usage_payload = await _get_usage_snapshot_simple(
+            db,
+            user_id=user_id,
+            influencer_id=influencer_id,
+            is_18= True,
+        )
+    except Exception:
+            log.exception("[BUF %s] Failed to load relationship snapshot", chat_id)
+            usage_payload = None
+
     # 4) Send to client
     try:
-        await ws.send_json({"reply": reply})
+        await ws.send_json({"reply": reply, "usage": usage_payload,})
         log.info("[BUF %s] ws.send_json done", chat_id)
     except Exception:
         log.exception("[BUF %s] Failed to send reply", chat_id)
