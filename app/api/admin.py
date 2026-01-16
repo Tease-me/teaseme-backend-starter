@@ -5,11 +5,12 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.turn_handler import redis_history
-from app.db.models import CallRecord, Message, Memory, Message18
+from app.db.models import CallRecord, Message, Memory, Message18, User
 from app.db.session import get_db
+from app.utils.deps import get_current_user
 
 from sqlalchemy import select
-from app.db.models import RelationshipState, User, Influencer
+from app.db.models import RelationshipState, Influencer
 from app.utils.s3 import save_sample_audio_to_s3, generate_presigned_url, delete_file_from_s3
 
 from pydantic import BaseModel, Field
@@ -23,6 +24,7 @@ log = logging.getLogger("admin")
 async def clear_chat_history_admin(
     chat_id: str,
     is_18: bool = False,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -91,7 +93,11 @@ def sentiment_label(score: float) -> str:
         return "IN_LOVE"
     
 @router.get("/relationships")
-async def list_relationships(user_id: int, db: AsyncSession = Depends(get_db)):
+async def list_relationships(
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     q = select(RelationshipState).where(RelationshipState.user_id == user_id)
     res = await db.execute(q)
     rows = res.scalars().all()
@@ -116,7 +122,11 @@ async def list_relationships(user_id: int, db: AsyncSession = Depends(get_db)):
     ]
 
 @router.get("/users")
-async def list_users(q: str | None = None, db: AsyncSession = Depends(get_db)):
+async def list_users(
+    q: str | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     stmt = select(User)
 
     if q:
@@ -163,7 +173,11 @@ class RelationshipPatch(BaseModel):
 
 
 @router.patch("/relationships")
-async def patch_relationship(payload: RelationshipPatch, db: AsyncSession = Depends(get_db)):
+async def patch_relationship(
+    payload: RelationshipPatch,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     q = select(RelationshipState).where(
         RelationshipState.user_id == payload.user_id,
         RelationshipState.influencer_id == payload.influencer_id,
@@ -237,7 +251,11 @@ async def patch_relationship(payload: RelationshipPatch, db: AsyncSession = Depe
     }
 
 @router.post("/relationships/update")
-async def update_relationship(payload: RelationshipPatch, db: AsyncSession = Depends(get_db)):
+async def update_relationship(
+    payload: RelationshipPatch,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     q = select(RelationshipState).where(
         RelationshipState.user_id == payload.user_id,
         RelationshipState.influencer_id == payload.influencer_id,
@@ -286,6 +304,7 @@ async def update_relationship(payload: RelationshipPatch, db: AsyncSession = Dep
 async def upload_influencer_sample(
     influencer_id: str,
     file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     influencer = await db.get(Influencer, influencer_id)
@@ -331,6 +350,7 @@ async def upload_influencer_sample(
 async def delete_influencer_sample(
     influencer_id: str,
     sample_id: str,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     influencer = await db.get(Influencer, influencer_id)
