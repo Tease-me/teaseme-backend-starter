@@ -32,6 +32,22 @@ router = APIRouter(prefix="/chat18", tags=["chat18"])
 
 log = logging.getLogger("chat18")
 
+
+async def _get_message_context(db: AsyncSession, chat_id: str, limit: int = 6) -> str:
+    recent_res = await db.execute(
+        select(Message18)
+        .where(Message18.chat_id == chat_id)
+        .order_by(Message18.created_at.desc())
+        .limit(limit)
+    )
+    recent = list(recent_res.scalars().all())
+    recent.reverse()
+    context_lines = []
+    for msg in recent:
+        speaker = "User" if msg.sender == "user" else "AI"
+        context_lines.append(f"{speaker}: {msg.content or ''}")
+    return "\n".join(context_lines)
+
 @router.post("/")
 async def start_chat(
     data: ChatCreateRequest, 
@@ -293,7 +309,8 @@ async def websocket_chat(
                 log.exception("[WS %s] Failed to save user message", chat_id)
 
             try:
-                mod_result = await moderate_message(text, "", db)
+                context = await _get_message_context(db, chat_id)
+                mod_result = await moderate_message(text, context, db)
                 if mod_result.action == "FLAG":
                     await handle_violation(
                         db=db,
@@ -301,7 +318,7 @@ async def websocket_chat(
                         chat_id=chat_id,
                         influencer_id=influencer_id,
                         message=text,
-                        context="",
+                        context=context,
                         result=mod_result
                     )
                     log.warning("Flagged user=%s category=%s", user_id, mod_result.category)
