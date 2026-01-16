@@ -158,7 +158,7 @@ def _format_transcript_entries(transcript: List[Dict[str, Any]]) -> str:
 
 def _format_redis_history(chat_id: str, influencer_id: str, limit: int = 12) -> Optional[str]:
     try:
-        history = redis_history(chat_id, influencer_id)
+        history = redis_history(chat_id)
     except Exception as exc:  # pragma: no cover - defensive
         log.warning("redis_history.fetch_failed chat=%s err=%s", chat_id, exc)
         return None
@@ -1063,7 +1063,7 @@ async def _persist_transcript_to_chat(
     await db.commit()
     # Push to Redis so turn_handler can see call history immediately.
     try:
-        history = redis_history(chat_id, influencer_id)
+        history = redis_history(chat_id)
         for msg in new_messages:
             if msg.sender == "user":
                 history.add_user_message(msg.content)
