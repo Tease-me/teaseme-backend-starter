@@ -20,6 +20,8 @@ from app.api.notify_ws import notify_email_verified
 from app.services.firstpromoter import fp_track_signup
 from app.schemas.user import UserOut
 from app.utils.s3 import generate_user_presigned_url
+from app.services.follow import create_follow_if_missing
+from app.services.influencer import ensure_influencer
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -74,6 +76,9 @@ async def register(data: RegisterRequest, request: Request, db: AsyncSession = D
     if existing_user.scalar():
         raise HTTPException(status_code=200, detail="Username or email already registered")
 
+    if data.influencer_id:
+        await ensure_influencer(db, data.influencer_id)
+
     verify_token = secrets.token_urlsafe(32)           
 
     user = User(
@@ -85,6 +90,9 @@ async def register(data: RegisterRequest, request: Request, db: AsyncSession = D
     db.add(user)
     await db.commit()
     await db.refresh(user)
+
+    if data.influencer_id:
+        await create_follow_if_missing(db, data.influencer_id, user.id)
 
     try:
         tid = getattr(data, "fp_tid", None) or request.cookies.get("_fprom_tid")
