@@ -633,6 +633,17 @@ async def list_pre_influencers(status: str | None = None, db: AsyncSession = Dep
 def normalize_influencer_id(username: str) -> str:
     return re.sub(r"[^a-z0-9_]", "", username.lower())
 
+@router.get("/{pre_id}")
+async def get_pre_influencer(
+    pre_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    q = select(PreInfluencer).where(PreInfluencer.id == pre_id)
+    row = (await db.execute(q)).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="PreInfluencer not found")
+    return row
+
 @router.post("/{pre_id}/approve")
 async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)):
     pre = await db.get(PreInfluencer, pre_id)
