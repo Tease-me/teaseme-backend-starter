@@ -7,7 +7,7 @@ from app.db.models import Influencer
 import base64
 import io
 from PIL import Image
-from app.utils.s3 import s3
+from app.utils.s3 import generate_user_presigned_url, s3
 from app.core.config import settings
 
 
@@ -21,10 +21,13 @@ AWS_SECRET_ACCESS_KEY = settings.SES_AWS_SECRET_ACCESS_KEY
 
 ses_client = boto3.client("ses", region_name=AWS_REGION)
 
+EMAIL_VERIFY_HEADER_URL = "https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/email_verify_header.png"
+EMAIL_RESET_HEADER_URL = "https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/reset_password_header.png"
+
 def send_verification_email(to_email: str, token: str):
     subject = "Confirm your email on TeaseMe!"
     confirm_url = f"{CONFIRM_BASE_URL}/verify-email?token={token}"
-    logo_url = f"https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/email_verify_header.png"
+    logo_url = EMAIL_VERIFY_HEADER_URL
 
     body_html = f"""
 <!DOCTYPE html>
@@ -89,9 +92,7 @@ def send_verification_email(to_email: str, token: str):
 def send_profile_survey_email(to_email: str, token: str, temp_password: str):
     subject = "Complete Your TeaseMe Profile Survey"
     survey_url = f"{CONFIRM_BASE_URL}/profile-survey-form?token={token}&temp_password={temp_password}"
-    logo_url = (
-        "https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/email_verify_header.png"
-    )
+    logo_url = EMAIL_VERIFY_HEADER_URL
 
     body_html = f"""
     <!DOCTYPE html>
@@ -210,7 +211,7 @@ def send_email_via_ses(to_email, subject, body_html, body_text=None):
 def send_password_reset_email(to_email: str, token: str):
     subject = "Redefine your TeaseMe password"
     reset_url = f"{CONFIRM_BASE_URL}/reset-password?token={token}"
-    logo_url = f"https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/reset_password_header.png"
+    logo_url = EMAIL_RESET_HEADER_URL
 
     body_html = f"""
         <!DOCTYPE html>
@@ -276,36 +277,22 @@ def send_password_reset_email(to_email: str, token: str):
 
 def image_data_url(key: str) -> str:
     """
-    Fetch an S3 object and return it as a PNG data URL.
+    Return an image URL for email templates.
 
-    Note: logs are intentionally metadata-only (no image contents).
+    NOTE:
+    - Many email clients (incl. Gmail) don't reliably render `data:` URLs.
+    - So we generate a long-lived presigned HTTPS URL instead.
     """
     try:
+        expires = 60 * 60 * 24 * 7  # 7 days (max for SigV4 presign)
+        url = generate_user_presigned_url(key, expires=expires)
         log.info(
-            f"image_data_url: fetching s3 object bucket={settings.BUCKET_NAME} key={key}",
-            extra={"bucket": settings.BUCKET_NAME, "key": key},
+            f"image_data_url: generated presigned url bucket={settings.BUCKET_NAME} key={key} expires={expires}"
         )
-        obj = s3.get_object(Bucket=settings.BUCKET_NAME, Key=key)
-        raw = obj["Body"].read()
-        log.debug(
-            f"image_data_url: downloaded bytes bucket={settings.BUCKET_NAME} key={key} bytes={len(raw)}",
-            extra={"bucket": settings.BUCKET_NAME, "key": key, "bytes": len(raw)},
-        )
-
-        img = Image.open(io.BytesIO(raw)).convert("RGB")
-        out = io.BytesIO()
-        img.save(out, format="PNG")
-        png_bytes = out.getvalue()
-        log.debug(
-            f"image_data_url: encoded png bucket={settings.BUCKET_NAME} key={key} png_bytes={len(png_bytes)}",
-            extra={"bucket": settings.BUCKET_NAME, "key": key, "png_bytes": len(png_bytes)},
-        )
-
-        b64 = base64.b64encode(png_bytes).decode("ascii")
-        return f"data:image/png;base64,{b64}"
+        return url
     except Exception:
         log.exception(
-            f"image_data_url: failed to build data url from s3 object bucket={settings.BUCKET_NAME} key={key}",
+            f"image_data_url: failed to generate presigned url bucket={settings.BUCKET_NAME} key={key}",
             extra={"bucket": settings.BUCKET_NAME, "key": key},
         )
         raise
@@ -319,7 +306,7 @@ def send_new_influencer_email(
     public_url = f"https://teaseme.live/{influencer.id}"
     referral_url = f"{public_url}?fpr={fp_ref_id}" if fp_ref_id else None
 
-    logo_url = "https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/email_verify_header.png"
+    logo_url = EMAIL_VERIFY_HEADER_URL
     if influencer.profile_picture_key:
         try:
             logo_url = image_data_url(influencer.profile_picture_key)
@@ -428,6 +415,7 @@ def send_new_influencer_email_with_picture(
 ):
     subject = "🎉 Your TeaseMe profile is live!"
     public_url = f"https://teaseme.live/{influencer.id}"
+    image_background_url = "https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/influencer_header_background.png"
     key = getattr(influencer, "profile_photo_key", None)
     log.info(
         f"send_new_influencer_email_with_picture: building email influencer_id={influencer.id} has_profile_photo_key={bool(key)}",
@@ -438,7 +426,7 @@ def send_new_influencer_email_with_picture(
             "profile_photo_key": key,
         },
     )
-    logo_url = "https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/email_verify_header.png"
+    logo_url = EMAIL_VERIFY_HEADER_URL
     if key:
         try:
             logo_url = image_data_url(key)
