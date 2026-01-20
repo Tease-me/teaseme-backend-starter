@@ -19,7 +19,6 @@ COPY ./app ./app
 COPY ./alembic.ini ./
 COPY ./poetry.lock ./
 COPY ./pyproject.toml ./
-COPY ./redis_dump_all.py ./
 COPY .env ./
 COPY ./.cert ./.cert
 
