@@ -171,8 +171,7 @@ async def get_user_usage(
         },
     }
 
-
-
+@router.get("/{id}", response_model=UserOut)
 async def get_user_by_id(
     id: int,
     current_user: User = Depends(get_current_user),
