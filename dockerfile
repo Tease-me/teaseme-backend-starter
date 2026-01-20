@@ -30,5 +30,7 @@ RUN apt-get purge -y curl build-essential \
 COPY ./alembic ./alembic
 COPY ./app ./app
 COPY ./alembic.ini ./
+COPY ./poetry.lock ./
+COPY ./pyproject.toml ./
 COPY .env ./
 COPY ./.cert ./.cert

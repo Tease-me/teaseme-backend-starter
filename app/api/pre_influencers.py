@@ -16,6 +16,7 @@ from fastapi import (
     UploadFile,
     File,
     Form,
+    Query,
     Response,
     status
 )
@@ -118,6 +119,30 @@ def _unwrap_json(raw: str) -> str:
         if text.endswith("```"):
             text = text.rsplit("```", 1)[0]
     return text.strip()
+
+def _require_pre_influencer_survey_access(
+    pre: PreInfluencer,
+    token: str,
+    temp_password: str,
+) -> None:
+    if (
+        not pre.survey_token
+        or not token
+        or not secrets.compare_digest(pre.survey_token, token)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invalid or expired survey link",
+        )
+    if (
+        not pre.password
+        or not temp_password
+        or not secrets.compare_digest(pre.password, temp_password)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid temporary password",
+        )
 
 
 async def _generate_prompt_from_markdown(markdown: str, additional_prompt: str | None, db:AsyncSession) -> str:
@@ -325,7 +350,11 @@ async def resend_pre_influencer_survey(
     }
 
 @router.get("/survey", response_model=SurveyState)
-async def open_survey(token: str, db: AsyncSession = Depends(get_db)):
+async def open_survey(
+    token: str,
+    temp_password: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(
         select(PreInfluencer).where(PreInfluencer.survey_token == token)
     )
@@ -336,6 +365,8 @@ async def open_survey(token: str, db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Invalid or expired survey link",
         )
+
+    _require_pre_influencer_survey_access(pre, token, temp_password)
 
     return SurveyState(
         pre_influencer_id=pre.id,
@@ -456,6 +487,8 @@ async def _notify_parent_promoter_if_needed(pre: PreInfluencer, db: AsyncSession
 async def save_survey_state(
     pre_id: int,
     data: SurveySaveRequest,
+    token: str = Query(...),
+    temp_password: str = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -465,6 +498,8 @@ async def save_survey_state(
 
     if not pre:
         raise HTTPException(status_code=404, detail="Pre-influencer not found")
+
+    _require_pre_influencer_survey_access(pre, token, temp_password)
 
     incoming_answers: dict = data.survey_answers or {}
     existing_answers = pre.survey_answers or {}
@@ -500,6 +535,8 @@ async def save_survey_state(
 @router.post("/upload-picture")
 async def upload_pre_influencer_picture(
     pre_influencer_id: int = Form(...),
+    token: str = Query(...),
+    temp_password: str = Query(...),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     
@@ -511,6 +548,8 @@ async def upload_pre_influencer_picture(
 
     if not pre:
         raise HTTPException(status_code=404, detail="Pre-influencer not found")
+
+    _require_pre_influencer_survey_access(pre, token, temp_password)
 
     if not pre.username:
         raise HTTPException(
@@ -554,6 +593,8 @@ async def upload_pre_influencer_picture(
 @router.get("/{pre_id}/picture-url")
 async def get_pre_influencer_picture_url(
     pre_id: int,
+    token: str = Query(...),
+    temp_password: str = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -563,6 +604,8 @@ async def get_pre_influencer_picture_url(
 
     if not pre:
         raise HTTPException(status_code=404, detail="Pre-influencer not found")
+
+    _require_pre_influencer_survey_access(pre, token, temp_password)
 
     answers = pre.survey_answers or {}
     key = answers.get("profile_picture_key")
