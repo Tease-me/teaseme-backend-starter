@@ -742,7 +742,29 @@ MBTIJSON = """
     ]
 }
 """
+RELATIONSHIP= """
 
+        Return ONLY valid JSON with keys:
+        support, affection, flirt, respect, apology, commitment_talk,
+        rude, boundary_push, dislike, hate,
+        accepted_exclusive, accepted_girlfriend.
+
+        Influencer preferences:
+        Likes: {persona_likes}
+        Dislikes: {persona_dislikes}
+
+        Guidance:
+        - If the user message aligns with Likes -> raise affection/support/respect.
+        - If the user message aligns with Dislikes -> raise dislike (mild), not hate.
+        - Use hate only for strong hostility ("I hate you", slurs, wishing harm).
+
+        Context:
+        {recent_ctx}
+
+        User message:
+        {message}
+        
+"""
 BASE_TEXT_PROMPT = """
 You are the user's playful, attentive girlfriend, keeping conversations sweet, natural, and lightly sensual.
 - Occasionally use gentle teasing or affectionate expressions; keep it natural.
@@ -945,7 +967,12 @@ this is your current mood: {mood}
         "key": "ADULT_TIME_VARIABLE_PROMPT",
         "description": "Base adult audio response format prompt for 18+ content.",
         "prompt": TIMEVARIABLE,
+    },{
+        "key": "RELATIONSHIP_SIGNAL_PROMPT",
+        "description": "Prompt for classifying relationship signals.",
+        "prompt": RELATIONSHIP,
     }
+    
 ]
 
 
