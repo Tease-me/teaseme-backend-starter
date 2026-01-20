@@ -263,7 +263,6 @@ def send_password_reset_email(to_email: str, token: str):
         </html>
         """
 
-
     body_text = f"Reset your TeaseMe password by clicking this link: {reset_url}"
 
     return send_email_via_ses(to_email, subject, body_html, body_text)

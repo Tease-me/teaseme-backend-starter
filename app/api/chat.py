@@ -12,11 +12,16 @@ from app.db.session import get_db
 from app.db.models import Message, Chat
 from jose import jwt
 from app.api.utils import get_embedding
+from app.services.relationship import _get_relationship_payload
+from app.services.user import _get_usage_snapshot_simple
+
 from starlette.websockets import WebSocketDisconnect
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.chat_service import get_or_create_chat
 from app.schemas.chat import ChatCreateRequest,PaginatedMessages
+from app.db.models import User
+from app.utils.deps import get_current_user
 
 from app.core.config import settings
 from app.utils.chat import transcribe_audio, synthesize_audio_with_elevenlabs_V3, get_ai_reply_via_websocket
@@ -32,10 +37,13 @@ log = logging.getLogger("chat")
 
 @router.post("/")
 async def start_chat(
-    data: ChatCreateRequest, 
-    db: AsyncSession = Depends(get_db)
+    data: ChatCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    chat_id = await get_or_create_chat(db, data.user_id, data.influencer_id)
+    if data.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    chat_id = await get_or_create_chat(db, current_user.id, data.influencer_id)
     return {"chat_id": chat_id}
 
 # TODO: add code in the right place
@@ -134,7 +142,6 @@ async def _flush_buffer(
     if not buf:
         return
 
-    # Drain messages atomically
     async with buf.lock:
         if not buf.messages:
             return
@@ -147,7 +154,7 @@ async def _flush_buffer(
 
     log.info("[BUF %s] FLUSH start; user_text=%r", chat_id, user_text)
 
-    # 1) Billing per flush (burst)
+    # 1) Billing
     try:
         await charge_feature(
             db,
@@ -157,9 +164,6 @@ async def _flush_buffer(
             units=1,
             meta={"chat_id": chat_id},
         )
-        # ⚠ If charge_feature() commits internally, don't commit here.
-        # If it does NOT commit, you may commit here with a guarded commit.
-        # await db.commit()
     except Exception:
         try:
             await db.rollback()
@@ -169,7 +173,7 @@ async def _flush_buffer(
         await ws.send_json({"error": "⚠️ Billing error. Please try again."})
         return
 
-    # 2) Get LLM reply
+    # 2) LLM
     try:
         log.info("[BUF %s] calling handle_turn()", chat_id)
         reply = await handle_turn(
@@ -180,10 +184,8 @@ async def _flush_buffer(
             db=db,
             is_audio=False,
         )
-        log.info("[BUF %s] handle_turn ok (reply_len=%d)", chat_id, len(reply or ""))
     except Exception:
         log.exception("[BUF %s] handle_turn error", chat_id)
-        # try to tell the client but don't crash if socket closed
         try:
             await ws.send_json({"error": "Sorry, something went wrong. 😔"})
         except Exception:
@@ -201,9 +203,29 @@ async def _flush_buffer(
             pass
         log.exception("[BUF %s] Failed to save AI message", chat_id)
 
-    # 4) Send to client
+    # ✅ 4) Fetch relationship snapshot and send together
     try:
-        await ws.send_json({"reply": reply})
+        rel_payload = await _get_relationship_payload(db, user_id, influencer_id)
+    except Exception:
+        log.exception("[BUF %s] Failed to load relationship snapshot", chat_id)
+        rel_payload = None
+
+    try:
+        usage_payload = await _get_usage_snapshot_simple(
+            db,
+            user_id=user_id,
+            influencer_id=influencer_id,
+            is_18= False,
+        )
+    except Exception:
+            log.exception("[BUF %s] Failed to load relationship snapshot", chat_id)
+            usage_payload = None
+    try:
+        await ws.send_json({
+            "reply": reply,
+            "relationship": rel_payload,
+            "usage": usage_payload,
+        })
         log.info("[BUF %s] ws.send_json done", chat_id)
     except Exception:
         log.exception("[BUF %s] Failed to send reply", chat_id)
@@ -297,8 +319,12 @@ async def get_chat_history(
     chat_id: str,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    chat = await db.get(Chat, chat_id)
+    if not chat or chat.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this chat")
     total_result = await db.execute(
         select(func.count()).where(Message.chat_id == chat_id)
     )
