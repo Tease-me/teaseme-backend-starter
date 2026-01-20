@@ -9,7 +9,7 @@ from app.relationship.inactivity import apply_inactivity_decay
 from app.relationship.repo import get_or_create_relationship
 import httpx
 from datetime import datetime, timedelta, timezone
-
+from app.moderation import moderate_message, handle_violation
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from itertools import chain
@@ -159,7 +159,7 @@ def _format_transcript_entries(transcript: List[Dict[str, Any]]) -> str:
 
 def _format_redis_history(chat_id: str, influencer_id: str, limit: int = 12) -> Optional[str]:
     try:
-        history = redis_history(chat_id, influencer_id)
+        history = redis_history(chat_id)
     except Exception as exc:  # pragma: no cover - defensive
         log.warning("redis_history.fetch_failed chat=%s err=%s", chat_id, exc)
         return None
@@ -943,7 +943,18 @@ async def _persist_transcript_to_chat(
     transcript = conversation_json.get("transcript") or []
     if not transcript:
         return 0
-
+    chat = await db.get(Chat, chat_id)
+    user_id = chat.user_id if chat else None
+    resolved_influencer_id = influencer_id or (chat.influencer_id if chat else None)
+    if not chat: 
+        log.warning(
+            log.warning(
+                "_persist_transcript.chat_not_found conv=%s chat=%s",
+                conversation_id,
+                chat_id,
+            )
+        )
+    moderation_enabled =  bool(user_id and resolved_influencer_id)
     # Approximate message timestamps using call start + offset if provided.
     start_ts = (conversation_json.get("metadata") or {}).get("start_time_unix_secs")
     base_dt = (
@@ -959,7 +970,7 @@ async def _persist_transcript_to_chat(
         .limit(25)
     )
     recent = list(recent_res.scalars().all())
-
+    context_lines: List[str] = []
     new_messages: List[Message] = []
     seen: set[tuple[str, str]] = set()
 
@@ -991,7 +1002,33 @@ async def _persist_transcript_to_chat(
 
         if _is_dup(sender, text):
             continue
-
+        if moderation_enabled and sender == "user":
+            context = "\n".join(context_lines[-6:]) if context_lines else ""
+            try: 
+                mod_result = await moderate_message(text, context, db)
+                if mod_result.action == "FLAG":
+                    await handle_violation(
+                        db=db,
+                        user_id=user_id,
+                        chat_id=chat_id,
+                        influencer_id=resolved_influencer_id,
+                        message=text,
+                        context=context,
+                        result=mod_result,
+                    )
+                    log.logging.warning(
+                        "persist_transcript.violation chat=%s conv=%s msg=%s",
+                        chat_id,
+                        conversation_id,
+                        text,
+                    )
+            except Exception as exc:
+                log.exception(
+                    "presist_transcript.moderation_failed chat=%s conv=%s err=%s",
+                    chat_id,
+                    conversation_id,
+                    exc,
+                )
         t_secs = entry.get("time_in_call_secs")
         created_at = (
             base_dt + timedelta(seconds=float(t_secs))
@@ -1017,6 +1054,8 @@ async def _persist_transcript_to_chat(
                 conversation_id=conversation_id,
             )
         )
+        speaker = "User" if sender == "user" else "AI"
+        context_lines.append(f"{speaker}: {text}")
 
     if not new_messages:
         return 0
@@ -1025,7 +1064,7 @@ async def _persist_transcript_to_chat(
     await db.commit()
     # Push to Redis so turn_handler can see call history immediately.
     try:
-        history = redis_history(chat_id, influencer_id)
+        history = redis_history(chat_id)
         for msg in new_messages:
             if msg.sender == "user":
                 history.add_user_message(msg.content)
