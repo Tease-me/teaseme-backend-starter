@@ -10,6 +10,7 @@ from app.db.models import (
     InfluencerSubscription,
     InfluencerSubscriptionPayment,
     InfluencerWallet,
+    User
 )
 from app.services.influencer_subscriptions import require_active_subscription
 
@@ -160,6 +161,55 @@ async def expire_subscriptions(db: AsyncSession = Depends(get_db)):
     )
     await db.commit()
     return {"ok": True}
+
+
+class CancelSubscriptionBody(BaseModel):
+    influencer_id: str
+    reason: str | None = None
+
+@router.post("/cancel")
+async def cancel_subscription(
+    body: CancelSubscriptionBody,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    now = datetime.now(timezone.utc)
+
+    sub = await db.scalar(
+        select(InfluencerSubscription).where(
+            InfluencerSubscription.user_id == user.id,
+            InfluencerSubscription.influencer_id == body.influencer_id,
+        )
+    )
+
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+
+    if sub.status in ("canceled", "expired"):
+        return {
+            "ok": True,
+            "status": sub.status,
+            "message": "Subscription already canceled",
+        }
+
+    sub.status = "canceled"
+    sub.canceled_at = now
+    sub.cancel_reason = body.reason
+
+    db.add(sub)
+    await db.commit()
+    await db.refresh(sub)
+
+    return {
+        "ok": True,
+        "user_id": user.id,
+        "influencer_id": sub.influencer_id,
+        "status": sub.status,
+        "canceled_at": sub.canceled_at.isoformat(),
+        "current_period_end": sub.current_period_end.isoformat()
+        if sub.current_period_end
+        else None,
+    }
 
 class Set18Req(BaseModel):
     is_18_selected: bool
