@@ -17,6 +17,8 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.chat_service import get_or_create_chat18
 from app.schemas.chat import ChatCreateRequest,PaginatedMessages
+from app.db.models import User
+from app.utils.deps import get_current_user
 
 from app.core.config import settings
 from app.utils.chat import transcribe_audio, synthesize_audio_with_elevenlabs_V3
@@ -24,6 +26,7 @@ from app.utils.s3 import save_audio_to_s3, save_ia_audio_to_s3, generate_presign
 from app.services.billing import charge_feature, get_duration_seconds, can_afford
 from app.services.influencer_subscriptions import require_active_subscription
 from app.moderation import moderate_message, handle_violation
+from app.services.user import _get_usage_snapshot_simple
 
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = settings.ALGORITHM
@@ -50,10 +53,13 @@ async def _get_message_context(db: AsyncSession, chat_id: str, limit: int = 6) -
 
 @router.post("/")
 async def start_chat(
-    data: ChatCreateRequest, 
-    db: AsyncSession = Depends(get_db)
+    data: ChatCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    chat_id = await get_or_create_chat18(db, data.user_id, data.influencer_id)
+    if data.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    chat_id = await get_or_create_chat18(db, current_user.id, data.influencer_id)
     return {"chat_id": chat_id}
 
 # ---------- Buffer state ----------
@@ -225,9 +231,20 @@ async def _flush_buffer(
             pass
         log.exception("[BUF %s] Failed to save AI message", chat_id)
 
+    try:
+        usage_payload = await _get_usage_snapshot_simple(
+            db,
+            user_id=user_id,
+            influencer_id=influencer_id,
+            is_18= True,
+        )
+    except Exception:
+            log.exception("[BUF %s] Failed to load relationship snapshot", chat_id)
+            usage_payload = None
+
     # 4) Send to client
     try:
-        await ws.send_json({"reply": reply})
+        await ws.send_json({"reply": reply, "usage": usage_payload,})
         log.info("[BUF %s] ws.send_json done", chat_id)
     except Exception:
         log.exception("[BUF %s] Failed to send reply", chat_id)
@@ -353,8 +370,12 @@ async def get_chat_history(
     chat_id: str,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    chat = await db.get(Chat18, chat_id)
+    if not chat or chat.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this chat")
     total_result = await db.execute(
         select(func.count()).where(Message18.chat_id == chat_id)
     )

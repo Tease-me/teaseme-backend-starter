@@ -81,7 +81,7 @@ def send_verification_email(to_email: str, token: str):
 
 def send_profile_survey_email(to_email: str, token: str, temp_password: str):
     subject = "Complete Your TeaseMe Profile Survey"
-    survey_url = f"{CONFIRM_BASE_URL}/profile-survey-form?token={token}"
+    survey_url = f"{CONFIRM_BASE_URL}/profile-survey-form?token={token}&temp_password={temp_password}"
     logo_url = (
         "https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/email_verify_header.png"
     )
@@ -132,18 +132,6 @@ def send_profile_survey_email(to_email: str, token: str, temp_password: str):
                     Start Profile Survey
                   </a>
 
-                  <p style="font-size:14px;color:#666;margin:12px 0 8px 0;">
-                    Your session identifier is:
-                  </p>
-
-                  <div style="display:inline-block;padding:10px 18px;border-radius:8px;background:#f3f4ff;
-                              font-family:monospace;font-size:16px;color:#333;margin-bottom:16px;">
-                    {temp_password}
-                  </div>
-                   <p style="font-size:12px;color:#666;margin:2px 0 8px 0;">
-                    You will only need this if support asks for it.
-                  </p>
-
                   <p style="margin:24px 0 0 0; font-size:14px; color:#bbb;">
                     If you didn’t request this, you can safely ignore the email.<br/>
                     Your persona can't wait to meet you. ❤️
@@ -174,8 +162,6 @@ You're all set! Before your AI companion goes live, we just need a little more i
 
 Start your profile survey here:
 {survey_url}
-
-Your temporary password: {temp_password}
 
 If you didn’t request this, you can safely ignore this email.
 Your persona can't wait to meet you. ❤️
@@ -276,7 +262,6 @@ def send_password_reset_email(to_email: str, token: str):
         </body>
         </html>
         """
-
 
     body_text = f"Reset your TeaseMe password by clicking this link: {reset_url}"
 

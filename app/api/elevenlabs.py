@@ -15,8 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from itertools import chain
 from typing import Any, Dict, List, Optional
 from app.core.config import settings
-from app.db.models import Influencer, Chat, Message, CallRecord
+from app.db.models import Influencer, Chat, Message, CallRecord, User
 from app.db.session import get_db
+from app.utils.deps import get_current_user
 from app.schemas.elevenlabs import FinalizeConversationBody, RegisterConversationBody, UpdatePromptBody
 from app.services.billing import charge_feature,_get_influencer_id_from_chat
 from sqlalchemy import insert, select, text
@@ -1093,13 +1094,14 @@ async def _persist_transcript_to_chat(
 @router.get("/signed-url")
 async def get_signed_url(
     influencer_id: str,
-    user_id: int = Query(..., description="Numeric user id"),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     first_message: Optional[str] = Query(None),
     greeting_mode: str = Query("random", pattern="^(random|rr)$"),
 ):
+    user_id = current_user.id
     ok, cost_cents, free_left = await can_afford(
-        db, user_id=user_id,influencer_id=influencer_id, feature="live_chat", units=10
+        db, user_id=user_id, influencer_id=influencer_id, feature="live_chat", units=10
     )
 
     if not ok:
@@ -1139,11 +1141,12 @@ async def get_signed_url(
 @router.get("/conversation-token")
 async def get_conversation_token(
     influencer_id: str,
-    user_id: int = Query(..., description="Numeric user id"),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    user_id = current_user.id
     ok, cost_cents, free_left = await can_afford(
-        db, user_id=user_id,influencer_id=influencer_id, feature="live_chat", units=10
+        db, user_id=user_id, influencer_id=influencer_id, feature="live_chat", units=10
     )
 
     if not ok:
@@ -1358,10 +1361,13 @@ async def was_already_billed(db: AsyncSession, conversation_id: str) -> bool:
 async def register_conversation(
     conversation_id: str,
     body: RegisterConversationBody,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    if body.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
     chat_id = await save_pending_conversation(
-        db, conversation_id, body.user_id, body.influencer_id, body.sid
+        db, conversation_id, current_user.id, body.influencer_id, body.sid
     )
     if not chat_id:
         try:
@@ -1391,8 +1397,11 @@ async def register_conversation(
 async def finalize_conversation(
     conversation_id: str,
     body: FinalizeConversationBody,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    if body.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
     async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
         snapshot = await _wait_until_terminal_status(
             client,
@@ -1557,6 +1566,7 @@ def _default_auto_commit() -> bool:
 @router.post("/update-prompt")
 async def update_elevenlabs_prompt(
     body: UpdatePromptBody,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     auto_commit: bool = Depends(_default_auto_commit),
 ):
@@ -1643,13 +1653,13 @@ async def update_elevenlabs_prompt(
 @router.get("/calls/{conversation_id}")
 async def get_call_details(
     conversation_id: str,
-    user_id: int = Query(..., description="Numeric user id for authz"),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     call = await db.get(CallRecord, conversation_id)
     if not call:
         raise HTTPException(404, "Call not found")
-    if call.user_id != user_id:
+    if call.user_id != current_user.id:
         raise HTTPException(403, "Forbidden")
 
     transcript = call.transcript or []

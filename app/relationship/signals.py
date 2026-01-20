@@ -1,5 +1,7 @@
 import json
-
+from app.services.system_prompt_service import get_system_prompt
+from app.db.session import get_db
+db = get_db()
 DEFAULT = {
     "support": 0.0, "affection": 0.0, "flirt": 0.0, "respect": 0.0,
     "apology": 0.0, "commitment_talk": 0.0,
@@ -29,28 +31,7 @@ async def classify_signals(
     persona_dislikes: list[str],
     llm
 ) -> dict:
-    prompt = f"""
-        Return ONLY valid JSON with keys:
-        support, affection, flirt, respect, apology, commitment_talk,
-        rude, boundary_push, dislike, hate,
-        accepted_exclusive, accepted_girlfriend.
-
-        Influencer preferences:
-        Likes: {persona_likes}
-        Dislikes: {persona_dislikes}
-
-        Guidance:
-        - If the user message aligns with Likes -> raise affection/support/respect.
-        - If the user message aligns with Dislikes -> raise dislike (mild), not hate.
-        - Use hate only for strong hostility ("I hate you", slurs, wishing harm).
-
-        Context:
-        {recent_ctx}
-
-        User message:
-        {message}
-        """
-
+    prompt = get_system_prompt(db, "RELATIONSHIP_SIGNAL_PROMPT")
     try:
         r = await llm.ainvoke(prompt)
         data = json.loads((r.content or "").strip())

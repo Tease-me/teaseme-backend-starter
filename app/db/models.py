@@ -199,8 +199,8 @@ class InfluencerWallet(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("user_id", "influencer_id", name="uq_user_influencer_wallet"),
-        Index("ix_infl_wallet_user_infl", "user_id", "influencer_id"),
+        UniqueConstraint("user_id", "influencer_id", "is_18", name="uq_user_influencer_wallet_mode"),
+        Index("ix_infl_wallet_user_infl_mode", "user_id", "influencer_id", "is_18"),
     )
 
 
