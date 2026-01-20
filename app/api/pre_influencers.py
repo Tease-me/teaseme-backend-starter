@@ -39,6 +39,7 @@ from app.schemas.pre_influencer import (
 )
 from app.core.config import settings
 from app.utils.email import (
+    send_new_influencer_email_with_picture,
     send_profile_survey_email,
     send_new_influencer_email,
     send_influencer_survey_completed_email_to_promoter,
@@ -711,7 +712,6 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
 
     influencer = await db.get(Influencer, influencer_id)
 
-    
     sections = _load_survey_questions()
     markdown = _format_survey_markdown(sections, pre.survey_answers or {}, pre.username)
     prompt = await _generate_prompt_from_markdown(markdown, additional_prompt=None, db=db)
@@ -761,6 +761,34 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
         profile_picture_key=profile_picture_key,
         influencer=influencer,
         fp_ref_id=influencer.fp_ref_id,
+    )
+
+    return {
+        "ok": True,
+        "influencer_id": influencer.id,
+        "fp_ref_id": influencer.fp_ref_id,
+        "fp_promoter_id": influencer.fp_promoter_id,
+    }
+
+
+@router.post("/send-test-email")
+async def send_test_email(influencer_id: str, to_email: str, db: AsyncSession = Depends(get_db)):
+    if not influencer_id:
+        raise HTTPException(400, "Invalid influencer id")
+
+    influencer = await db.get(Influencer, influencer_id)
+    if not influencer:
+        log.warning(f"send_test_email: influencer not found influencer_id={influencer_id}")
+        raise HTTPException(404, "Influencer not found")
+
+    log.info(
+        "send_test_email: sending test email "
+        f"influencer_id={influencer.id} to_email={to_email} profile_photo_key={influencer.profile_photo_key}"
+    )
+
+    send_new_influencer_email_with_picture(
+        to_email=to_email,
+        influencer=influencer,
     )
 
     return {

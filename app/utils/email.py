@@ -274,21 +274,45 @@ def send_password_reset_email(to_email: str, token: str):
 
     return send_email_via_ses(to_email, subject, body_html, body_text)
 
-def pre_influencer_image_data_url(key: str) -> str:
-    obj = s3.get_object(Bucket=settings.BUCKET_NAME, Key=key)
-    raw = obj["Body"].read()
+def image_data_url(key: str) -> str:
+    """
+    Fetch an S3 object and return it as a PNG data URL.
 
-    img = Image.open(io.BytesIO(raw)).convert("RGB")
-    out = io.BytesIO()
-    img.save(out, format="PNG")
+    Note: logs are intentionally metadata-only (no image contents).
+    """
+    try:
+        log.info(
+            f"image_data_url: fetching s3 object bucket={settings.BUCKET_NAME} key={key}",
+            extra={"bucket": settings.BUCKET_NAME, "key": key},
+        )
+        obj = s3.get_object(Bucket=settings.BUCKET_NAME, Key=key)
+        raw = obj["Body"].read()
+        log.debug(
+            f"image_data_url: downloaded bytes bucket={settings.BUCKET_NAME} key={key} bytes={len(raw)}",
+            extra={"bucket": settings.BUCKET_NAME, "key": key, "bytes": len(raw)},
+        )
 
-    b64 = base64.b64encode(out.getvalue()).decode("ascii")
-    return f"data:image/png;base64,{b64}"
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
+        out = io.BytesIO()
+        img.save(out, format="PNG")
+        png_bytes = out.getvalue()
+        log.debug(
+            f"image_data_url: encoded png bucket={settings.BUCKET_NAME} key={key} png_bytes={len(png_bytes)}",
+            extra={"bucket": settings.BUCKET_NAME, "key": key, "png_bytes": len(png_bytes)},
+        )
+
+        b64 = base64.b64encode(png_bytes).decode("ascii")
+        return f"data:image/png;base64,{b64}"
+    except Exception:
+        log.exception(
+            f"image_data_url: failed to build data url from s3 object bucket={settings.BUCKET_NAME} key={key}",
+            extra={"bucket": settings.BUCKET_NAME, "key": key},
+        )
+        raise
   
 def send_new_influencer_email(
     to_email: str,
     influencer: Influencer,
-    profile_picture_key: str | None = None,
     fp_ref_id: str | None = None,
 ):
     subject = "🎉 Your TeaseMe profile is live!"
@@ -296,9 +320,9 @@ def send_new_influencer_email(
     referral_url = f"{public_url}?fpr={fp_ref_id}" if fp_ref_id else None
 
     logo_url = "https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/email_verify_header.png"
-    if profile_picture_key:
+    if influencer.profile_picture_key:
         try:
-            logo_url = pre_influencer_image_data_url(profile_picture_key)
+            logo_url = image_data_url(influencer.profile_picture_key)
         except Exception:
             log.warning("Failed to load pre-influencer image for email", exc_info=True)
 
@@ -398,6 +422,110 @@ Open your profile:
 
     return send_email_via_ses(to_email, subject, body_html, body_text)
 
+def send_new_influencer_email_with_picture(
+    to_email: str,
+    influencer: Influencer,
+):
+    subject = "🎉 Your TeaseMe profile is live!"
+    public_url = f"https://teaseme.live/{influencer.id}"
+    key = getattr(influencer, "profile_photo_key", None)
+    log.info(
+        f"send_new_influencer_email_with_picture: building email influencer_id={influencer.id} has_profile_photo_key={bool(key)}",
+        extra={
+            "to_email": to_email,
+            "influencer_id": str(influencer.id),
+            "has_profile_photo_key": bool(key),
+            "profile_photo_key": key,
+        },
+    )
+    logo_url = "https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/email_verify_header.png"
+    if key:
+        try:
+            logo_url = image_data_url(key)
+            log.info(
+                f"send_new_influencer_email_with_picture: using influencer profile photo influencer_id={influencer.id} key={key}",
+                extra={"influencer_id": str(influencer.id), "key": key},
+            )
+        except Exception:
+            log.warning("Failed to load influencer image for email", exc_info=True)
+    else:
+        log.info(
+            f"send_new_influencer_email_with_picture: using default header image influencer_id={influencer.id}",
+            extra={"influencer_id": str(influencer.id)},
+        )
+
+    temp_pw_block = ""
+
+    body_html = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <title>Your TeaseMe profile is live</title>
+    </head>
+    <body style="background:#f7f8fc;padding:0;margin:0;font-family:Arial,sans-serif;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f7f8fc;padding:40px 0;">
+        <tr>
+          <td align="center">
+
+            <table width="520" cellpadding="0" cellspacing="0" border="0"
+              style="background:#fff;border-radius:24px;box-shadow:0 10px 32px rgba(50,50,93,0.10),0 2px 4px rgba(0,0,0,0.07);overflow:hidden;">
+
+              <tr>
+                <td align="center" style="background:#23293b;padding:0;">
+                  <img src="{logo_url}" alt="TeaseMe"
+                    style="width:100%;max-width:520px;display:block;border-top-left-radius:24px;border-top-right-radius:24px;" />
+                </td>
+              </tr>
+
+              <tr>
+                <td align="center" style="padding:32px 30px 16px 30px;">
+                  <h2 style="font-family:'Arial Rounded MT Bold', Arial, sans-serif; font-size:30px; font-weight:bold; margin:0 0 12px 0; color:#444;">
+                    You’re live on TeaseMe 🎉
+                  </h2>
+
+                  <p style="font-size:16px;color:#666;margin:0 0 22px 0;">
+                    Your influencer profile is now active. Fans can find you and join your page instantly.
+                  </p>
+
+                  {temp_pw_block}
+
+                  <a href="{public_url}"
+                    style="background:#FF5C74;border-radius:8px;color:#fff;text-decoration:none;display:inline-block;padding:16px 42px;font-size:20px;font-weight:bold;box-shadow:0 6px 24px #ffb5c7;margin:10px 0 6px 0;">
+                    View my profile
+                  </a>
+
+                  <p style="margin:26px 0 0 0; font-size:14px; color:#bbb;">
+                    If you didn’t request this, you can safely ignore the email.<br/>
+                    Let’s get you discovered. ❤️
+                  </p>
+                </td>
+              </tr>
+
+              <tr>
+                <td align="center" style="padding:20px 0 12px 0;background:#e5e5e5;color:#bbb;font-size:14px;border-bottom-left-radius:24px;border-bottom-right-radius:24px;">
+                  © {datetime.now().year} TeaseMe. All rights reserved.
+                </td>
+              </tr>
+            </table>
+
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
+    """
+
+    body_text = f"""
+Your TeaseMe profile is live 🎉
+
+Open your profile:
+{public_url}
+
+© {datetime.now().year} TeaseMe. All rights reserved.
+""".strip()
+
+    return send_email_via_ses(to_email, subject, body_html, body_text)
 
 def send_influencer_survey_completed_email_to_promoter(
     *,

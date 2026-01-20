@@ -185,14 +185,14 @@ async def cancel_subscription(
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
 
-    if sub.status in ("canceled", "expired"):
+    if sub.status in ("cancelled", "expired"):
         return {
             "ok": True,
             "status": sub.status,
-            "message": "Subscription already canceled",
+            "message": "Subscription already cancelled",
         }
 
-    sub.status = "canceled"
+    sub.status = "cancelled"
     sub.canceled_at = now
     sub.cancel_reason = body.reason
 
@@ -213,6 +213,7 @@ async def cancel_subscription(
 
 class Set18Req(BaseModel):
     is_18_selected: bool
+    
 @router.post("/{influencer_id}/18")
 async def set_18_mode(
     influencer_id: str,

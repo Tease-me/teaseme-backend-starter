@@ -323,7 +323,7 @@ class InfluencerSubscription(Base):
 
     # Status lifecycle
     status: Mapped[str] = mapped_column(String, nullable=False, default="active")
-    # status: "active" | "paused" | "canceled" | "expired"
+    # status: "active" | "paused" | "cancelled" | "expired"
 
     # Dates
     started_at: Mapped[datetime] = mapped_column(
