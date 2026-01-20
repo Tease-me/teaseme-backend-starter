@@ -41,6 +41,7 @@ from app.utils.email import (
     send_new_influencer_email,
     send_influencer_survey_completed_email_to_promoter,
 )
+
 from app.utils.s3 import s3,save_influencer_photo_to_s3, generate_presigned_url, delete_file_from_s3
 from app.services.firstpromoter import (
     fp_create_promoter,
@@ -691,10 +692,11 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
 
     await db.commit()
     await db.refresh(influencer)
-
+    profile_picture_key = (pre.survey_answers or {}).get("profile_picture_key") 
     send_new_influencer_email(
         to_email=pre.email,
-        influencer_username=influencer.id,
+        profile_picture_key=profile_picture_key,
+        influencer=influencer,
         fp_ref_id=influencer.fp_ref_id,
     )
 

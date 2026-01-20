@@ -3,6 +3,13 @@ import boto3
 from botocore.exceptions import ClientError
 from app.core.config import settings
 from datetime import datetime
+from app.db.models import Influencer
+import base64
+import io
+from PIL import Image
+from app.utils.s3 import s3
+from app.core.config import settings
+
 
 log = logging.getLogger(__name__)
 
@@ -281,17 +288,34 @@ def send_password_reset_email(to_email: str, token: str):
 
     return send_email_via_ses(to_email, subject, body_html, body_text)
 
+def pre_influencer_image_data_url(key: str) -> str:
+    obj = s3.get_object(Bucket=settings.BUCKET_NAME, Key=key)
+    raw = obj["Body"].read()
 
+    img = Image.open(io.BytesIO(raw)).convert("RGB")
+    out = io.BytesIO()
+    img.save(out, format="PNG")
+
+    b64 = base64.b64encode(out.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{b64}"
+  
 def send_new_influencer_email(
     to_email: str,
-    influencer_username: str,
+    influencer: Influencer,
+    profile_picture_key: str | None = None,
     fp_ref_id: str | None = None,
 ):
     subject = "🎉 Your TeaseMe profile is live!"
-    public_url = f"https://teaseme.live/{influencer_username}"
-    referral_url = f"https://teaseme.live/{influencer_username}?fpr={fp_ref_id}" if fp_ref_id else None
+    public_url = f"https://teaseme.live/{influencer.id}"
+    referral_url = f"{public_url}?fpr={fp_ref_id}" if fp_ref_id else None
 
     logo_url = "https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/email_verify_header.png"
+    if profile_picture_key:
+        try:
+            logo_url = pre_influencer_image_data_url(profile_picture_key)
+        except Exception:
+            log.warning("Failed to load pre-influencer image for email", exc_info=True)
+
 
     referral_block = ""
     if referral_url:
