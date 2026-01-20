@@ -2,6 +2,7 @@ import json
 import logging
 import secrets
 import re
+from fastapi.encoders import jsonable_encoder
 
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -42,6 +43,7 @@ from app.utils.email import (
     send_new_influencer_email,
     send_influencer_survey_completed_email_to_promoter,
 )
+
 from app.utils.s3 import s3,save_influencer_photo_to_s3, generate_presigned_url, delete_file_from_s3
 from app.services.firstpromoter import (
     fp_create_promoter,
@@ -663,6 +665,14 @@ async def get_default_voices(db: AsyncSession = Depends(get_db)):
         "count": len(voices),
         "voices": voices,
     }
+def _pre_influencer_with_profile_picture_url(pre: PreInfluencer) -> dict:
+    data = jsonable_encoder(pre)
+    answers = data.get("survey_answers") or {}
+    key = answers.get("profile_picture_key")
+    if key:
+        answers["profile_picture_url"] = generate_presigned_url(key, expires=3600)
+    data["survey_answers"] = answers
+    return data
 
 @router.get("")
 async def list_pre_influencers(status: str | None = None, db: AsyncSession = Depends(get_db)):
@@ -670,10 +680,21 @@ async def list_pre_influencers(status: str | None = None, db: AsyncSession = Dep
     if status:
         q = q.where(PreInfluencer.status == status)
     rows = (await db.execute(q)).scalars().all()
-    return rows
+    return [_pre_influencer_with_profile_picture_url(r) for r in rows]
 
 def normalize_influencer_id(username: str) -> str:
     return re.sub(r"[^a-z0-9_]", "", username.lower())
+
+@router.get("/{pre_id}")
+async def get_pre_influencer(
+    pre_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    q = select(PreInfluencer).where(PreInfluencer.id == pre_id)
+    row = (await db.execute(q)).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="PreInfluencer not found")
+    return _pre_influencer_with_profile_picture_url(row)
 
 @router.post("/{pre_id}/approve")
 async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)):
@@ -734,10 +755,11 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
 
     await db.commit()
     await db.refresh(influencer)
-
+    profile_picture_key = (pre.survey_answers or {}).get("profile_picture_key") 
     send_new_influencer_email(
         to_email=pre.email,
-        influencer_username=influencer.id,
+        profile_picture_key=profile_picture_key,
+        influencer=influencer,
         fp_ref_id=influencer.fp_ref_id,
     )
 
