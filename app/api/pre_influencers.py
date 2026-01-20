@@ -2,6 +2,7 @@ import json
 import logging
 import secrets
 import re
+from fastapi.encoders import jsonable_encoder
 
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -621,6 +622,14 @@ async def get_default_voices(db: AsyncSession = Depends(get_db)):
         "count": len(voices),
         "voices": voices,
     }
+def _pre_influencer_with_profile_picture_url(pre: PreInfluencer) -> dict:
+    data = jsonable_encoder(pre)
+    answers = data.get("survey_answers") or {}
+    key = answers.get("profile_picture_key")
+    if key:
+        answers["profile_picture_url"] = generate_presigned_url(key, expires=3600)
+    data["survey_answers"] = answers
+    return data
 
 @router.get("")
 async def list_pre_influencers(status: str | None = None, db: AsyncSession = Depends(get_db)):
@@ -628,7 +637,7 @@ async def list_pre_influencers(status: str | None = None, db: AsyncSession = Dep
     if status:
         q = q.where(PreInfluencer.status == status)
     rows = (await db.execute(q)).scalars().all()
-    return rows
+    return [_pre_influencer_with_profile_picture_url(r) for r in rows]
 
 def normalize_influencer_id(username: str) -> str:
     return re.sub(r"[^a-z0-9_]", "", username.lower())
@@ -642,7 +651,7 @@ async def get_pre_influencer(
     row = (await db.execute(q)).scalar_one_or_none()
     if not row:
         raise HTTPException(status_code=404, detail="PreInfluencer not found")
-    return row
+    return _pre_influencer_with_profile_picture_url(row)
 
 @router.post("/{pre_id}/approve")
 async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)):
