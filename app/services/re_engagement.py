@@ -133,18 +133,6 @@ async def generate_reengagement_via_turn_handler(
     influencer_name: str,
     days_inactive: int,
 ) -> tuple[str, str]:
-    """
-    Generate a re-engagement message using the AI turn_handler.
-    
-    1. Construct a system-injected prompt that guides the AI to generate a re-engagement message
-    2. Get or create the regular (non-18) chat for persistence
-    3. Call handle_turn with the special prompt
-    4. Save the AI's response to the Message table
-    5. Return (title, body) for the push notification
-    
-    Returns:
-        tuple[str, str]: (notification_title, message_body)
-    """
     prompt_template = await get_system_prompt(db, "REENGAGEMENT_PROMPT")
     
     if not prompt_template:
