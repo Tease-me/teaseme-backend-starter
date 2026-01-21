@@ -4,7 +4,6 @@ from sqlalchemy import select
 from app.db.models import Pricing
 from app.db.session import SessionLocal
 
-# Default pricing; adjust as needed.
 PRICING_ROWS = [
     {
         "feature": "text",

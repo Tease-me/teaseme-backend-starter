@@ -38,7 +38,6 @@ ELEVENLABS_API_KEY = settings.ELEVENLABS_API_KEY
 ELEVEN_BASE_URL = settings.ELEVEN_BASE_URL
 DEFAULT_ELEVENLABS_VOICE_ID = settings.ELEVENLABS_VOICE_ID or None
 
-# Temporary in-memory greetings (no DB). Keep the content SFW and generic.
 _GREETINGS: Dict[str, List[str]] = {
     "playful": [
         "Well, look who finally decided to show up.",
@@ -150,7 +149,7 @@ def _format_transcript_entries(transcript: List[Dict[str, Any]]) -> str:
 def _format_redis_history(chat_id: str, influencer_id: str, limit: int = 12) -> Optional[str]:
     try:
         history = redis_history(chat_id)
-    except Exception as exc:  # pragma: no cover - defensive
+    except Exception as exc:
         log.warning("redis_history.fetch_failed chat=%s err=%s", chat_id, exc)
         return None
     if not history or not history.messages:
@@ -192,21 +191,19 @@ def _add_natural_pause(text: Optional[str]) -> Optional[str]:
 
 
 def _classify_gap(minutes: float) -> str:
-    """Classify the time gap into categories for greeting context."""
     if minutes < 2:
         return "immediate"
     elif minutes < 15:
         return "short"
-    elif minutes < 120:  # 2 hours
+    elif minutes < 120: 
         return "medium"
-    elif minutes < 1440:  # 24 hours
+    elif minutes < 1440: 
         return "long"
     else:
         return "extended"
 
 
 def _classify_call_ending(call: Optional[CallRecord]) -> str:
-    """Classify how the last call ended based on duration and patterns."""
     if not call:
         return "normal"
     duration = call.call_duration_secs or 0
@@ -219,12 +216,11 @@ def _classify_call_ending(call: Optional[CallRecord]) -> str:
 
 
 def _extract_last_message(db_messages: List[Message], transcript: Optional[str]) -> str:
-    """Extract the last meaningful message from conversation history."""
     if db_messages:
         for msg in db_messages:
             content = (msg.content or "").strip()
             if content and len(content) > 5:
-                return content[:100]  # Truncate for prompt
+                return content[:100]  
     
     if transcript:
         lines = transcript.strip().split("\n")
@@ -261,7 +257,6 @@ async def _generate_contextual_greeting(
     last_interaction: Optional[datetime] = None
     last_call: Optional[CallRecord] = None
 
-    # Fetch recent messages
     result = await db.execute(
         select(Message)
         .where(Message.chat_id == chat_id)
@@ -284,14 +279,12 @@ async def _generate_contextual_greeting(
         db_messages.reverse()
         transcript = _format_history(db_messages)
 
-    # Get chat to find user_id
     try:
         chat = await db.get(Chat, chat_id)
         user_id = chat.user_id if chat else None
     except Exception:
         user_id = None
 
-    # Fetch the most recent call for this user+influencer
     if user_id:
         try:
             call_res = await db.execute(
@@ -305,15 +298,12 @@ async def _generate_contextual_greeting(
             )
             last_call = call_res.scalar_one_or_none()
             
-            # Update last_interaction from call if more recent
             if last_call and last_call.created_at:
                 call_time = last_call.created_at
                 
-                # Ensure call_time is aware (it should be, but just in case)
                 if call_time.tzinfo is None:
                     call_time = call_time.replace(tzinfo=timezone.utc)
                 
-                # Ensure last_interaction is aware if it exists
                 if last_interaction:
                     if last_interaction.tzinfo is None:
                         last_interaction = last_interaction.replace(tzinfo=timezone.utc)
@@ -323,7 +313,6 @@ async def _generate_contextual_greeting(
                 elif call_time > last_interaction:
                     last_interaction = call_time
                     
-            # Also try to get transcript from call if we don't have messages
             if not transcript and last_call and last_call.transcript:
                 transcript = _format_transcript_entries(last_call.transcript)
                 
@@ -333,10 +322,8 @@ async def _generate_contextual_greeting(
                 chat_id, user_id, influencer_id, exc,
             )
 
-    # Calculate gap and classify context
     gap_minutes: float = 0
     if last_interaction:
-        # Handle timezone-aware vs naive datetimes
         if last_interaction.tzinfo is not None:
             now = datetime.now(timezone.utc)
         else:
@@ -348,13 +335,11 @@ async def _generate_contextual_greeting(
     last_call_duration = last_call.call_duration_secs if last_call else 0
     last_message = _extract_last_message(db_messages, transcript)
 
-    # Get influencer name
     influencer = await db.get(Influencer, influencer_id)
     persona_name = (
         influencer.display_name if influencer and influencer.display_name else influencer_id
     )
 
-    # If no history at all, use dopamine greeting
     if not transcript and not last_message:
         return _pick_random_first_greeting(persona_name)
 
@@ -381,7 +366,6 @@ async def _generate_contextual_greeting(
         print(llm_response)
         greeting = _add_natural_pause((llm_response.content or "").strip())
         
-        # Clean up quotes if LLM wrapped the response
         if greeting.startswith('"') and greeting.endswith('"'):
             greeting = greeting[1:-1]
         if greeting.startswith("'") and greeting.endswith("'"):
@@ -543,7 +527,6 @@ async def _create_agent(
         name=name,
         voice_id=voice_id,
         prompt_text=prompt_text,
-        # first_message=first_message,
         language=language,
         llm=llm,
         temperature=temperature,
@@ -616,7 +599,7 @@ async def _poll_and_persist_conversation(
         if not chat_id and user_id and influencer_id:
             try:
                 chat_id = await get_or_create_chat(db, user_id, influencer_id)
-            except Exception as exc:  # pragma: no cover - defensive
+            except Exception as exc:  
                 log.warning(
                     "background.chat_id_fallback_failed conv=%s user=%s infl=%s err=%s",
                     conversation_id,
@@ -634,7 +617,7 @@ async def _poll_and_persist_conversation(
                     conversation_id=conversation_id,
                     influencer_id=influencer_id,
                 )
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception as exc: 
             log.warning(
                 "background.persist_transcript_failed conv=%s chat=%s err=%s",
                 conversation_id,
@@ -660,18 +643,16 @@ async def _poll_and_persist_conversation(
                 call_record.chat_id = chat_id
             db.add(call_record)
             await db.commit()
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception as exc:  
             log.warning(
                 "background.update_call_record_failed conv=%s err=%s",
                 conversation_id,
                 exc,
             )
 
-        # Extract and store facts from the transcript using existing fact extractor
         if chat_id and normalized_transcript:
             try:
                 from app.agents.turn_handler import extract_and_store_facts_for_turn
-                # Format transcript as context, use last user message as "message"
                 user_messages = [t.get("message") or t.get("text") or "" for t in normalized_transcript 
                                  if (t.get("role") or "").lower() in ("user", "human")]
                 last_user_msg = user_messages[-1] if user_messages else ""
@@ -701,7 +682,6 @@ async def _poll_and_persist_conversation(
                 )
 
 
-# === DO NOT RENAME: you said you call this elsewhere ===
 async def _push_prompt_to_elevenlabs(
     agent_id: Optional[str],
     prompt_text: str,
@@ -735,7 +715,6 @@ async def _push_prompt_to_elevenlabs(
                 await _patch_agent_config(
                     client,
                     agent_id=agent_id,
-                    # first_message=first_message,
                     prompt_text=prompt_text,
                     llm=llm,
                     temperature=temperature,
@@ -763,7 +742,6 @@ async def _push_prompt_to_elevenlabs(
             name=agent_name,
             voice_id=resolved_voice_id,
             prompt_text=prompt_text,
-            # first_message=first_message,
             language=language,
             llm=llm,
             temperature=temperature,
@@ -836,7 +814,7 @@ async def _ensure_transcript_snapshot(
         refreshed = await _get_conversation_snapshot(client, conversation_id)
         if refreshed.get("transcript"):
             return refreshed
-    except Exception as exc:  # pragma: no cover - defensive
+    except Exception as exc: 
         log.warning(
             "ensure_transcript.refetch_failed conv=%s err=%s", conversation_id, exc
         )
@@ -945,7 +923,6 @@ async def _persist_transcript_to_chat(
             )
         )
     moderation_enabled =  bool(user_id and resolved_influencer_id)
-    # Approximate message timestamps using call start + offset if provided.
     start_ts = (conversation_json.get("metadata") or {}).get("start_time_unix_secs")
     base_dt = (
         datetime.utcfromtimestamp(start_ts)
@@ -1029,7 +1006,7 @@ async def _persist_transcript_to_chat(
         embedding = None
         try:
             embedding = await get_embedding(text)
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception as exc:  
             log.warning("persist_transcript.embed_failed chat=%s err=%s", chat_id, exc)
 
         seen.add((sender, text))
@@ -1052,7 +1029,6 @@ async def _persist_transcript_to_chat(
 
     db.add_all(new_messages)
     await db.commit()
-    # Push to Redis so turn_handler can see call history immediately.
     try:
         history = redis_history(chat_id)
         for msg in new_messages:
@@ -1060,7 +1036,6 @@ async def _persist_transcript_to_chat(
                 history.add_user_message(msg.content)
             else:
                 history.add_ai_message(msg.content)
-        # Trim to configured window if present
         try:
             max_len = settings.MAX_HISTORY_WINDOW
             if max_len and len(history.messages) > max_len:
@@ -1069,7 +1044,7 @@ async def _persist_transcript_to_chat(
                 history.add_messages(trimmed)
         except Exception:
             pass
-    except Exception as exc:  # pragma: no cover - defensive
+    except Exception as exc: 
         log.warning("persist_transcript.redis_sync_failed chat=%s err=%s", chat_id, exc)
 
     log.info(
@@ -1304,7 +1279,7 @@ async def save_pending_conversation(
     if user_id and influencer_id:
         try:
             chat_id = await get_or_create_chat(db, user_id, influencer_id)
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception as exc:  
             log.warning(
                 "save_pending_conversation.get_or_create_chat_failed user=%s infl=%s err=%s",
                 user_id,
@@ -1591,7 +1566,6 @@ async def update_elevenlabs_prompt(
                 detail=f"Influencer with id '{body.influencer_id}' not found",
             )
         
-        # Get agent metadata
         agent_name = getattr(influencer, "display_name", None) or influencer.id
         voice_id = getattr(influencer, "voice_id", None)
         if not voice_id and DEFAULT_ELEVENLABS_VOICE_ID:

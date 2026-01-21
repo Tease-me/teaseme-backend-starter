@@ -169,7 +169,6 @@ async def update_influencer_profile(
             )
             influencer.profile_video_key = uploaded_video_key
 
-        # Update metadata
         if native_language:
             influencer.native_language = native_language
 
@@ -177,7 +176,6 @@ async def update_influencer_profile(
         if dt_val:
             influencer.date_of_birth = dt_val
 
-        # Save profile JSON (about + native language) to S3; keep extras minimal
         await save_influencer_profile_to_s3(
             influencer_id,
             about=about,
@@ -233,7 +231,6 @@ async def update_influencer_profile(
         log.error("Failed to persist influencer profile: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to persist influencer profile")
 
-    # Best-effort cleanup: remove previous objects if the key changed (e.g., photo.jpg -> photo.png)
     for key, new_key in (
         (previous_photo_key, influencer.profile_photo_key),
         (previous_video_key, influencer.profile_video_key),

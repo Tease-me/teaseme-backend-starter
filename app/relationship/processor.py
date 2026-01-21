@@ -16,13 +16,11 @@ STAGES = ["HATE", "DISLIKE", "STRANGERS", "TALKING", "FLIRTING", "DATING"]
 
 
 def stage_from_signals_and_points(stage_points: float, sig) -> str:
-  # HARD NEGATIVE overrides
   if getattr(sig, "threat", 0.0) > 0.20 or getattr(sig, "hate", 0.0) > 0.60:
       return "HATE"
   if getattr(sig, "dislike", 0.0) > 0.40 or getattr(sig, "rejecting", 0.0) > 0.40:
       return "DISLIKE"
 
-  # Positive progression by points
   p = float(stage_points or 0.0)
   if p < 20.0:
       return "STRANGERS"
@@ -34,7 +32,6 @@ def stage_from_signals_and_points(stage_points: float, sig) -> str:
 
 
 def compute_stage_delta(sig) -> float:
-  # Positive contributions
   delta = (
       2.0 * sig.support +
       1.6 * sig.affection +
@@ -42,18 +39,15 @@ def compute_stage_delta(sig) -> float:
       1.4 * sig.flirt
   )
 
-  # Existing negatives
   delta -= 5.0 * sig.boundary_push
   delta -= 3.5 * sig.rude
 
-  # New negatives
   delta -= 4.0 * getattr(sig, "dislike", 0.0)
   delta -= 8.0 * getattr(sig, "hate", 0.0)
   delta -= 10.0 * getattr(sig, "threat", 0.0)
   delta -= 4.0 * getattr(sig, "rejecting", 0.0)
   delta -= 2.0 * getattr(sig, "insult", 0.0)
 
-  # Baseline only if message is non-negative overall
   baseline = 0.25 if (
       sig.rude < 0.1 and sig.boundary_push < 0.1
       and getattr(sig, "dislike", 0.0) < 0.1
@@ -64,7 +58,6 @@ def compute_stage_delta(sig) -> float:
 
   delta += baseline
 
-  # Allow stronger downward movement than upward (more realistic)
   return max(-8.0, min(3.0, delta))
 
 
@@ -82,7 +75,6 @@ def compute_sentiment_delta(sig) -> float:
       - 6*getattr(sig, "insult", 0.0)
       - 6*getattr(sig, "rejecting", 0.0)
   )
-  # cap per message
   return max(-10.0, min(5.0, d))
 
 
@@ -121,33 +113,28 @@ async def process_relationship_turn(
     if influencer is None:
         raise ValueError(f"Influencer not found: {influencer_id}")
 
-    # --- Persona preferences from bio_json ---
     bio = influencer.bio_json or {}
 
     persona_likes: List[str] = bio.get("likes", []) or []
     persona_dislikes: List[str] = bio.get("dislikes", []) or []
 
-    # Ensure lists (defensive)
     if not isinstance(persona_likes, list):
         persona_likes = []
     if not isinstance(persona_dislikes, list):
         persona_dislikes = []
 
-    # 3) Classify user message -> relationship signals
     sig_dict = await classify_signals(
         message, recent_ctx, persona_likes, persona_dislikes, convo_analyzer
     )
     log.info("[%s] SIG_DICT=%s", cid, sig_dict)
     sig = Signals(**sig_dict)
 
-    # --- sentiment_score (-100..100): Sims-like mood (can be negative) ---
     d_sent = compute_sentiment_delta(sig)
     rel.sentiment_score = max(
         -100.0,
         min(100.0, float(rel.sentiment_score or 0.0) + d_sent)
     )
 
-    # 4) Update dimensions (trust/closeness/attraction/safety)
     out = update_relationship(rel.trust, rel.closeness, rel.attraction, rel.safety, sig)
 
     log.info(
@@ -164,16 +151,12 @@ async def process_relationship_turn(
     rel.attraction = out.attraction
     rel.safety = out.safety
 
-    # --- stage points update (controls state progression) ---
     prev_sp = float(rel.stage_points or 0.0)
     delta = compute_stage_delta(sig)
     rel.stage_points = max(0.0, min(100.0, prev_sp + delta))
 
-    # Derive stage from BOTH points and negative dominance
     rel.state = stage_from_signals_and_points(rel.stage_points, sig)
 
-    # eligibility based on final state + dimensions
-    # (Only allow girlfriend/exclusive talk if not in negative stages)
     can_ask = (
         rel.state == "DATING"
         and rel.safety >= 70
@@ -182,11 +165,9 @@ async def process_relationship_turn(
         and rel.attraction >= 65
     )
 
-    # Block commitment if user is in DISLIKE/HATE
     if rel.state in ("HATE", "DISLIKE"):
         can_ask = False
 
-    # Apply accepts AFTER state is derived
     if sig.accepted_exclusive and rel.state in ("DATING", "GIRLFRIEND"):
         rel.exclusive_agreed = True
 
@@ -195,7 +176,6 @@ async def process_relationship_turn(
         rel.exclusive_agreed = True
         rel.state = "GIRLFRIEND"
 
-    # keep girlfriend sticky
     if rel.girlfriend_confirmed:
         rel.state = "GIRLFRIEND"
 
@@ -206,7 +186,6 @@ async def process_relationship_turn(
         cid, prev_sp, delta, rel.stage_points, rel.state, can_ask
     )
 
-    # 7) Update last interaction
     rel.last_interaction_at = now
     rel.updated_at = now
 

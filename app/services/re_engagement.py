@@ -32,14 +32,6 @@ async def find_inactive_high_balance_users(
     inactive_days: int = DEFAULT_INACTIVE_DAYS,
     min_balance_cents: int = DEFAULT_MIN_BALANCE_CENTS,
 ) -> list[dict]:
-    """
-    Find users who:
-    1. Have wallet balance >= min_balance_cents for an influencer
-    2. Haven't interacted with that influencer in >= inactive_days
-    3. Haven't received a re-engagement notification since their last interaction
-
-    Returns list of dicts with user_id, influencer_id, balance, days_inactive, influencer_name
-    """
     cutoff = datetime.now(timezone.utc) - timedelta(days=inactive_days)
 
     already_notified = (
@@ -186,7 +178,6 @@ async def send_reengagement_notification(
     balance_cents: int,
     days_inactive: int,
 ) -> dict:
-    # Use AI-driven message generation (also persists to chat history)
     title, body = await generate_reengagement_via_turn_handler(
         db=db,
         user_id=user_id,
@@ -282,7 +273,6 @@ async def run_reengagement_job(
         f"min_balance=${min_balance_cents/100:.2f}, dry_run={dry_run}"
     )
 
-    # Find eligible users
     eligible = await find_inactive_high_balance_users(
         db,
         inactive_days=inactive_days,
@@ -298,7 +288,6 @@ async def run_reengagement_job(
             "eligible": eligible,
         }
 
-    # Send notifications
     results = []
     for entry in eligible:
         try:

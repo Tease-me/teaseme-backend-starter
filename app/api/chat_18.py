@@ -62,7 +62,6 @@ async def start_chat(
     chat_id = await get_or_create_chat18(db, current_user.id, data.influencer_id)
     return {"chat_id": chat_id}
 
-# ---------- Buffer state ----------
 class _Buf:
     __slots__ = ("messages", "timer", "lock", "timezone")
     def __init__(self) -> None:
@@ -71,9 +70,8 @@ class _Buf:
         self.lock = asyncio.Lock()
         self.timezone: Optional[str] = None
 
-_buffers: Dict[str, _Buf] = {}  # chat_id -> _Buf
+_buffers: Dict[str, _Buf] = {}
 
-# ---------- Heuristic: did the message end a thought? ----------
 def _ends_thought(msg: str) -> bool:
     if not msg:
         return False
@@ -82,7 +80,6 @@ def _ends_thought(msg: str) -> bool:
     end_emojis = ("👍", "😉", "😂", "😅", "🤣", "😍", "😘")
     return msg.endswith(strong) or msg.endswith(end_emojis)
 
-# ---------- Queue message and schedule flush ----------
 async def _queue_message(
     chat_id: str,
     msg: str,
@@ -95,7 +92,6 @@ async def _queue_message(
 ) -> None:
     buf = _buffers.setdefault(chat_id, _Buf())
 
-    # ---- mutate buffer under lock
     flush_now = False
     async with buf.lock:
         buf.messages.append(msg)
@@ -103,13 +99,11 @@ async def _queue_message(
             buf.timezone = user_timezone
         log.info("[BUF %s] queued: %r (len=%d)", chat_id, msg, len(buf.messages))
 
-        # cancel previous timer if any
         if buf.timer and not buf.timer.done():
             log.info("[BUF %s] cancel previous timer", chat_id)
             buf.timer.cancel()
             buf.timer = None
 
-        # decide behavior
         if _ends_thought(msg):
             flush_now = True
         else:
@@ -126,7 +120,6 @@ async def _queue_message(
 
             buf.timer = asyncio.create_task(_wait_and_flush())
 
-    # ---- outside the lock: perform the flush now if needed
     if flush_now:
         log.info("[BUF %s] ends_thought=True -> flush now", chat_id)
         try:
@@ -146,10 +139,8 @@ async def _wait_and_flush(
         await asyncio.sleep(delay)
         await _flush_buffer(chat_id, ws, influencer_id, user_id, db)
     except asyncio.CancelledError:
-        # timer canceled due to a newer incoming message
         return
 
-# ---------- Do the flush: concat, charge, call LLM, persist, reply ----------
 async def _flush_buffer(
     chat_id: str,
     ws: WebSocket,
@@ -161,7 +152,6 @@ async def _flush_buffer(
     if not buf:
         return
 
-    # Drain messages atomically
     async with buf.lock:
         if not buf.messages:
             return
@@ -174,7 +164,6 @@ async def _flush_buffer(
 
     log.info("[BUF %s] FLUSH start; user_text=%r", chat_id, user_text)
 
-    # 1) Billing per flush (burst)
     try:
         await charge_feature(
             db,
@@ -185,9 +174,6 @@ async def _flush_buffer(
             is_18=True,
             meta={"chat_id": chat_id},
         )
-        # ⚠ If charge_feature() commits internally, don't commit here.
-        # If it does NOT commit, you may commit here with a guarded commit.
-        # await db.commit()
     except Exception:
         try:
             await db.rollback()
@@ -197,7 +183,6 @@ async def _flush_buffer(
         await ws.send_json({"error": "⚠️ Billing error. Please try again."})
         return
 
-    # 2) Get LLM reply
     try:
         user_timezone = buf.timezone
         log.info("[BUF %s] calling handle_turn_18()", chat_id)
@@ -213,14 +198,12 @@ async def _flush_buffer(
         log.info("[BUF %s] handle_turn_18 ok (reply_len=%d)", chat_id, len(reply or ""))
     except Exception:
         log.exception("[BUF %s] handle_turn_18 error", chat_id)
-        # try to tell the client but don't crash if socket closed
         try:
             await ws.send_json({"error": "Sorry, something went wrong. 😔"})
         except Exception:
             pass
         return
 
-    # 3) Persist AI reply
     try:
         db.add(Message18(chat_id=chat_id, sender="ai", content=reply))
         await db.commit()
@@ -242,7 +225,6 @@ async def _flush_buffer(
             log.exception("[BUF %s] Failed to load relationship snapshot", chat_id)
             usage_payload = None
 
-    # 4) Send to client
     try:
         await ws.send_json({"reply": reply, "usage": usage_payload,})
         log.info("[BUF %s] ws.send_json done", chat_id)
@@ -250,7 +232,6 @@ async def _flush_buffer(
         log.exception("[BUF %s] Failed to send reply", chat_id)
 
 
-# ---------- WebSocket entrypoint ----------
 @router.websocket("/ws/{influencer_id}")
 async def websocket_chat(
     ws: WebSocket,
@@ -259,7 +240,6 @@ async def websocket_chat(
 ):
     await ws.accept()
 
-    # simple token auth: ?token=...
     token = ws.query_params.get("token")
     if not token:
         await ws.close(code=4001)
@@ -279,7 +259,6 @@ async def websocket_chat(
     try:
         await require_active_subscription(db, user_id=user_id, influencer_id=influencer_id)
     except Exception as e:
-        # You can be more specific here if your function raises custom errors
         await ws.send_json({
             "ok": False,
             "type": "subscription_error",
@@ -300,10 +279,8 @@ async def websocket_chat(
 
             chat_id = await get_or_create_chat18(db, user_id, influencer_id, raw.get("chat_id"))
 
-            # 🔒 PRE-CHECK: deny if user cannot afford a burst (1 unit)
             ok, cost, free_left = await can_afford(db, user_id=user_id,influencer_id=influencer_id, feature="text_18", units=1,is_18=True)
             if not ok:
-                # send a structured error and DO NOT save/enqueue
                 await ws.send_json({
                     "ok": False,
                     "type": "billing_error",
@@ -312,11 +289,7 @@ async def websocket_chat(
                     "needed_cents": cost,
                     "free_left": free_left,
                 })
-                # optionally close socket with specific code:
-                # await ws.close(code=4402)
                 continue
-
-            # save user message (with embedding)
             try:
                 emb = await get_embedding(text)
                 db.add(Message18(chat_id=chat_id, sender="user", content=text, embedding=emb))
@@ -342,17 +315,14 @@ async def websocket_chat(
             except Exception:
                 log.exception("Error during moderation check")
 
-            # enqueue; buffer decides when to respond
             await _queue_message(chat_id, text, ws, influencer_id, user_id, db, user_timezone=user_timezone)
 
-            # optional: client can force immediate flush by sending {"final": true}
             if raw.get("final") is True:
                 log.info("[BUF %s] client requested final flush", chat_id)
                 await _flush_buffer(chat_id, ws, influencer_id, user_id, db)
 
     except WebSocketDisconnect:
         log.info("[WS] Client %s disconnected from %s", user_id, influencer_id)
-        # try a last flush so we don't leave unsent content
         try:
             chat_id = f"{user_id}_{influencer_id}"
             await _flush_buffer(chat_id, ws, influencer_id, user_id, db)
@@ -414,28 +384,24 @@ async def chat_audio(
         if not token:
             raise HTTPException(status_code=400, detail="Token missing")
 
-        # ✅ resolve influencer_id from chat if missing
         if not influencer_id:
             chat = await db.get(Chat18, chat_id)
             if not chat or not chat.influencer_id:
                 raise HTTPException(status_code=400, detail="Missing influencer context")
             influencer_id = chat.influencer_id
 
-        # ✅ decode token
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
             user_id = int(payload.get("sub"))
         except Exception:
             raise HTTPException(status_code=401, detail="Invalid token")
 
-        # ✅ read audio
         file_bytes = await file.read()
         if not file_bytes:
             raise HTTPException(status_code=400, detail="Audio file empty")
 
         seconds = int(get_duration_seconds(file_bytes, file.content_type))
 
-        # ✅ PRE-CHECK (influencer-based now)
         ok, cost, free_left = await can_afford(
             db,
             user_id=user_id,
@@ -455,7 +421,6 @@ async def chat_audio(
                 },
             )
 
-        # ✅ CHARGE before expensive calls
         await charge_feature(
             db,
             user_id=user_id,
@@ -466,7 +431,6 @@ async def chat_audio(
             meta={"chat_id": chat_id, "seconds": seconds},
         )
 
-        # ✅ upload user audio (expect S3 KEY back)
         user_audio_key = await save_audio_to_s3(
             io.BytesIO(file_bytes),
             file.filename,
@@ -486,7 +450,6 @@ async def chat_audio(
         if not transcript_text.strip():
             raise HTTPException(status_code=422, detail="Empty transcript")
 
-        # ✅ save user msg
         embedding = await get_embedding(transcript_text)
         msg_user = Message18(
             chat_id=chat_id,
@@ -498,7 +461,6 @@ async def chat_audio(
         db.add(msg_user)
         await db.commit()
 
-        # ✅ get AI reply
         ai_reply = await get_ai_reply_via_websocket(
             chat_id,
             transcript_text,
@@ -510,15 +472,12 @@ async def chat_audio(
         if not ai_reply:
             raise HTTPException(status_code=500, detail="No AI reply")
 
-        # ✅ TTS
         audio_bytes, audio_mime = await synthesize_audio_with_elevenlabs_V3(ai_reply, db, influencer_id)
         if not audio_bytes:
             raise HTTPException(status_code=500, detail="No audio returned from any TTS provider")
 
-        # ✅ upload AI audio (expect S3 KEY back)
         ai_audio_key = await save_ia_audio_to_s3(audio_bytes, user_id)
 
-        # ✅ save AI msg
         msg_ai = Message18(
             chat_id=chat_id,
             sender="ai",
@@ -528,7 +487,6 @@ async def chat_audio(
         db.add(msg_ai)
         await db.commit()
 
-        # ✅ return presigned URLs (ONLY if keys)
         return {
             "ai_text": ai_reply,
             "ai_audio_url": generate_presigned_url(ai_audio_key),
@@ -558,10 +516,7 @@ async def get_ai_reply_via_websocket(
     db: AsyncSession,
     user_timezone: Optional[str] = None,
 ) -> str:
-    """
-    Get AI reply using handle_turn function.
-    This function should be called with a validated user_id from the token.
-    """
+
     if not user_id:
         raise HTTPException(status_code=401, detail="User ID is required")
     

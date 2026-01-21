@@ -35,21 +35,17 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s"
 )
 
-# Load CORS origins from environment variable
 origins_str = os.getenv("CORS_ORIGINS", "")
 origins = [origin.strip() for origin in origins_str.split(",") if origin.strip()]
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup and shutdown events."""
-    # Startup
     log.info("Starting re-engagement scheduler...")
     start_scheduler()
     
     yield
     
-    # Shutdown
     log.info("Stopping re-engagement scheduler...")
     stop_scheduler()
 
