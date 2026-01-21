@@ -49,13 +49,13 @@ async def _build_influencer_detail(influencer: Influencer) -> InfluencerDetail:
 
 
 @router.get("", response_model=List[InfluencerDetail])
-async def list_influencers(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def list_influencers(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Influencer))
     influencers = result.scalars().all()
     return [await _build_influencer_detail(influencer) for influencer in influencers]
 
 @router.get("/{id}", response_model=InfluencerDetail)
-async def get_influencer(id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def get_influencer(id: str, db: AsyncSession = Depends(get_db)):
     influencer = await db.get(Influencer, id)
     if not influencer:
         raise HTTPException(404, "Influencer not found")
@@ -75,7 +75,7 @@ async def create_influencer(data: InfluencerCreate, current_user: User = Depends
     return influencer
 
 @router.patch("/{id}", response_model=InfluencerOut)
-async def update_influencer(id: str, data: InfluencerUpdate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def update_influencer(id: str, data: InfluencerUpdate, db: AsyncSession = Depends(get_db)):
     influencer = await db.get(Influencer, id)
     if not influencer:
         raise HTTPException(404, "Influencer not found")
