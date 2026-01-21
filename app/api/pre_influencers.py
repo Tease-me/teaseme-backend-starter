@@ -728,6 +728,7 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
             voice_id=DEFAULT_VOICE_ID,
             fp_promoter_id=pre.fp_promoter_id,
             fp_ref_id=pre.fp_ref_id,
+            email=pre.email,
         )
         db.add(influencer)
     else:
@@ -755,39 +756,9 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
 
     await db.commit()
     await db.refresh(influencer)
-    profile_picture_key = (pre.survey_answers or {}).get("profile_picture_key") 
-    send_new_influencer_email(
-        to_email=pre.email,
-        profile_picture_key=profile_picture_key,
-        influencer=influencer,
-        fp_ref_id=influencer.fp_ref_id,
-    )
-
-    return {
-        "ok": True,
-        "influencer_id": influencer.id,
-        "fp_ref_id": influencer.fp_ref_id,
-        "fp_promoter_id": influencer.fp_promoter_id,
-    }
-
-
-@router.post("/send-test-email")
-async def send_test_email(influencer_id: str, to_email: str, db: AsyncSession = Depends(get_db)):
-    if not influencer_id:
-        raise HTTPException(400, "Invalid influencer id")
-
-    influencer = await db.get(Influencer, influencer_id)
-    if not influencer:
-        log.warning(f"send_test_email: influencer not found influencer_id={influencer_id}")
-        raise HTTPException(404, "Influencer not found")
-
-    log.info(
-        "send_test_email: sending test email "
-        f"influencer_id={influencer.id} to_email={to_email} profile_photo_key={influencer.profile_photo_key}"
-    )
 
     send_new_influencer_email_with_picture(
-        to_email=to_email,
+        to_email=pre.email,
         influencer=influencer,
     )
 
