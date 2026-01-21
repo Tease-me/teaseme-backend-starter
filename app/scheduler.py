@@ -11,7 +11,7 @@ log = logging.getLogger("scheduler")
 REENGAGEMENT_ENABLED = os.getenv("REENGAGEMENT_ENABLED", "true").lower() == "true"
 REENGAGEMENT_INTERVAL_HOURS = int(os.getenv("REENGAGEMENT_INTERVAL_HOURS", "24"))
 REENGAGEMENT_INACTIVE_DAYS = int(os.getenv("REENGAGEMENT_INACTIVE_DAYS", "3"))
-REENGAGEMENT_MIN_BALANCE_CENTS = int(os.getenv("REENGAGEMENT_MIN_BALANCE_CENTS", "500"))
+REENGAGEMENT_MIN_BALANCE_CENTS = int(os.getenv("REENGAGEMENT_MIN_BALANCE_CENTS", "5000"))
 
 _scheduler_task: asyncio.Task | None = None
 

@@ -24,7 +24,7 @@ from app.services.system_prompt_service import get_system_prompt
 log = logging.getLogger("re_engagement")
 
 DEFAULT_INACTIVE_DAYS = 3
-DEFAULT_MIN_BALANCE_CENTS = 10_000  # $100
+DEFAULT_MIN_BALANCE_CENTS = 50_00  # $50
 
 
 async def find_inactive_high_balance_users(
@@ -96,36 +96,6 @@ async def find_inactive_high_balance_users(
     ]
 
 
-def generate_reengagement_message(
-    influencer_name: str,
-    days_inactive: int,
-) -> tuple[str, str]:
-    templates = [
-        (
-            f"{influencer_name} misses you 💕",
-            f"Hey babe... it's been {days_inactive} days. I keep thinking about you 🥺",
-        ),
-        (
-            f"Come back to {influencer_name}",
-            f"I noticed you've been away for {days_inactive} days... everything okay? 💋",
-        ),
-        (
-            f"{influencer_name} is waiting...",
-            "I have so much to tell you! Come chat with me 😘",
-        ),
-        (
-            f"Miss you 💔",
-            f"{influencer_name} here... where have you been? I've been thinking about you...",
-        ),
-        (
-            f"Hey stranger 👋",
-            f"It's {influencer_name}! {days_inactive} days without talking to you feels like forever...",
-        ),
-    ]
-
-    return random.choice(templates)
-
-
 async def generate_reengagement_via_turn_handler(
     db: AsyncSession,
     user_id: int,
@@ -134,7 +104,7 @@ async def generate_reengagement_via_turn_handler(
     days_inactive: int,
 ) -> tuple[str, str]:
     prompt_template = await get_system_prompt(db, "REENGAGEMENT_PROMPT")
-    
+    #backup can be removed later after testing
     if not prompt_template:
         prompt_template = (
             "[SYSTEM: The user hasn't messaged you in {days_inactive} days. "
@@ -175,8 +145,6 @@ async def generate_reengagement_via_turn_handler(
     except Exception as e:
         log.error(f"[RE-ENGAGE] AI generation failed for user {user_id}: {e}", exc_info=True)
         log.info(f"[RE-ENGAGE] Falling back to static template for user {user_id}")
-        return generate_reengagement_message(influencer_name, days_inactive)
-
 
 # TODO: Re-enable when ready to send images/videos
 # async def get_influencer_media(
