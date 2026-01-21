@@ -13,8 +13,12 @@ from app.db.models import (
     RelationshipState,
     ReEngagementLog,
     Subscription,
+    Message,
 )
 from app.utils.push import send_push_rich
+from app.agents.turn_handler import handle_turn
+from app.services.chat_service import get_or_create_chat
+from app.services.system_prompt_service import get_system_prompt
 # from app.utils.s3 import generate_presigned_url  # - text only for now
 
 log = logging.getLogger("re_engagement")
@@ -122,6 +126,70 @@ def generate_reengagement_message(
     return random.choice(templates)
 
 
+async def generate_reengagement_via_turn_handler(
+    db: AsyncSession,
+    user_id: int,
+    influencer_id: str,
+    influencer_name: str,
+    days_inactive: int,
+) -> tuple[str, str]:
+    """
+    Generate a re-engagement message using the AI turn_handler.
+    
+    1. Construct a system-injected prompt that guides the AI to generate a re-engagement message
+    2. Get or create the regular (non-18) chat for persistence
+    3. Call handle_turn with the special prompt
+    4. Save the AI's response to the Message table
+    5. Return (title, body) for the push notification
+    
+    Returns:
+        tuple[str, str]: (notification_title, message_body)
+    """
+    prompt_template = await get_system_prompt(db, "REENGAGEMENT_PROMPT")
+    
+    if not prompt_template:
+        prompt_template = (
+            "[SYSTEM: The user hasn't messaged you in {days_inactive} days. "
+            "Send them a flirty, personalized message to bring them back. "
+            "Be sweet and miss them. Keep it short and enticing - 1-2 sentences max. "
+            "Don't mention specific days or numbers - just express that you've missed them.]"
+        )
+    
+    reengagement_prompt = prompt_template.format(days_inactive=days_inactive)
+    
+    chat_id = await get_or_create_chat(db, user_id, influencer_id)
+    
+    try:
+        ai_response = await handle_turn(
+            message=reengagement_prompt,
+            chat_id=chat_id,
+            influencer_id=influencer_id,
+            user_id=str(user_id),
+            db=db,
+            is_audio=False,
+        )
+        
+        ai_message = Message(
+            chat_id=chat_id,
+            sender="ai",
+            content=ai_response,
+            channel="text",
+        )
+        db.add(ai_message)
+        await db.commit()
+        
+        log.info(f"[RE-ENGAGE] AI generated message for user {user_id}: {ai_response[:50]}...")
+        
+        title = f"{influencer_name} misses you 💕"
+        
+        return title, ai_response
+        
+    except Exception as e:
+        log.error(f"[RE-ENGAGE] AI generation failed for user {user_id}: {e}", exc_info=True)
+        log.info(f"[RE-ENGAGE] Falling back to static template for user {user_id}")
+        return generate_reengagement_message(influencer_name, days_inactive)
+
+
 # TODO: Re-enable when ready to send images/videos
 # async def get_influencer_media(
 #     db: AsyncSession,
@@ -162,7 +230,14 @@ async def send_reengagement_notification(
     balance_cents: int,
     days_inactive: int,
 ) -> dict:
-    title, body = generate_reengagement_message(influencer_name, days_inactive)
+    # Use AI-driven message generation (also persists to chat history)
+    title, body = await generate_reengagement_via_turn_handler(
+        db=db,
+        user_id=user_id,
+        influencer_id=influencer_id,
+        influencer_name=influencer_name,
+        days_inactive=days_inactive,
+    )
 
     media_url = None
     notification_type = "text"
