@@ -94,7 +94,6 @@ async def upsert_memory(
         await db.commit()
         return result_action
     except Exception as e:
-        # Rollback on error to prevent transaction from being in failed state
         await db.rollback()
         import logging
         log = logging.getLogger(__name__)

@@ -68,7 +68,6 @@ def message18_to_schema_with_presigned(msg):
         conversation_id=getattr(msg, "conversation_id", None),  # Message18 doesn't have it
     )
 async def save_knowledge_file_to_s3(file_obj, filename: str, content_type: str, influencer_id: str) -> str:
-    """Save a knowledge file (PDF, DOCX, TXT) to S3"""
     ext = filename.split('.')[-1].lower() if '.' in filename else 'txt'
     key = f"knowledge/{influencer_id}/{uuid.uuid4()}.{ext}"
     file_obj.seek(0)
@@ -81,7 +80,6 @@ async def save_knowledge_file_to_s3(file_obj, filename: str, content_type: str, 
     return key
 
 async def delete_file_from_s3(key: str) -> None:
-    """Delete a file from S3"""
     try:
         s3.delete_object(Bucket=settings.BUCKET_NAME, Key=key)
     except botocore.exceptions.ClientError as e:
@@ -209,7 +207,6 @@ async def get_influencer_profile_from_s3(influencer_id: str) -> dict:
 
 
 async def save_user_photo_to_s3(file_obj, filename: str, content_type: str, user_id: int) -> str:
-    """Save user profile photo to S3"""
     ext = _normalize_image_ext(filename, content_type)
     key = f"{settings.USER_PREFIX}/{user_id}/profile.{ext}"
     file_obj.seek(0)
@@ -218,5 +215,4 @@ async def save_user_photo_to_s3(file_obj, filename: str, content_type: str, user
 
 
 def generate_user_presigned_url(key: str, expires: int = 3600) -> str:
-    """Generate presigned URL for user content (photos)"""
     return generate_presigned_url(key, expires)

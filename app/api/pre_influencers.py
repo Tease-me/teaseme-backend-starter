@@ -78,7 +78,6 @@ async def _load_survey_questions(db: AsyncSession):
 
 
 def _format_survey_markdown(sections, answers, username: str | None = None) -> str:
-    """Build a simple markdown report of questions and answers."""
     lines = []
     if username:
         lines.append(f"# {username}'s Survey")
