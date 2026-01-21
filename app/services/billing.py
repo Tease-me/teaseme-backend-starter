@@ -21,7 +21,6 @@ async def charge_feature(
 ) -> int:
     today = date.today()
 
-    # DailyUsage stays global per user (free allowance per day)
     usage = await db.get(DailyUsage, (user_id, today, is_18))
     if not usage:
         usage = DailyUsage(user_id=user_id, date=today, is_18=is_18)
@@ -48,7 +47,6 @@ async def charge_feature(
     billable = max(units - free_left, 0)
     cost = billable * (price.price_cents or 0)
 
-    # Update usage counters
     if "text" in feature:
         usage.text_count += units
     elif "voice" in feature:
@@ -57,7 +55,6 @@ async def charge_feature(
         usage.live_secs += units
     db.add(usage)
 
-    # Debit influencer wallet (per user + influencer)
     if cost:
         wallet = await db.scalar(
             select(InfluencerWallet).where(
@@ -86,7 +83,6 @@ async def charge_feature(
         wallet.balance_cents = old_balance - cost
         db.add(wallet)
 
-        # Low balance notification (per influencer wallet)
         new_balance = wallet.balance_cents
         THRESHOLD = 1000
         if old_balance >= THRESHOLD and new_balance < THRESHOLD:
@@ -98,7 +94,6 @@ async def charge_feature(
                 except Exception as e:
                     print(f"Error sending low balance notification: {e}")
 
-    # Ledger
     db.add(
         InfluencerCreditTransaction(
             user_id=user_id,
@@ -273,12 +268,6 @@ async def can_afford(
     units: int,
     is_18: bool = False,
 ) -> tuple[bool, int, int]:
-    """
-    Returns (ok, cost_cents, free_left)
-
-    - Uses DailyUsage for free allowance (shared)
-    - Uses InfluencerWallet filtered by is_18
-    """
 
     price: Pricing | None = await db.scalar(
         select(Pricing).where(
@@ -360,7 +349,6 @@ async def get_remaining_units(
 
     free_left = max(free_allowance - used, 0)
 
-    # wallet
     wallet: InfluencerWallet | None = await db.scalar(
         select(InfluencerWallet).where(
             and_(

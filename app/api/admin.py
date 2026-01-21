@@ -188,7 +188,6 @@ async def patch_relationship(
     if not rel:
         raise HTTPException(status_code=404, detail="Relationship not found")
 
-    # apply updates if provided
     if payload.trust is not None:
         rel.trust = payload.trust
     if payload.closeness is not None:
@@ -220,7 +219,6 @@ async def patch_relationship(
     if payload.last_interaction_at is not None:
         rel.last_interaction_at = payload.last_interaction_at
 
-    # optional: keep girlfriend sticky
     if rel.girlfriend_confirmed:
         rel.state = "GIRLFRIEND"
         rel.exclusive_agreed = True

@@ -122,6 +122,12 @@ WEEKEND_TIMEVARIABLE = """{
         "Planning future travels or scrolling travel inspo on Pinterest"
     ]
 }""".strip()
+
+REENGAGEMENT_PROMPT = """[SYSTEM: The user hasn't messaged you in {days_inactive} days.
+Send them a flirty, personalized message to bring them back.
+Be sweet and miss them. Keep it short and enticing - 1-2 sentences max.
+Don't mention specific days or numbers - just express that you've missed them.]""".strip()
+
 SURVEY_QUESTIONS_JSON = """
 [
     {
@@ -1082,6 +1088,10 @@ this is your current mood: {mood}
         "key": "RELATIONSHIP_SIGNAL_PROMPT",
         "description": "Prompt for classifying relationship signals.",
         "prompt": RELATIONSHIP,
+    },{
+        "key": "REENGAGEMENT_PROMPT",
+        "description": "System prompt for re-engagement notifications. Use {days_inactive} placeholder.",
+        "prompt": REENGAGEMENT_PROMPT,
     }
     
 ]

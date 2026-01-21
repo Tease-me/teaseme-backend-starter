@@ -42,18 +42,7 @@ async def upsert_memory(
     sender: str = "fact",
     similarity_threshold: float = 0.1,
 ):
-    """
-    Save a new vector fact/memory in the `memories` table of this chat.
-    If a very similar memory (by embedding) is found for the chat, it updates that memory;
-    if not, it inserts a new row.
-    :param db: Database session
-    :param chat_id: ID of the chat
-    :param content: Content of the memory
-    :param embedding: Embedding vector of the memory
-    :param sender: Who is sending the memory (default is "fact")
-    :param similarity_threshold: Threshold for similarity (default is 0.1)
-    :return: "update" if updated, "insert" if a new memory was added, None on error
-    """
+
     try:
         embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
 
@@ -74,7 +63,6 @@ async def upsert_memory(
         similar = result.fetchone()
 
         if similar and similar[1] <= similarity_threshold:
-            # 2. Update if similar memory found - use PostgreSQL's NOW() to avoid timezone issues
             sql_update = text("""
                 UPDATE memories
                 SET content = :content, embedding = :embedding, sender = :sender, created_at = NOW()
@@ -106,7 +94,6 @@ async def upsert_memory(
         await db.commit()
         return result_action
     except Exception as e:
-        # Rollback on error to prevent transaction from being in failed state
         await db.rollback()
         import logging
         log = logging.getLogger(__name__)

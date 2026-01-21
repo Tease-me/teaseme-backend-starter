@@ -78,7 +78,6 @@ async def _load_survey_questions(db: AsyncSession):
 
 
 def _format_survey_markdown(sections, answers, username: str | None = None) -> str:
-    """Build a simple markdown report of questions and answers."""
     lines = []
     if username:
         lines.append(f"# {username}'s Survey")
@@ -111,10 +110,8 @@ def _format_survey_markdown(sections, answers, username: str | None = None) -> s
 
 
 def _unwrap_json(raw: str) -> str:
-    """Strip markdown code fences if the model wrapped the JSON."""
     text = raw.strip()
     if text.startswith("```"):
-        # Remove opening fence with optional language
         text = text.split("\n", 1)[-1]
         if text.endswith("```"):
             text = text.rsplit("```", 1)[0]
@@ -173,7 +170,6 @@ async def _generate_prompt_from_markdown(markdown: str, additional_prompt: str |
     if not isinstance(parsed, dict):
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Prompt generation returned non-object JSON.")
 
-    # Basic normalization/defaults
     parsed.setdefault("likes", [])
     parsed.setdefault("dislikes", [])
     parsed.setdefault("mbti_architype", "")
@@ -191,7 +187,6 @@ async def _generate_prompt_from_markdown(markdown: str, additional_prompt: str |
         "in_love": stages.get("in_love", ""),
     }
 
-    # Ensure lists are lists of strings
     def _as_str_list(val):
         if isinstance(val, list):
             return [str(x) for x in val]
@@ -731,7 +726,6 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
         )
         db.add(influencer)
     else:
-        # Existing influencer, update fields if empty
         if not influencer.display_name:
             influencer.display_name = pre.full_name or pre.username
         if not influencer.prompt_template:
@@ -743,7 +737,6 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
         influencer.fp_ref_id = pre.fp_ref_id
         db.add(influencer)
 
-    # Update photo key if available
     answers = pre.survey_answers or {}
     photo_key = answers.get("profile_picture_key")
     if photo_key and not influencer.profile_photo_key:

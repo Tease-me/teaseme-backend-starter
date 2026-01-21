@@ -21,7 +21,6 @@ async def get_relationship(
         )
     )
 
-    # if not found, frontend can show defaults (or you can auto-create here)
     if not rel:
         return {
             "user_id": user.id,

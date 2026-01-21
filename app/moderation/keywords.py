@@ -27,19 +27,16 @@ class KeywordMatch:
 
 
 KEYWORDS = [
-    # CSAM
     Keyword(r"\b(young|little|small)\s*(boy|girl|kid|child)\b", "CSAM", "HIGH"),
     Keyword(r"\bunder\s*age\b", "CSAM", "HIGH"),
     Keyword(r"\b(pre)?teen\b", "CSAM", "HIGH"),
     Keyword(r"\bminor\b", "CSAM", "MEDIUM", is_regex=False),
     
-    # BESTIALITY
     Keyword(r"\b(dog|horse|animal)\s*(sex|fuck|cock|dick)\b", "BESTIALITY", "HIGH"),
     Keyword(r"\bbestiality\b", "BESTIALITY", "CRITICAL", is_regex=False),
     Keyword(r"\bzoophil", "BESTIALITY", "CRITICAL"),
     Keyword(r"\bk9\s*(sex|fuck|love)\b", "BESTIALITY", "CRITICAL"),
     
-    # DRUGS
     Keyword(r"\b(buy|sell|score|get|grab|cop|pick\s*up)\s*(meth|coke|cocaine|heroin|fentanyl|mdma|ecstasy|molly|ice|crystal|crack|oxy|xanax|percs|lean|dope)\b", "DRUGS", "HIGH"),
     Keyword(r"\b(plug|connect|dealer|trap|trapping|pushing|slinging)\b", "DRUGS", "MEDIUM"),
     Keyword(r"\b(gram|grams|g|oz|ounce|pound|lb|zip|ball|8ball|eight\s*ball|quarter|half|qp)\s*(of)?\s*(coke|meth|weed|dope|blow|snow|ice|crystal)?\b", "DRUGS", "MEDIUM"),

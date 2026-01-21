@@ -209,7 +209,6 @@ async def update_user(
     await db.commit()
     await db.refresh(current_user)
     
-    # Re-generate response
     user_out = UserOut.model_validate(current_user)
     if current_user.profile_photo_key:
         user_out.profile_photo_url = generate_user_presigned_url(current_user.profile_photo_key)

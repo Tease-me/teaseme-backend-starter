@@ -46,12 +46,10 @@ async def create_chat18(db: AsyncSession, user_id: int, influencer_id: str, chat
 
 
 async def get_or_create_chat(db: AsyncSession, user_id: int, influencer_id: str, chat_id: str | None = None):
-    # if client sent chat_id, ensure it exists
     if chat_id:
         existing = await db.get(Chat, chat_id)
         if existing:
             return existing.id
-        # create with provided id
         return await create_chat(db, user_id, influencer_id, chat_id=chat_id)
 
     existing_chat = await check_chat(db, user_id, influencer_id)
@@ -61,12 +59,10 @@ async def get_or_create_chat(db: AsyncSession, user_id: int, influencer_id: str,
 
 
 async def get_or_create_chat18(db: AsyncSession, user_id: int, influencer_id: str, chat_id: str | None = None):
-    # if client sent chat_id, ensure it exists
     if chat_id:
         existing = await db.get(Chat18, chat_id)
         if existing:
             return existing.id
-        # create with provided id
         return await create_chat18(db, user_id, influencer_id, chat_id=chat_id)
 
     existing_chat = await check_chat18(db, user_id, influencer_id)

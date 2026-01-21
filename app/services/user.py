@@ -20,7 +20,6 @@ async def _get_usage_snapshot_simple(
 ) -> dict:
     today = date.today()
 
-    # ---- pricing ----
     pricing_rows = (
         await db.execute(
             select(Pricing).where(Pricing.is_active.is_(True))
@@ -38,7 +37,6 @@ async def _get_usage_snapshot_simple(
     text_price, text_free = _price_and_free("text")
     text18_price, text18_free = _price_and_free("text_18")
 
-    # ---- daily usage ----
     normal_usage = await db.get(DailyUsage, (user_id, today, False))
     adult_usage = await db.get(DailyUsage, (user_id, today, True))
 
@@ -48,7 +46,6 @@ async def _get_usage_snapshot_simple(
     normal_free_left = max(text_free - normal_used, 0)
     adult_free_left = max(text18_free - adult_used, 0)
 
-    # ---- wallets ----
     wallets = (
         await db.execute(
             select(InfluencerWallet).where(
@@ -76,7 +73,6 @@ async def _get_usage_snapshot_simple(
     normal_remaining = normal_free_left + _paid_units(normal_balance, text_price)
     adult_remaining = adult_free_left + _paid_units(adult_balance, text18_price)
 
-    # ✅ FINAL FILTER (this is the fix)
     if is_18:
         return {
             "influencer_id": influencer_id,
