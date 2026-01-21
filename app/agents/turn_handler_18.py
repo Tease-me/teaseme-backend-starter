@@ -58,13 +58,26 @@ def _resolve_tz(tz_name: str | None):
         return timezone.utc
 
 
-def pick_time_mood(time_prompt: str | None, user_timezone: str | None) -> str:
+def _is_weekend(user_timezone: str | None) -> bool:
+    tz = _resolve_tz(user_timezone)
+    now = datetime.now(tz)
+    return now.weekday() >= 5  # 5 = Saturday, 6 = Sunday
+
+
+def pick_time_mood(
+    weekday_prompt: str | None,
+    weekend_prompt: str | None,
+    user_timezone: str | None
+) -> str:
+    is_weekend = _is_weekend(user_timezone)
+    time_prompt = weekend_prompt if is_weekend else weekday_prompt
+    
     if not time_prompt:
         return ""
     try:
         mood_map = json.loads(time_prompt)
     except json.JSONDecodeError:
-        log.warning("Invalid ADULT_TIME_VARIABLE_PROMPT JSON; using empty mood")
+        log.warning("Invalid TIME_PROMPT JSON; using empty mood")
         return ""
     if not isinstance(mood_map, dict):
         return ""
@@ -86,7 +99,6 @@ def pick_time_mood(time_prompt: str | None, user_timezone: str | None) -> str:
         matches.sort(key=lambda item: item[0])
         return random.choice(matches[0][1])
 
-    # fallback: any mood
     flat = [m for opts in mood_map.values() if isinstance(opts, list) for m in opts]
     return random.choice(flat) if flat else ""
 
@@ -135,11 +147,12 @@ async def handle_turn_18(
     cid = uuid4().hex[:8]
     log.info("[%s] START(18) persona=%s chat=%s user=%s", cid, influencer_id, chat_id, user_id)
 
-    influencer, base_adult_prompt, base_audio_prompt, time_prompt, recent_ctx = await asyncio.gather(
+    influencer, base_adult_prompt, base_audio_prompt, weekday_prompt, weekend_prompt, recent_ctx = await asyncio.gather(
         db.get(Influencer, influencer_id),
         get_system_prompt(db, "BASE_ADULT_PROMPT"),
         get_system_prompt(db, "BASE_ADULT_AUDIO_PROMPT"),
-        get_system_prompt(db, "ADULT_TIME_VARIABLE_PROMPT"),
+        get_system_prompt(db, "WEEKDAY_TIME_PROMPT"),
+        get_system_prompt(db, "WEEKEND_TIME_PROMPT"),
         _load_recent_ctx_18(db, chat_id, limit=12),
     )
 
@@ -157,7 +170,7 @@ async def handle_turn_18(
             ("user", "{input}"),
         ]
     )
-    mood = pick_time_mood(time_prompt, user_timezone)
+    mood = pick_time_mood(weekday_prompt, weekend_prompt, user_timezone)
 
     prompt = prompt.partial(main_prompt=influencer.custom_adult_prompt, history=recent_ctx, mood=mood)
     chain = prompt | XAI_MODEL
