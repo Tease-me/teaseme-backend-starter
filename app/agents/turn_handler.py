@@ -124,7 +124,6 @@ async def handle_turn(
     days_idle = rel_pack["days_idle"]
     dtr_goal = rel_pack["dtr_goal"]
 
-    # Memories
     memories_result = await find_similar_memories(db, chat_id, message) if (db and user_id) else []
     memories = memories_result[0] if isinstance(memories_result, tuple) else memories_result
 
@@ -156,7 +155,6 @@ async def handle_turn(
         persona_rules=getattr(influencer, "prompt_template", "") or "",
     )
 
-    # Optional: log rendered prompt
     try:
         hist_msgs = history.messages
         rendered = prompt.format_prompt(input=message, history=hist_msgs)
@@ -184,7 +182,6 @@ async def handle_turn(
         log.error("[%s] LLM error: %s", cid, e, exc_info=True)
         return "Sorry, something went wrong. 😔"
 
-    # background task
     try:
         asyncio.create_task(
             extract_and_store_facts_for_turn(

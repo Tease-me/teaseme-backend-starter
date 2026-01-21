@@ -9,7 +9,6 @@ from app.db.session import SessionLocal
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# Default users to seed; adjust to your needs.
 USERS = [
     {
         "email": "admin@example.com",

@@ -114,10 +114,5 @@ async def get_today_script(
         return ""
     idx = date.today().timetuple().tm_yday % len(scripts)
     frase = scripts[idx]
-    # log.info(f"@@@@@ - Today's script index for {influencer_id}: {idx} - Script: {frase}")
     return frase
 
-
-# Call user by name or nickname
-# WELCOME Conversation
-# await charge_feature(db, user_id, "live_chat", total_seconds, meta={"session_id": sid})

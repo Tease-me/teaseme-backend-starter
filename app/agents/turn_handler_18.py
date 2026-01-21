@@ -130,7 +130,7 @@ async def _load_recent_ctx_18(db, chat_id: str, limit: int = 12) -> list[BaseMes
     )
     res = await db.execute(q)
     rows = list(res.scalars().all())
-    rows.reverse()  # oldest -> newest
+    rows.reverse() 
     return _render_recent_ctx(rows)
 
 
