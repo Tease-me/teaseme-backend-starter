@@ -4,12 +4,13 @@ from typing import Any, Dict, List
 
 from app.db.models import Influencer
 from app.relationship.repo import get_or_create_relationship
-from app.relationship.inactivity import apply_inactivity_decay
+from app.relationship.inactivity import apply_inactivity_decay, check_and_trigger_reengagement
 from app.relationship.signals import classify_signals
 from app.relationship.engine import Signals, update_relationship
 from app.relationship.dtr import plan_dtr_goal
 
 log = logging.getLogger("teaseme-relationship")
+
 
 STAGES = ["HATE", "DISLIKE", "STRANGERS", "TALKING", "FLIRTING", "DATING"]
 
@@ -103,11 +104,17 @@ async def process_relationship_turn(
     now = datetime.now(timezone.utc)
     log.info("[REL %s] START user_id=%s influencer_id=%s", cid, user_id, influencer_id)
 
-    # 1) Load relationship row from DB
     rel = await get_or_create_relationship(db, int(user_id), influencer_id)
 
-    # 2) Inactivity decay (if user disappeared for days)
     days_idle = apply_inactivity_decay(rel, now)
+
+    if days_idle >= 3:
+        await check_and_trigger_reengagement(
+            db=db,
+            user_id=int(user_id),
+            influencer_id=influencer_id,
+            days_idle=days_idle,
+        )
 
     if influencer is None:
         influencer = await db.get(Influencer, influencer_id)

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Notification Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 500px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #1a1a2e;
+            color: #eee;
+            text-align: center;
+        }
+
+        h1 {
+            color: #ff6b6b;
+        }
+
+        button {
+            background: #ff6b6b;
+            color: white;
+            border: none;
+            padding: 20px 40px;
+            font-size: 18px;
+            border-radius: 12px;
+            cursor: pointer;
+            margin: 20px;
+        }
+
+        button:hover {
+            background: #ee5a5a;
+        }
+
+        #status {
+            margin-top: 20px;
+            padding: 15px;
+            background: #16213e;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>🔔 Notification Test</h1>
+    <p>Click the button to test if notifications work on your device</p>
+
+    <button onclick="testNotification()">Show Test Notification</button>
+
+    <div id="status"></div>
+
+    <script>
+        async function testNotification() {
+            const status = document.getElementById('status');
+
+            // Check support
+            if (!('Notification' in window)) {
+                status.innerHTML = '❌ This browser does not support notifications';
+                return;
+            }
+
+            // Request permission
+            if (Notification.permission === 'default') {
+                status.innerHTML = '🔔 Requesting permission...';
+                const permission = await Notification.requestPermission();
+                if (permission !== 'granted') {
+                    status.innerHTML = '❌ Notification permission denied. Enable in browser settings.';
+                    return;
+                }
+            }
+
+            if (Notification.permission !== 'granted') {
+                status.innerHTML = '❌ Notifications blocked. Enable in browser settings.';
+                return;
+            }
+
+            // Show notification
+            const notification = new Notification('Bella misses you 💕', {
+                body: "Hey babe... it's been 3 days. I keep thinking about you 🥺",
+                icon: 'https://via.placeholder.com/192/ff6b6b/fff?text=♥',
+                tag: 'test-notification',
+                requireInteraction: true,
+            });
+
+            notification.onclick = () => {
+                window.focus();
+                notification.close();
+            };
+
+            status.innerHTML = '✅ Notification sent! Check your screen/notification center.';
+        }
+    </script>
+</body>
+
+</html>

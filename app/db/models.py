@@ -623,3 +623,45 @@ class ContentViolation(Base):
         Index("ix_violations_reviewed", "reviewed"),
     )
 
+
+class ReEngagementLog(Base):
+    __tablename__ = "re_engagement_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    influencer_id: Mapped[str] = mapped_column(
+        ForeignKey("influencers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    notification_type: Mapped[str] = mapped_column(String, nullable=False)  # "text" | "image" | "video"
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    media_url: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    delivered: Mapped[bool] = mapped_column(Boolean, default=False)
+    delivery_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    subscriptions_targeted: Mapped[int] = mapped_column(Integer, default=0)
+    subscriptions_succeeded: Mapped[int] = mapped_column(Integer, default=0)
+
+    wallet_balance_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    days_inactive: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    triggered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        Index("ix_reeng_user_infl_triggered", "user_id", "influencer_id", "triggered_at"),
+        Index("ix_reeng_triggered_at", "triggered_at"),
+    )
+
