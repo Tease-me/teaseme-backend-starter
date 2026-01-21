@@ -25,7 +25,6 @@ from app.api.relationship import router as relationship_router
 from app.api import system_prompts as system_prompts_router
 
 from .api import health_router
-from app.mcp.router import router as mcp_router
 
 log = logging.getLogger("teaseme")
 logging.basicConfig(
@@ -60,7 +59,6 @@ app.include_router(follow_router)
 app.include_router(influencer_subscriptions_router)
 app.include_router(health_router.router)
 app.include_router(webhooks_router)
-app.include_router(mcp_router)
 app.include_router(system_prompts_router.router)
 app.include_router(pre_influencers_router)
 app.include_router(social_router)

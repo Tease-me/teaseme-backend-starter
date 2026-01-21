@@ -122,6 +122,7 @@ async def topup_wallet(db, user_id: int, cents: int, source: str):
     db.add_all([
         wallet,
         InfluencerCreditTransaction(
+            influencer_id=wallet.influencer_id,
             user_id=user_id,
             feature="topup",
             units=cents,
