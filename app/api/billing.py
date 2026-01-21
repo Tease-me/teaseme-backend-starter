@@ -13,9 +13,12 @@ from pydantic import BaseModel, PositiveInt
 from sqlalchemy import select
 from app.services.paypal import paypal_access_token
 from app.services.firstpromoter import fp_track_sale_v2
-from app.db.models import PayPalTopUp, Influencer, Pricing, DailyUsage
+from app.db.models import PayPalTopUp, Influencer, Pricing, DailyUsage, InfluencerCreditTransaction
 from app.core.config import settings
 from datetime import date
+from sqlalchemy import and_
+import traceback
+from fastapi.responses import JSONResponse
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -174,104 +177,176 @@ async def paypal_capture(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    row = await db.scalar(
-        select(PayPalTopUp).where(PayPalTopUp.order_id == req.order_id)
-    )
-    if not row:
-        raise HTTPException(404, "Unknown order_id")
-
-    if row.user_id != user.id:
-        raise HTTPException(403, "Order does not belong to this user")
-
-    if row.credited:
-        wallet = await db.scalar(select(InfluencerWallet).where(
-            InfluencerWallet.user_id == user.id,
-            InfluencerWallet.influencer_id == row.influencer_id,
-            InfluencerWallet.is_18 == False,
-        ))
-        return {"ok": True, "credited": True, "new_balance_cents": wallet.balance_cents if wallet else 0}
-
-    # Capture PayPal
-    token = await paypal_access_token()
-    if not settings.PAYPAL_BASE_URL:
-        raise HTTPException(status_code=500, detail="PAYPAL_BASE_URL not configured")
-    async with httpx.AsyncClient(timeout=20) as client:
-        try:
-            r = await client.post(
-                f"{settings.PAYPAL_BASE_URL}/v2/checkout/orders/{req.order_id}/capture",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                },
-            )
-            r.raise_for_status()
-            cap = r.json()
-        except httpx.HTTPStatusError as e:
-            try:
-                paypal_body = e.response.json()
-            except Exception:
-                paypal_body = {"raw": e.response.text}
-            raise HTTPException(
-                status_code=502,
-                detail={
-                    "message": "PayPal capture failed",
-                    "paypal_status": e.response.status_code,
-                    "paypal": paypal_body,
-                },
-            ) from e
-        except httpx.RequestError as e:
-            raise HTTPException(status_code=502, detail="PayPal request failed") from e
-
-    if cap.get("status") != "COMPLETED":
-        row.status = cap.get("status", "UNKNOWN")
-        db.add(row)
-        await db.commit()
-        return {"ok": False, "status": row.status, "credited": False}
-
-    # Credit wallet
-    influencer_id = (row.influencer_id or req.influencer_id or "").strip()
-    if not influencer_id:
-        raise HTTPException(status_code=400, detail="Missing influencer_id for this PayPal order")
-    # If older rows were created without influencer_id, attach it now.
-    if not row.influencer_id and influencer_id:
-        row.influencer_id = influencer_id
-        db.add(row)
-        await db.commit()
-
-    new_balance = await topup_wallet(
-        db,
-        user.id,
-        influencer_id,
-        row.cents,
-        source=f"paypal:{req.order_id}",
-        is_18=False,
-    )
-
-    row.status = "COMPLETED"
-    row.credited = True
-
     try:
-        if req.influencer_id:
-            influencer = await db.get(Influencer, req.influencer_id)
+        # Capture PayPal (safe to call multiple times; PayPal returns completed on repeats)
+        token = await paypal_access_token()
+        if not settings.PAYPAL_BASE_URL:
+            raise HTTPException(status_code=500, detail="PAYPAL_BASE_URL not configured")
 
-            if influencer and influencer.fp_ref_id:
-                await fp_track_sale_v2(
-                    email=user.email,
-                    uid=str(user.id),
-                    amount_cents=row.cents,
-                    event_id=req.order_id,
-                    ref_id=influencer.fp_ref_id,
-                    plan="wallet_topup",
+        async with httpx.AsyncClient(timeout=20) as client:
+            try:
+                r = await client.post(
+                    f"{settings.PAYPAL_BASE_URL}/v2/checkout/orders/{req.order_id}/capture",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
                 )
+                r.raise_for_status()
+                cap = r.json()
+            except httpx.HTTPStatusError as e:
+                try:
+                    paypal_body = e.response.json()
+                except Exception:
+                    paypal_body = {"raw": e.response.text}
+                raise HTTPException(
+                    status_code=502,
+                    detail={
+                        "message": "PayPal capture failed",
+                        "paypal_status": e.response.status_code,
+                        "paypal": paypal_body,
+                    },
+                ) from e
+            except httpx.RequestError as e:
+                raise HTTPException(status_code=502, detail="PayPal request failed") from e
+
+        status = cap.get("status", "UNKNOWN")
+        if status != "COMPLETED":
+            try:
+                locked = await db.scalar(
+                    select(PayPalTopUp).where(PayPalTopUp.order_id == req.order_id).with_for_update()
+                )
+                if not locked:
+                    raise HTTPException(404, "Unknown order_id")
+                if locked.user_id != user.id:
+                    raise HTTPException(403, "Order does not belong to this user")
+                locked.status = status
+                db.add(locked)
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
+            return {"ok": False, "status": status, "credited": False}
+
+        source = f"paypal:{req.order_id}"
+        new_balance: int
+        cents: int
+
+        # Credit + ledger (idempotent, concurrency-safe)
+        try:
+            locked = await db.scalar(
+                select(PayPalTopUp).where(PayPalTopUp.order_id == req.order_id).with_for_update()
+            )
+            if not locked:
+                raise HTTPException(404, "Unknown order_id")
+            if locked.user_id != user.id:
+                raise HTTPException(403, "Order does not belong to this user")
+
+            influencer_id = (locked.influencer_id or req.influencer_id or "").strip()
+            if not influencer_id:
+                raise HTTPException(status_code=400, detail="Missing influencer_id for this PayPal order")
+
+            if not locked.influencer_id:
+                locked.influencer_id = influencer_id
+                db.add(locked)
+
+            if locked.credited:
+                wallet = await db.scalar(
+                    select(InfluencerWallet).where(
+                        and_(
+                            InfluencerWallet.user_id == user.id,
+                            InfluencerWallet.influencer_id == influencer_id,
+                            InfluencerWallet.is_18.is_(False),
+                        )
+                    )
+                )
+                return {
+                    "ok": True,
+                    "credited": True,
+                    "new_balance_cents": wallet.balance_cents if wallet else 0,
+                }
+
+            existing_tx = await db.scalar(
+                select(InfluencerCreditTransaction).where(
+                    and_(
+                        InfluencerCreditTransaction.user_id == user.id,
+                        InfluencerCreditTransaction.influencer_id == influencer_id,
+                        InfluencerCreditTransaction.feature == "topup",
+                        InfluencerCreditTransaction.meta["source"].as_string() == source,  # type: ignore[index]
+                    )
+                )
+            )
+            if existing_tx:
+                locked.status = "COMPLETED"
+                locked.credited = True
+                db.add(locked)
+                wallet = await db.scalar(
+                    select(InfluencerWallet).where(
+                        and_(
+                            InfluencerWallet.user_id == user.id,
+                            InfluencerWallet.influencer_id == influencer_id,
+                            InfluencerWallet.is_18.is_(False),
+                        )
+                    )
+                )
+                return {
+                    "ok": True,
+                    "credited": True,
+                    "new_balance_cents": wallet.balance_cents if wallet else 0,
+                }
+
+            cents = int(locked.cents)
+            new_balance = await topup_wallet(
+                db,
+                user.id,
+                influencer_id,
+                cents,
+                source=source,
+                is_18=False,
+            )
+            locked.status = "COMPLETED"
+            locked.credited = True
+            db.add(locked)
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+
+        # Post-commit side effects (don't affect payment success)
+        try:
+            if req.influencer_id:
+                influencer = await db.get(Influencer, req.influencer_id)
+                if influencer and influencer.fp_ref_id:
+                    await fp_track_sale_v2(
+                        email=user.email,
+                        uid=str(user.id),
+                        amount_cents=cents,
+                        event_id=req.order_id,
+                        ref_id=influencer.fp_ref_id,
+                        plan="wallet_topup",
+                    )
+        except Exception as e:
+            print("FirstPromoter track sale failed:", e)
+
+        return {
+            "ok": True,
+            "status": "COMPLETED",
+            "credited": True,
+            "new_balance_cents": new_balance,
+        }
+    except HTTPException:
+        raise
     except Exception as e:
-        print("FirstPromoter track sale failed:", e)
-
-    db.add(row)
-    await db.commit()
-
-    return {
-        "ok": True,
-        "status": "COMPLETED",
-        "credited": True,
-        "new_balance_cents": new_balance,
-    }
+        # Keep `detail` a string so frontends that render it directly don't crash,
+        # while still returning rich debug info for development.
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": "paypal_capture crashed",
+                "debug": {
+                    "error_type": type(e).__name__,
+                    "error": str(e),
+                    "trace": traceback.format_exc().splitlines()[-20:],
+                },
+            },
+        )

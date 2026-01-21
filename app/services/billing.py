@@ -5,6 +5,7 @@ import math
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert
 
 from fastapi import HTTPException
 from app.db.models import InfluencerWallet, InfluencerCreditTransaction, DailyUsage, Pricing, User, Chat, Influencer
@@ -132,6 +133,20 @@ async def topup_wallet(
     if not infl:
         raise HTTPException(status_code=404, detail="Influencer not found")
 
+    # Race-safe get-or-create without rolling back the surrounding transaction
+    await db.execute(
+        insert(InfluencerWallet)
+        .values(
+            user_id=user_id,
+            influencer_id=influencer_id,
+            is_18=is_18,
+            balance_cents=0,
+        )
+        .on_conflict_do_nothing(
+            index_elements=["user_id", "influencer_id", "is_18"],
+        )
+    )
+
     wallet = await db.scalar(
         select(InfluencerWallet).where(
             and_(
@@ -142,29 +157,7 @@ async def topup_wallet(
         )
     )
     if not wallet:
-        wallet = InfluencerWallet(
-            user_id=user_id,
-            influencer_id=influencer_id,
-            is_18=is_18,
-            balance_cents=0,
-        )
-        db.add(wallet)
-        try:
-            await db.flush()
-        except IntegrityError:
-            # Another request may have created the wallet concurrently.
-            await db.rollback()
-            wallet = await db.scalar(
-                select(InfluencerWallet).where(
-                    and_(
-                        InfluencerWallet.user_id == user_id,
-                        InfluencerWallet.influencer_id == influencer_id,
-                        InfluencerWallet.is_18.is_(is_18),
-                    )
-                )
-            )
-            if not wallet:
-                raise
+        raise HTTPException(status_code=500, detail="Wallet not found/created")
 
     wallet.balance_cents = int(wallet.balance_cents or 0) + int(cents)
     db.add(wallet)
@@ -180,11 +173,8 @@ async def topup_wallet(
         )
     )
 
-    try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        raise
+    # Intentionally no commit/rollback here: caller controls transaction boundaries.
+    await db.flush()
     return int(wallet.balance_cents or 0)
 
 def get_audio_duration_ffmpeg(file_bytes: bytes) -> float:
