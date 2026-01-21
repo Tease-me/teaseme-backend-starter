@@ -27,7 +27,6 @@ async def get_balance(
     user=Depends(get_current_user),
     is_18: bool = True,
 ):
-    # optional: validate influencer exists
     infl = await db.get(Influencer, influencer_id)
     if not infl:
         raise HTTPException(status_code=404, detail="Influencer not found")
@@ -157,7 +156,6 @@ async def paypal_capture(
         ))
         return {"ok": True, "credited": True, "new_balance_cents": wallet.balance_cents if wallet else 0}
 
-    # Capture PayPal
     token = await paypal_access_token()
     async with httpx.AsyncClient(timeout=20) as client:
         r = await client.post(
@@ -176,7 +174,6 @@ async def paypal_capture(
         await db.commit()
         return {"ok": False, "status": row.status, "credited": False}
 
-    # Credit wallet
     new_balance = await topup_wallet(
         db, user.id, row.cents, source=f"paypal:{req.order_id}"
     )

@@ -13,7 +13,6 @@ log = logging.getLogger("openai.assistants")
 
 DEFAULT_AGENT_MODEL = "gpt-4.1"
 
-# Single shared client; adjust params here if needed.
 _chat_llm = ChatOpenAI(
     api_key=settings.OPENAI_API_KEY,
     model=DEFAULT_AGENT_MODEL,
@@ -29,9 +28,6 @@ async def upsert_influencer_agent(
     assistant_id: str | None = None,
     model: str = DEFAULT_AGENT_MODEL,
 ) -> str:
-    """
-    Legacy placeholder: assistants API removed, so we just echo back the provided id or a dummy.
-    """
     return assistant_id or "legacy-chat-model"
 
 
@@ -43,10 +39,6 @@ async def send_agent_message(
     thread_id: str | None = None,
     max_attempts: int = 2,
 ) -> Tuple[str, str | None]:
-    """
-    Send a chat completion using gpt-4.1 directly (no Assistants API).
-    Context is provided as a system message; thread_id is ignored but returned for signature compatibility.
-    """
     if not message:
         raise HTTPException(400, "Message is required.")
 
@@ -66,5 +58,4 @@ async def send_agent_message(
     if not reply_text:
         raise HTTPException(502, "Assistant responded without text.")
 
-    # No thread semantics with plain chat completions.
     return reply_text, None

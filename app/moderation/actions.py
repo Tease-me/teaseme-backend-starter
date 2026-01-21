@@ -22,16 +22,14 @@ async def flag_user(
     
     now = datetime.now(timezone.utc)
     
-    # Update violation count
     user.violation_count = (user.violation_count or 0) + 1
     user.last_violation_at = now
     
     if not user.first_violation_at:
         user.first_violation_at = now
     
-    # Update status based on count
     if user.moderation_status == "BANNED":
-        pass  # Don't change if already banned
+        pass  
     elif user.violation_count >= 3:
         user.moderation_status = "UNDER_REVIEW"
     else:
@@ -58,7 +56,7 @@ async def handle_violation(
         chat_id=chat_id,
         influencer_id=influencer_id,
         message_content=message,
-        message_context=context[:2000] if context else None,  # Limit context size
+        message_context=context[:2000] if context else None, 
         category=result.category or "UNKNOWN",
         severity=result.severity or "MEDIUM",
         keyword_matched=result.keyword,
@@ -94,7 +92,6 @@ async def clear_user_flag(
         raise ValueError(f"User {user_id} not found")
     
     user.moderation_status = "CLEAN"
-    # Keep violation_count and dates for audit trail
     
     await db.commit()
     

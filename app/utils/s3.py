@@ -18,7 +18,6 @@ s3 = boto3.client(
     region_name=getattr(settings, "AWS_REGION", None) or "us-east-1",
 )
 
-# Save audio file to S3 and return the S3 key
 async def save_audio_to_s3(file_obj, filename, content_type, user_id):
     ext = filename.split('.')[-1] if '.' in filename else 'webm'
     key = f"useraudio/{user_id}/{uuid.uuid4()}.{ext}"
@@ -26,13 +25,11 @@ async def save_audio_to_s3(file_obj, filename, content_type, user_id):
     s3.upload_fileobj(file_obj, settings.BUCKET_NAME, key, ExtraArgs={"ContentType": content_type})
     return key
  
-# Save IA-generated audio to S3 and return the S3 key
 async def save_ia_audio_to_s3(audio_bytes: bytes, user_id: str) -> str:
     filename = f"iaudio/{user_id}/{uuid.uuid4()}.mp3"
     s3.upload_fileobj(io.BytesIO(audio_bytes), settings.BUCKET_NAME, filename, ExtraArgs={"ContentType": "audio/mpeg"})
-    return filename  # Return the S3 key, not URL
+    return filename   
 
-# Generate a presigned URL for accessing an S3 object
 def generate_presigned_url(key: str, expires: int = 3600) -> str:
     return s3.generate_presigned_url(
         "get_object",
@@ -60,8 +57,6 @@ def message18_to_schema_with_presigned(msg):
     if audio_url:
         audio_url = generate_presigned_url(audio_url)
 
-    # MessageSchema expects fields that Message18 may not have.
-    # So we fill what exists and set missing ones to defaults.
     return MessageSchema(
         id=msg.id,
         chat_id=msg.chat_id,
@@ -72,9 +67,7 @@ def message18_to_schema_with_presigned(msg):
         channel=getattr(msg, "channel", "text"),          # default
         conversation_id=getattr(msg, "conversation_id", None),  # Message18 doesn't have it
     )
-# Save knowledge file to S3 and return the S3 key
 async def save_knowledge_file_to_s3(file_obj, filename: str, content_type: str, influencer_id: str) -> str:
-    """Save a knowledge file (PDF, DOCX, TXT) to S3"""
     ext = filename.split('.')[-1].lower() if '.' in filename else 'txt'
     key = f"knowledge/{influencer_id}/{uuid.uuid4()}.{ext}"
     file_obj.seek(0)
@@ -86,9 +79,7 @@ async def save_knowledge_file_to_s3(file_obj, filename: str, content_type: str, 
     )
     return key
 
-# Delete file from S3
 async def delete_file_from_s3(key: str) -> None:
-    """Delete a file from S3"""
     try:
         s3.delete_object(Bucket=settings.BUCKET_NAME, Key=key)
     except botocore.exceptions.ClientError as e:
@@ -103,7 +94,6 @@ async def delete_file_from_s3(key: str) -> None:
         log.error(f"Failed to delete S3 file {key}: {code} - {msg}")
         raise
     except Exception as e:
-        # fallback pra erros inesperados
         log.error(f"Unexpected error deleting S3 file {key}: {e}", exc_info=True)
         raise
 
@@ -217,7 +207,6 @@ async def get_influencer_profile_from_s3(influencer_id: str) -> dict:
 
 
 async def save_user_photo_to_s3(file_obj, filename: str, content_type: str, user_id: int) -> str:
-    """Save user profile photo to S3"""
     ext = _normalize_image_ext(filename, content_type)
     key = f"{settings.USER_PREFIX}/{user_id}/profile.{ext}"
     file_obj.seek(0)
@@ -226,5 +215,4 @@ async def save_user_photo_to_s3(file_obj, filename: str, content_type: str, user
 
 
 def generate_user_presigned_url(key: str, expires: int = 3600) -> str:
-    """Generate presigned URL for user content (photos)"""
     return generate_presigned_url(key, expires)
