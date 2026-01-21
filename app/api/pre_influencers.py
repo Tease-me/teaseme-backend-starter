@@ -39,6 +39,7 @@ from app.schemas.pre_influencer import (
 )
 from app.core.config import settings
 from app.utils.email import (
+    send_new_influencer_email_with_picture,
     send_profile_survey_email,
     send_new_influencer_email,
     send_influencer_survey_completed_email_to_promoter,
@@ -706,7 +707,6 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
 
     influencer = await db.get(Influencer, influencer_id)
 
-    
     sections = _load_survey_questions()
     markdown = _format_survey_markdown(sections, pre.survey_answers or {}, pre.username)
     prompt = await _generate_prompt_from_markdown(markdown, additional_prompt=None, db=db)
@@ -723,6 +723,7 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
             voice_id=DEFAULT_VOICE_ID,
             fp_promoter_id=pre.fp_promoter_id,
             fp_ref_id=pre.fp_ref_id,
+            email=pre.email,
         )
         db.add(influencer)
     else:
@@ -748,12 +749,10 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
 
     await db.commit()
     await db.refresh(influencer)
-    profile_picture_key = (pre.survey_answers or {}).get("profile_picture_key") 
-    send_new_influencer_email(
+
+    send_new_influencer_email_with_picture(
         to_email=pre.email,
-        profile_picture_key=profile_picture_key,
         influencer=influencer,
-        fp_ref_id=influencer.fp_ref_id,
     )
 
     return {

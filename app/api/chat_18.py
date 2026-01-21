@@ -139,6 +139,7 @@ async def _wait_and_flush(
         await asyncio.sleep(delay)
         await _flush_buffer(chat_id, ws, influencer_id, user_id, db)
     except asyncio.CancelledError:
+        # timer cancelled due to a newer incoming message
         return
 
 async def _flush_buffer(

@@ -40,7 +40,7 @@ class Influencer(Base):
     
     fp_promoter_id: Mapped[str | None] = mapped_column(String, nullable=True)
     fp_ref_id: Mapped[str | None] = mapped_column(String, nullable=True)
-
+    email: Mapped[str] = mapped_column(String, unique=True, nullable=True)
     custom_adult_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     custom_audio_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -314,6 +314,7 @@ class InfluencerSubscription(Base):
     interval: Mapped[str] = mapped_column(String, nullable=False, default="monthly")
 
     status: Mapped[str] = mapped_column(String, nullable=False, default="active")
+    # status: "active" | "paused" | "cancelled" | "expired"
 
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
