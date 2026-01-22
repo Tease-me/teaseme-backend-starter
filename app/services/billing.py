@@ -4,9 +4,11 @@ import os
 import math
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert
 
 from fastapi import HTTPException
-from app.db.models import InfluencerWallet, InfluencerCreditTransaction, DailyUsage, Pricing, User, Chat
+from app.db.models import InfluencerWallet, InfluencerCreditTransaction, DailyUsage, Pricing, User, Chat, Influencer
 from datetime import datetime, timezone, date
 
 async def charge_feature(
@@ -108,25 +110,67 @@ async def charge_feature(
     await db.commit()
     return cost
 
-async def topup_wallet(db, user_id: int, cents: int, source: str):
-    """Add credits to user's wallet and log the transaction."""
-    wallet = await db.get(InfluencerWallet, user_id) or InfluencerWallet(user_id=user_id)
-    if wallet.balance_cents is None:
-        wallet.balance_cents = 0
-    wallet.balance_cents += cents
-    db.add_all([
-        wallet,
+async def topup_wallet(
+    db: AsyncSession,
+    user_id: int,
+    influencer_id: str,
+    cents: int,
+    source: str,
+    *,
+    is_18: bool = False,
+) -> int:
+    """Add credits to a specific (user, influencer, mode) wallet and log the transaction."""
+    influencer_id = (influencer_id or "").strip()
+    if not influencer_id:
+        raise HTTPException(status_code=400, detail="Missing influencer_id for wallet topup")
+
+    infl = await db.get(Influencer, influencer_id)
+    if not infl:
+        raise HTTPException(status_code=404, detail="Influencer not found")
+
+    # Race-safe get-or-create without rolling back the surrounding transaction
+    await db.execute(
+        insert(InfluencerWallet)
+        .values(
+            user_id=user_id,
+            influencer_id=influencer_id,
+            is_18=is_18,
+            balance_cents=0,
+        )
+        .on_conflict_do_nothing(
+            index_elements=["user_id", "influencer_id", "is_18"],
+        )
+    )
+
+    wallet = await db.scalar(
+        select(InfluencerWallet).where(
+            and_(
+                InfluencerWallet.user_id == user_id,
+                InfluencerWallet.influencer_id == influencer_id,
+                InfluencerWallet.is_18.is_(is_18),
+            )
+        )
+    )
+    if not wallet:
+        raise HTTPException(status_code=500, detail="Wallet not found/created")
+
+    wallet.balance_cents = int(wallet.balance_cents or 0) + int(cents)
+    db.add(wallet)
+
+    db.add(
         InfluencerCreditTransaction(
-            influencer_id=wallet.influencer_id,
+            influencer_id=influencer_id,
             user_id=user_id,
             feature="topup",
-            units=cents,
-            amount_cents=cents,
-            meta={"source": source}
+            units=int(cents),
+            amount_cents=int(cents),
+            meta={"source": source},
         )
-    ])
-    await db.commit()
-    return wallet.balance_cents
+    )
+
+    # Intentionally no commit/rollback here: caller controls transaction boundaries.
+    await db.flush()
+    return int(wallet.balance_cents or 0)
 
 def get_audio_duration_ffmpeg(file_bytes: bytes) -> float:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as tmp:
