@@ -19,11 +19,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade():
-    op.add_column(
-        "influencers",
-        sa.Column("email", sa.String(), nullable=True),
-    )
+    op.execute("ALTER TABLE influencers ADD COLUMN IF NOT EXISTS email VARCHAR")
 
 
 def downgrade():
-    op.drop_column("influencers", "email")
+    op.execute("ALTER TABLE influencers DROP COLUMN IF EXISTS email")
