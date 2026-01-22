@@ -2,6 +2,7 @@ import json
 import logging
 import secrets
 import re
+from fastapi.encoders import jsonable_encoder
 
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -15,6 +16,7 @@ from fastapi import (
     UploadFile,
     File,
     Form,
+    Query,
     Response,
     status
 )
@@ -37,10 +39,12 @@ from app.schemas.pre_influencer import (
 )
 from app.core.config import settings
 from app.utils.email import (
+    send_new_influencer_email_with_picture,
     send_profile_survey_email,
     send_new_influencer_email,
     send_influencer_survey_completed_email_to_promoter,
 )
+
 from app.utils.s3 import s3,save_influencer_photo_to_s3, generate_presigned_url, delete_file_from_s3
 from app.services.firstpromoter import (
     fp_create_promoter,
@@ -75,7 +79,6 @@ async def _load_survey_questions(db: AsyncSession):
 
 
 def _format_survey_markdown(sections, answers, username: str | None = None) -> str:
-    """Build a simple markdown report of questions and answers."""
     lines = []
     if username:
         lines.append(f"# {username}'s Survey")
@@ -108,14 +111,36 @@ def _format_survey_markdown(sections, answers, username: str | None = None) -> s
 
 
 def _unwrap_json(raw: str) -> str:
-    """Strip markdown code fences if the model wrapped the JSON."""
     text = raw.strip()
     if text.startswith("```"):
-        # Remove opening fence with optional language
         text = text.split("\n", 1)[-1]
         if text.endswith("```"):
             text = text.rsplit("```", 1)[0]
     return text.strip()
+
+def _require_pre_influencer_survey_access(
+    pre: PreInfluencer,
+    token: str,
+    temp_password: str,
+) -> None:
+    if (
+        not pre.survey_token
+        or not token
+        or not secrets.compare_digest(pre.survey_token, token)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invalid or expired survey link",
+        )
+    if (
+        not pre.password
+        or not temp_password
+        or not secrets.compare_digest(pre.password, temp_password)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid temporary password",
+        )
 
 
 async def _generate_prompt_from_markdown(markdown: str, additional_prompt: str | None, db:AsyncSession) -> str:
@@ -146,7 +171,6 @@ async def _generate_prompt_from_markdown(markdown: str, additional_prompt: str |
     if not isinstance(parsed, dict):
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Prompt generation returned non-object JSON.")
 
-    # Basic normalization/defaults
     parsed.setdefault("likes", [])
     parsed.setdefault("dislikes", [])
     parsed.setdefault("mbti_architype", "")
@@ -164,7 +188,6 @@ async def _generate_prompt_from_markdown(markdown: str, additional_prompt: str |
         "in_love": stages.get("in_love", ""),
     }
 
-    # Ensure lists are lists of strings
     def _as_str_list(val):
         if isinstance(val, list):
             return [str(x) for x in val]
@@ -323,7 +346,11 @@ async def resend_pre_influencer_survey(
     }
 
 @router.get("/survey", response_model=SurveyState)
-async def open_survey(token: str, db: AsyncSession = Depends(get_db)):
+async def open_survey(
+    token: str,
+    temp_password: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(
         select(PreInfluencer).where(PreInfluencer.survey_token == token)
     )
@@ -334,6 +361,8 @@ async def open_survey(token: str, db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Invalid or expired survey link",
         )
+
+    _require_pre_influencer_survey_access(pre, token, temp_password)
 
     return SurveyState(
         pre_influencer_id=pre.id,
@@ -454,6 +483,8 @@ async def _notify_parent_promoter_if_needed(pre: PreInfluencer, db: AsyncSession
 async def save_survey_state(
     pre_id: int,
     data: SurveySaveRequest,
+    token: str = Query(...),
+    temp_password: str = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -463,6 +494,8 @@ async def save_survey_state(
 
     if not pre:
         raise HTTPException(status_code=404, detail="Pre-influencer not found")
+
+    _require_pre_influencer_survey_access(pre, token, temp_password)
 
     incoming_answers: dict = data.survey_answers or {}
     existing_answers = pre.survey_answers or {}
@@ -498,6 +531,8 @@ async def save_survey_state(
 @router.post("/upload-picture")
 async def upload_pre_influencer_picture(
     pre_influencer_id: int = Form(...),
+    token: str = Query(...),
+    temp_password: str = Query(...),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     
@@ -509,6 +544,8 @@ async def upload_pre_influencer_picture(
 
     if not pre:
         raise HTTPException(status_code=404, detail="Pre-influencer not found")
+
+    _require_pre_influencer_survey_access(pre, token, temp_password)
 
     if not pre.username:
         raise HTTPException(
@@ -552,6 +589,8 @@ async def upload_pre_influencer_picture(
 @router.get("/{pre_id}/picture-url")
 async def get_pre_influencer_picture_url(
     pre_id: int,
+    token: str = Query(...),
+    temp_password: str = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -561,6 +600,8 @@ async def get_pre_influencer_picture_url(
 
     if not pre:
         raise HTTPException(status_code=404, detail="Pre-influencer not found")
+
+    _require_pre_influencer_survey_access(pre, token, temp_password)
 
     answers = pre.survey_answers or {}
     key = answers.get("profile_picture_key")
@@ -620,6 +661,14 @@ async def get_default_voices(db: AsyncSession = Depends(get_db)):
         "count": len(voices),
         "voices": voices,
     }
+def _pre_influencer_with_profile_picture_url(pre: PreInfluencer) -> dict:
+    data = jsonable_encoder(pre)
+    answers = data.get("survey_answers") or {}
+    key = answers.get("profile_picture_key")
+    if key:
+        answers["profile_picture_url"] = generate_presigned_url(key, expires=3600)
+    data["survey_answers"] = answers
+    return data
 
 @router.get("")
 async def list_pre_influencers(status: str | None = None, db: AsyncSession = Depends(get_db)):
@@ -627,10 +676,21 @@ async def list_pre_influencers(status: str | None = None, db: AsyncSession = Dep
     if status:
         q = q.where(PreInfluencer.status == status)
     rows = (await db.execute(q)).scalars().all()
-    return rows
+    return [_pre_influencer_with_profile_picture_url(r) for r in rows]
 
 def normalize_influencer_id(username: str) -> str:
     return re.sub(r"[^a-z0-9_]", "", username.lower())
+
+@router.get("/{pre_id}")
+async def get_pre_influencer(
+    pre_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    q = select(PreInfluencer).where(PreInfluencer.id == pre_id)
+    row = (await db.execute(q)).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="PreInfluencer not found")
+    return _pre_influencer_with_profile_picture_url(row)
 
 @router.post("/{pre_id}/approve")
 async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)):
@@ -647,7 +707,6 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
 
     influencer = await db.get(Influencer, influencer_id)
 
-    
     sections = _load_survey_questions()
     markdown = _format_survey_markdown(sections, pre.survey_answers or {}, pre.username)
     prompt = await _generate_prompt_from_markdown(markdown, additional_prompt=None, db=db)
@@ -664,10 +723,10 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
             voice_id=DEFAULT_VOICE_ID,
             fp_promoter_id=pre.fp_promoter_id,
             fp_ref_id=pre.fp_ref_id,
+            email=pre.email,
         )
         db.add(influencer)
     else:
-        # Existing influencer, update fields if empty
         if not influencer.display_name:
             influencer.display_name = pre.full_name or pre.username
         if not influencer.prompt_template:
@@ -679,7 +738,6 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
         influencer.fp_ref_id = pre.fp_ref_id
         db.add(influencer)
 
-    # Update photo key if available
     answers = pre.survey_answers or {}
     photo_key = answers.get("profile_picture_key")
     if photo_key and not influencer.profile_photo_key:
@@ -692,10 +750,9 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
     await db.commit()
     await db.refresh(influencer)
 
-    send_new_influencer_email(
+    send_new_influencer_email_with_picture(
         to_email=pre.email,
-        influencer_username=influencer.id,
-        fp_ref_id=influencer.fp_ref_id,
+        influencer=influencer,
     )
 
     return {

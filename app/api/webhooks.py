@@ -63,7 +63,6 @@ def _verify_hmac(raw_body: bytes, signature_header: Optional[str]) -> None:
         raise HTTPException(401, "Malformed ElevenLabs-Signature")
 
     now = int(time.time())
-    # Reject very old signatures (30 minutes)
     if ts < now - 30 * 60:
         log.warning("webhook.hmac.stale_signature ts=%s now=%s skew=%ss", ts, now, now - ts)
         raise HTTPException(401, "Stale signature")
@@ -104,7 +103,6 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
     te = (request.headers.get("transfer-encoding") or "").lower()
     log.info("webhook.receive start ip=%s transfer_encoding=%s", client_ip, te)
 
-    # Handle possible chunked bodies (when "Send audio data" is enabled)
     if te == "chunked":
         buf = bytearray()
         async for chunk in request.stream():
@@ -125,7 +123,7 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
         log.warning("webhook.json.invalid ip=%s", client_ip)
         raise HTTPException(400, "Invalid JSON payload")
 
-    event_type = payload.get("type")  # "post_call_transcription" or "post_call_audio"
+    event_type = payload.get("type") 
     data = payload.get("data") or {}
 
     conversation_id = data.get("conversation_id")
@@ -147,12 +145,10 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
         log.warning("webhook.no_conversation_id ip=%s", client_ip)
         return {"ok": False, "reason": "no-conversation-id"}
 
-    # Derive your user mapping. Prefer the stored mapping from /register.
     meta_map = await _resolve_user_for_conversation(db, conversation_id)
-    user_id = meta_map.get("user_id") or data.get("user_id")  # last-resort fallback
+    user_id = meta_map.get("user_id") or data.get("user_id") 
     sid = meta_map.get("sid") or conversation_id
 
-    # Only bill when the conversation is fully done (avoid processing/in-progress).
     if status == "done" and user_id:
         meta = {
             "session_id": sid,
@@ -171,7 +167,6 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
             _redact(user_id), _redact(conversation_id), total_seconds
         )
         try:
-            # Important: charge_feature must be idempotent by conversation_id
             chat_id = meta.get("chat_id") if isinstance(meta, dict) else None
             if not chat_id:
                 raise HTTPException(400, "Missing chat_id in meta for billing")
@@ -191,7 +186,6 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
                 _redact(user_id), _redact(conversation_id), total_seconds
             )
         except Exception as e:
-            # Keep behavior: let the exception bubble (you may choose to swallow and still 200)
             log.exception(
                 "webhook.billing.error user=%s conv_id=%s err=%s",
                 _redact(user_id), _redact(conversation_id), repr(e)
@@ -199,7 +193,6 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
             raise
 
     else:
-        # Not billing: either not done or no user mapping
         reason = "not_done" if status != "done" else "no_user"
         log.info(
             "webhook.billing.skipped reason=%s conv_id=%s status=%s user=%s",
@@ -210,7 +203,6 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
         "webhook.response ok=True conv_id=%s status=%s seconds=%s",
         _redact(conversation_id), status, total_seconds
     )
-    # Always respond quickly with 200 on success.
     return {"ok": True, "conversation_id": conversation_id, "status": status, "total_seconds": int(total_seconds)}
 
 @router.post("/update_relationship")
@@ -219,10 +211,8 @@ async def update_relationship_api(
     db: AsyncSession = Depends(get_db),
     x_webhook_token: str | None = Header(default=None),
 ):
-    # 1) Auth
     _verify_token(ELEVENLABS_CONVAI_WEBHOOK_SECRET, x_webhook_token)
 
-    # 2) Parse payload
     try:
         payload = await req.json()
     except Exception:
@@ -233,7 +223,6 @@ async def update_relationship_api(
     except Exception:
         pass
 
-    # 3) Extract user text
     args = payload.get("arguments") or {}
     raw_text = (
         payload.get("text")
@@ -250,7 +239,6 @@ async def update_relationship_api(
         log.warning("[EL TOOL] missing conversation_id in payload=%s", str(payload)[:300])
         return {"error": "I’m missing the call ID. Please try again."}
 
-    # 4) Look up CallRecord
     try:
         res = await db.execute(select(CallRecord).where(CallRecord.conversation_id == conversation_id))
         call = res.scalar_one_or_none()
@@ -273,7 +261,6 @@ async def update_relationship_api(
         )
         return {"error": "I’m having trouble with this call’s context."}
 
-    # 5) Build recent context from Redis history
     history = redis_history(chat_id)
 
     if len(history.messages) > settings.MAX_HISTORY_WINDOW:
@@ -283,7 +270,6 @@ async def update_relationship_api(
 
     recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
 
-    # 6) Load influencer
     influencer = await db.get(Influencer, influencer_id)
     if not influencer:
         log.warning("[EL TOOL] Influencer not found infl=%s conv=%s", influencer_id, conversation_id)
@@ -321,12 +307,10 @@ async def update_relationship_api(
     return relationship
 
 def _verify_token(shared: str, token: str | None) -> None:
-    """Simple shared-secret check (constant time if you prefer)."""
-    if not shared:  # secret disabled
+    if not shared: 
         return
     if not token:
         raise HTTPException(status_code=403, detail="Missing webhook token")
-    # constant-time compare (avoid timing attacks)
     if not hmac.compare_digest(shared, token):
         raise HTTPException(status_code=403, detail="Invalid webhook token")
 
@@ -336,10 +320,8 @@ async def eleven_webhook_get_memories(
     db: AsyncSession = Depends(get_db),
     x_webhook_token: str | None = Header(default=None),
 ):
-    # 1) Auth
     _verify_token(ELEVENLABS_CONVAI_WEBHOOK_SECRET, x_webhook_token)
 
-    # 2) Parse payload
     try:
         payload = await req.json()
     except Exception:
@@ -350,7 +332,6 @@ async def eleven_webhook_get_memories(
     except Exception:
         pass
 
-    # 3) Extract user text
     args = payload.get("arguments") or {}
     raw_text = (
         payload.get("text")
@@ -367,7 +348,6 @@ async def eleven_webhook_get_memories(
         log.warning("[EL TOOL] missing conversation_id in payload=%s", str(payload)[:300])
         return {"memories": []}
 
-    # 4) Look up CallRecord – must exist (set by /elevenlabs/conversations/{conversation_id}/register)
     try:
         res = await db.execute(
             select(CallRecord).where(CallRecord.conversation_id == conversation_id)
@@ -387,7 +367,6 @@ async def eleven_webhook_get_memories(
     influencer_id = call.influencer_id
     chat_id = call.chat_id
 
-    # 5) Validate context – no defaults
     if not user_id or not influencer_id or not chat_id:
         log.warning(
             "[EL TOOL] incomplete CallRecord context conv=%s user=%s infl=%s chat=%s",
@@ -396,7 +375,6 @@ async def eleven_webhook_get_memories(
         return {
             "memories": []}
 
-    # 6) Ensure Chat exists
     try:
         res = await db.execute(select(Chat).where(Chat.id == chat_id))
         chat = res.scalar_one_or_none()
@@ -413,7 +391,6 @@ async def eleven_webhook_get_memories(
             "memories": []
         }
 
-    # 7) Generate reply via handle_turn
     started = time.perf_counter()
     try:
         memories = await asyncio.wait_for(
@@ -445,10 +422,8 @@ async def eleven_webhook_reply(
     db: AsyncSession = Depends(get_db),
     x_webhook_token: str | None = Header(default=None),
 ):
-    # 1) Auth
     _verify_token(ELEVENLABS_CONVAI_WEBHOOK_SECRET, x_webhook_token)
 
-    # 2) Parse payload
     try:
         payload = await req.json()
     except Exception:
@@ -459,7 +434,6 @@ async def eleven_webhook_reply(
     except Exception:
         pass
 
-    # 3) Extract user text
     args = payload.get("arguments") or {}
     raw_text = (
         payload.get("text")
@@ -476,7 +450,6 @@ async def eleven_webhook_reply(
         log.warning("[EL TOOL] missing conversation_id in payload=%s", str(payload)[:300])
         return {"text": "I’m missing the call ID. Please try again."}
 
-    # 4) Look up CallRecord – must exist (set by /elevenlabs/conversations/{conversation_id}/register)
     try:
         res = await db.execute(
             select(CallRecord).where(CallRecord.conversation_id == conversation_id)
@@ -499,7 +472,6 @@ async def eleven_webhook_reply(
     influencer_id = call.influencer_id
     chat_id = call.chat_id
 
-    # 5) Validate context – no defaults
     if not user_id or not influencer_id or not chat_id:
         log.warning(
             "[EL TOOL] incomplete CallRecord context conv=%s user=%s infl=%s chat=%s",
@@ -512,7 +484,6 @@ async def eleven_webhook_reply(
             )
         }
 
-    # 6) Ensure Chat exists
     try:
         res = await db.execute(select(Chat).where(Chat.id == chat_id))
         chat = res.scalar_one_or_none()
@@ -532,7 +503,6 @@ async def eleven_webhook_reply(
             )
         }
 
-    # 7) Generate reply via handle_turn
     started = time.perf_counter()
     try:
         reply = await asyncio.wait_for(
@@ -558,7 +528,6 @@ async def eleven_webhook_reply(
             ms, conversation_id, user_id, influencer_id, chat_id
         )
 
-    # 8) Trim for TTS
     if isinstance(reply, str) and len(reply) > 320:
         reply = reply[:317] + "…"
 

@@ -1,29 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
-from app.db.session import get_db
-from app.utils.deps import get_current_user
 from app.db.models import RelationshipState
+from sqlalchemy import select, func
 
-router = APIRouter(prefix="/relationship", tags=["relationship"])
+from sqlalchemy.ext.asyncio import AsyncSession
 
-@router.get("/{influencer_id}")
-async def get_relationship(
-    influencer_id: str,
-    db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user),
-):
+async def _get_relationship_payload(db: AsyncSession, user_id: int, influencer_id: str) -> dict:
     rel = await db.scalar(
         select(RelationshipState).where(
-            RelationshipState.user_id == user.id,
+            RelationshipState.user_id == user_id,
             RelationshipState.influencer_id == influencer_id,
         )
     )
 
     if not rel:
         return {
-            "user_id": user.id,
+            "user_id": user_id,
             "influencer_id": influencer_id,
             "trust": 10.0,
             "closeness": 10.0,

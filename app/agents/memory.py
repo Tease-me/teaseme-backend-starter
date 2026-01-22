@@ -27,10 +27,8 @@ async def find_similar_memories(
     """
     emb = embedding or await get_embedding(message)
     
-    # Get chat-specific memories (existing behavior)
     chat_memories = await search_similar_memories(db, chat_id, emb, top_k=top_k)
     
-    # Get influencer knowledge base chunks (NEW)
     knowledge_chunks = []
     if influencer_id:
         try:
@@ -40,7 +38,6 @@ async def find_similar_memories(
             log = logging.getLogger("memory")
             log.info(f"Knowledge search for {influencer_id}: found {len(knowledge_chunks)} chunks")
         except Exception as e:
-            # Log error but don't fail if knowledge search fails
             import logging
             log = logging.getLogger("memory")
             log.error(f"Failed to search influencer knowledge for {influencer_id}: {e}", exc_info=True)
@@ -62,16 +59,13 @@ async def _already_have(db, chat_id: str, fact: str) -> bool:
 
 
 async def store_fact(db, chat_id: str, fact: str, sender: str = "user"):
-    # normalize
     norm_fact = _norm(fact)
     if not norm_fact or norm_fact == "no new memories.":
         return
 
-    # avoid duplicates
     if await _already_have(db, chat_id, norm_fact):
-        return  # skip saving
+        return  
 
-    # get embedding
     try:
         emb = await get_embedding(norm_fact)
     except Exception as exc:
@@ -79,7 +73,6 @@ async def store_fact(db, chat_id: str, fact: str, sender: str = "user"):
         logging.getLogger("memory").error("get_embedding failed for fact=%r chat=%s err=%s", norm_fact, chat_id, exc, exc_info=True)
         return
 
-    # save or update
     await upsert_memory(
         db=db,
         chat_id=chat_id,

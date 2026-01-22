@@ -3,6 +3,15 @@ import boto3
 from botocore.exceptions import ClientError
 from app.core.config import settings
 from datetime import datetime
+from app.db.models import Influencer
+import base64
+import io
+import uuid
+import urllib.request
+from PIL import Image
+from app.utils.s3 import generate_user_presigned_url, s3
+from app.core.config import settings
+
 
 log = logging.getLogger(__name__)
 
@@ -14,10 +23,16 @@ AWS_SECRET_ACCESS_KEY = settings.SES_AWS_SECRET_ACCESS_KEY
 
 ses_client = boto3.client("ses", region_name=AWS_REGION)
 
+EMAIL_VERIFY_HEADER_URL = "https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/email_verify_header.png"
+EMAIL_RESET_HEADER_URL = "https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/reset_password_header.png"
+# Email hero image size (width is fixed by template). Increase height here without changing face size
+# because we render the overlay at a fixed scale (fit-to-width) and only crop vertically.
+EMAIL_HEADER_SIZE = (520, 150)  # (width, height)
+
 def send_verification_email(to_email: str, token: str):
     subject = "Confirm your email on TeaseMe!"
     confirm_url = f"{CONFIRM_BASE_URL}/verify-email?token={token}"
-    logo_url = f"https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/email_verify_header.png"
+    logo_url = EMAIL_VERIFY_HEADER_URL
 
     body_html = f"""
 <!DOCTYPE html>
@@ -81,10 +96,8 @@ def send_verification_email(to_email: str, token: str):
 
 def send_profile_survey_email(to_email: str, token: str, temp_password: str):
     subject = "Complete Your TeaseMe Profile Survey"
-    survey_url = f"{CONFIRM_BASE_URL}/profile-survey-form?token={token}"
-    logo_url = (
-        "https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/email_verify_header.png"
-    )
+    survey_url = f"{CONFIRM_BASE_URL}/profile-survey-form?token={token}&temp_password={temp_password}"
+    logo_url = EMAIL_VERIFY_HEADER_URL
 
     body_html = f"""
     <!DOCTYPE html>
@@ -132,18 +145,6 @@ def send_profile_survey_email(to_email: str, token: str, temp_password: str):
                     Start Profile Survey
                   </a>
 
-                  <p style="font-size:14px;color:#666;margin:12px 0 8px 0;">
-                    Your session identifier is:
-                  </p>
-
-                  <div style="display:inline-block;padding:10px 18px;border-radius:8px;background:#f3f4ff;
-                              font-family:monospace;font-size:16px;color:#333;margin-bottom:16px;">
-                    {temp_password}
-                  </div>
-                   <p style="font-size:12px;color:#666;margin:2px 0 8px 0;">
-                    You will only need this if support asks for it.
-                  </p>
-
                   <p style="margin:24px 0 0 0; font-size:14px; color:#bbb;">
                     If you didn’t request this, you can safely ignore the email.<br/>
                     Your persona can't wait to meet you. ❤️
@@ -174,8 +175,6 @@ You're all set! Before your AI companion goes live, we just need a little more i
 
 Start your profile survey here:
 {survey_url}
-
-Your temporary password: {temp_password}
 
 If you didn’t request this, you can safely ignore this email.
 Your persona can't wait to meet you. ❤️
@@ -217,7 +216,7 @@ def send_email_via_ses(to_email, subject, body_html, body_text=None):
 def send_password_reset_email(to_email: str, token: str):
     subject = "Redefine your TeaseMe password"
     reset_url = f"{CONFIRM_BASE_URL}/reset-password?token={token}"
-    logo_url = f"https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/reset_password_header.png"
+    logo_url = EMAIL_RESET_HEADER_URL
 
     body_html = f"""
         <!DOCTYPE html>
@@ -277,22 +276,207 @@ def send_password_reset_email(to_email: str, token: str):
         </html>
         """
 
-
     body_text = f"Reset your TeaseMe password by clicking this link: {reset_url}"
 
     return send_email_via_ses(to_email, subject, body_html, body_text)
 
+def image_data_url(key: str) -> str:
+    """
+    Return an image URL for email templates.
 
+    NOTE:
+    - Many email clients (incl. Gmail) don't reliably render `data:` URLs.
+    - So we generate a long-lived presigned HTTPS URL instead.
+    """
+    try:
+        expires = 60 * 60 * 24 * 7  # 7 days (max for SigV4 presign)
+        url = generate_user_presigned_url(key, expires=expires)
+        log.info(
+            f"image_data_url: generated presigned url bucket={settings.BUCKET_NAME} key={key} expires={expires}"
+        )
+        return url
+    except Exception:
+        log.exception(
+            f"image_data_url: failed to generate presigned url bucket={settings.BUCKET_NAME} key={key}",
+            extra={"bucket": settings.BUCKET_NAME, "key": key},
+        )
+        raise
+
+
+def _fetch_image_bytes_from_url(url: str) -> bytes:
+    with urllib.request.urlopen(url, timeout=10) as resp:  # nosec - url is controlled by our code
+        return resp.read()
+
+
+def _fetch_image_bytes_from_s3(key: str) -> bytes:
+    obj = s3.get_object(Bucket=settings.BUCKET_NAME, Key=key)
+    return obj["Body"].read()
+
+
+def _image_cover(img: Image.Image, size: tuple[int, int], *, mode: str = "RGB") -> Image.Image:
+    """
+    Resize+crop to fill size (cover), similar to CSS object-fit: cover.
+    """
+    target_w, target_h = size
+    img = img.convert(mode)
+    src_w, src_h = img.size
+    if src_w == 0 or src_h == 0:
+        return Image.new(mode, size, (0, 0, 0, 0) if mode == "RGBA" else (0, 0, 0))
+    scale = max(target_w / src_w, target_h / src_h)
+    new_w = int(round(src_w * scale))
+    new_h = int(round(src_h * scale))
+    img = img.resize((new_w, new_h), Image.LANCZOS)
+    left = max(0, (new_w - target_w) // 2)
+    top = max(0, (new_h - target_h) // 2)
+    return img.crop((left, top, left + target_w, top + target_h))
+
+
+def _resize_to_width(img: Image.Image, target_w: int, *, mode: str = "RGBA") -> Image.Image:
+    img = img.convert(mode)
+    w, h = img.size
+    if w == 0 or h == 0:
+        return Image.new(mode, (target_w, 1), (0, 0, 0, 0) if mode == "RGBA" else (0, 0, 0))
+    scale = target_w / w
+    new_h = max(1, int(round(h * scale)))
+    return img.resize((target_w, new_h), Image.LANCZOS)
+
+
+def _image_fit_height_center(
+    img: Image.Image, *, size: tuple[int, int], mode: str = "RGBA"
+) -> Image.Image:
+    """
+    Resize image to match target height (no vertical crop), keep aspect ratio,
+    and center it on a canvas of the target size.
+
+    This avoids the "zoomed in" look you get from cover-cropping portrait photos.
+    """
+    target_w, target_h = size
+    img = img.convert(mode)
+    src_w, src_h = img.size
+    if src_w == 0 or src_h == 0:
+        return Image.new(mode, size, (0, 0, 0, 0) if mode == "RGBA" else (0, 0, 0))
+
+    scale = target_h / src_h
+    new_w = int(round(src_w * scale))
+    new_h = target_h
+    resized = img.resize((new_w, new_h), Image.LANCZOS)
+
+    # If width exceeds canvas, center-crop horizontally.
+    if new_w > target_w:
+        left = (new_w - target_w) // 2
+        resized = resized.crop((left, 0, left + target_w, target_h))
+        return resized
+
+    # Otherwise, paste centered with transparent padding.
+    canvas = Image.new(mode, (target_w, target_h), (0, 0, 0, 0))
+    x = (target_w - new_w) // 2
+    canvas.paste(resized, (x, 0))
+    return canvas
+
+
+def compose_email_header_image_url(*, photo_key: str, background_url: str, influencer_id: str) -> str:
+    """
+    Compose a single email header image (520x800) so email clients don't need to support layered backgrounds.
+    Uploads to S3 and returns a presigned URL.
+    """
+    size = EMAIL_HEADER_SIZE
+    try:
+        log.info(
+            "compose_email_header_image_url: composing header "
+            f"influencer_id={influencer_id} photo_key={photo_key}"
+        )
+
+        bg_raw = _fetch_image_bytes_from_url(background_url)
+        photo_raw = _fetch_image_bytes_from_s3(photo_key)
+
+        # Render overlay at a fixed scale (fit-to-width) so changing HEIGHT does not change face size.
+        overlay_scaled = _resize_to_width(Image.open(io.BytesIO(bg_raw)), size[0], mode="RGBA")
+
+        # Detect the transparent "hole" on the scaled overlay
+        alpha_scaled = overlay_scaled.split()[-1]
+        hole_bbox_scaled = alpha_scaled.point(lambda a: 255 if a < 10 else 0).getbbox()
+        if not hole_bbox_scaled:
+            hole_bbox_scaled = (60, 80, size[0] - 60, max(1, overlay_scaled.size[1] - 80))
+
+        # Crop vertically around the hole so we always keep it visible.
+        target_h = size[1]
+        scaled_h = overlay_scaled.size[1]
+        if scaled_h <= target_h:
+            crop_top = 0
+        else:
+            hole_cy = (hole_bbox_scaled[1] + hole_bbox_scaled[3]) // 2
+            crop_top = hole_cy - (target_h // 2)
+            crop_top = max(0, min(crop_top, scaled_h - target_h))
+
+        overlay = overlay_scaled.crop((0, crop_top, size[0], crop_top + target_h))
+
+        # Hole bbox relative to cropped overlay
+        hole_bbox = (
+            hole_bbox_scaled[0],
+            max(0, hole_bbox_scaled[1] - crop_top),
+            hole_bbox_scaled[2],
+            max(0, hole_bbox_scaled[3] - crop_top),
+        )
+
+        alpha = overlay.split()[-1]
+        # Recompute bbox on cropped alpha as a safety net (e.g. if crop clipped edges)
+        hole_bbox2 = alpha.point(lambda a: 255 if a < 10 else 0).getbbox()
+        if hole_bbox2:
+            hole_bbox = hole_bbox2
+
+        if not hole_bbox:
+            # Fallback: assume a centered hole
+            hole_bbox = (60, 80, size[0] - 60, size[1] - 80)
+
+        hole_w = max(1, hole_bbox[2] - hole_bbox[0])
+        hole_h = max(1, hole_bbox[3] - hole_bbox[1])
+
+        photo_img = Image.open(io.BytesIO(photo_raw))
+        photo_fit = _image_cover(photo_img, (hole_w, hole_h), mode="RGBA")
+
+        # Base layer: solid background; paste photo only where the hole is
+        base = Image.new("RGBA", size, (0, 0, 0, 255))
+
+        # Mask is inverse alpha: 255 in hole, 0 outside
+        hole_mask_full = Image.eval(alpha, lambda a: 255 - a)
+        hole_mask = hole_mask_full.crop(hole_bbox)
+        base.paste(photo_fit, (hole_bbox[0], hole_bbox[1]), mask=hole_mask)
+
+        # Put overlay OVER photo so its alpha hole reveals the photo underneath
+        composed = Image.alpha_composite(base, overlay).convert("RGB")
+        out = io.BytesIO()
+        composed.save(out, format="JPEG", quality=90, optimize=True, progressive=True)
+        out.seek(0)
+
+        key = f"email-assets/headers/{influencer_id}/{uuid.uuid4()}.jpg"
+        s3.upload_fileobj(out, settings.BUCKET_NAME, key, ExtraArgs={"ContentType": "image/jpeg"})
+
+        url = generate_user_presigned_url(key, expires=60 * 60 * 24 * 7)
+        log.info(f"compose_email_header_image_url: uploaded header key={key}")
+        return url
+    except Exception:
+        log.exception(
+            "compose_email_header_image_url: failed to compose header "
+            f"influencer_id={influencer_id} photo_key={photo_key}"
+        )
+        raise
+  
 def send_new_influencer_email(
     to_email: str,
-    influencer_username: str,
+    influencer: Influencer,
     fp_ref_id: str | None = None,
 ):
     subject = "🎉 Your TeaseMe profile is live!"
-    public_url = f"https://teaseme.live/{influencer_username}"
-    referral_url = f"https://teaseme.live/{influencer_username}?fpr={fp_ref_id}" if fp_ref_id else None
+    public_url = f"https://teaseme.live/{influencer.id}"
+    referral_url = f"{public_url}?fpr={fp_ref_id}" if fp_ref_id else None
 
-    logo_url = "https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/email_verify_header.png"
+    logo_url = EMAIL_VERIFY_HEADER_URL
+    if influencer.profile_picture_key:
+        try:
+            logo_url = image_data_url(influencer.profile_picture_key)
+        except Exception:
+            log.warning("Failed to load pre-influencer image for email", exc_info=True)
+
 
     referral_block = ""
     if referral_url:
@@ -383,6 +567,121 @@ Your TeaseMe profile is live 🎉
 Open your profile:
 {public_url}
 """ + (f"\nReferral link:\n{referral_url}\n" if referral_url else "") + f"""
+
+© {datetime.now().year} TeaseMe. All rights reserved.
+""".strip()
+
+    return send_email_via_ses(to_email, subject, body_html, body_text)
+
+def send_new_influencer_email_with_picture(
+    to_email: str,
+    influencer: Influencer,
+):
+    subject = "🎉 Your TeaseMe profile is live!"
+    public_url = f"https://teaseme.live/{influencer.id}"
+    image_background_url = "https://bucket-image-tease-me.s3.us-east-1.amazonaws.com/influencer_header_background.png"
+    key = getattr(influencer, "profile_photo_key", None)
+    log.info(
+        f"send_new_influencer_email_with_picture: building email influencer_id={influencer.id} has_profile_photo_key={bool(key)}",
+        extra={
+            "to_email": to_email,
+            "influencer_id": str(influencer.id),
+            "has_profile_photo_key": bool(key),
+            "profile_photo_key": key,
+        },
+    )
+    # Default header image (static). If we have a profile photo, we’ll try to compose a single 520x800 image.
+    logo_url = EMAIL_VERIFY_HEADER_URL
+    if key:
+        try:
+            logo_url = compose_email_header_image_url(
+                photo_key=key,
+                background_url=image_background_url,
+                influencer_id=str(influencer.id),
+            )
+            log.info(
+                f"send_new_influencer_email_with_picture: using influencer profile photo influencer_id={influencer.id} key={key}",
+                extra={"influencer_id": str(influencer.id), "key": key},
+            )
+        except Exception:
+            log.warning("Failed to load influencer image for email", exc_info=True)
+    else:
+        log.info(
+            f"send_new_influencer_email_with_picture: using default header image influencer_id={influencer.id}",
+            extra={"influencer_id": str(influencer.id)},
+        )
+
+    temp_pw_block = ""
+
+    body_html = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <title>Your TeaseMe profile is live</title>
+    </head>
+    <body style="background:#f7f8fc;padding:0;margin:0;font-family:Arial,sans-serif;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f7f8fc;padding:40px 0;">
+        <tr>
+          <td align="center">
+
+            <table width="520" cellpadding="0" cellspacing="0" border="0"
+              style="background:#fff;border-radius:24px;box-shadow:0 10px 32px rgba(50,50,93,0.10),0 2px 4px rgba(0,0,0,0.07);overflow:hidden;">
+
+              <tr>
+                <td align="center" style="background:#23293b;padding:0;">
+                  <img
+                    src="{logo_url}"
+                    alt="TeaseMe"
+                    height="{EMAIL_HEADER_SIZE[1]}"
+                    style="width:100%;max-width:520px;height:{EMAIL_HEADER_SIZE[1]}px;display:block;border-top-left-radius:24px;border-top-right-radius:24px;object-fit:cover;"
+                  />
+                </td>
+              </tr>
+
+              <tr>
+                <td align="center" style="padding:32px 30px 16px 30px;">
+                  <h2 style="font-family:'Arial Rounded MT Bold', Arial, sans-serif; font-size:30px; font-weight:bold; margin:0 0 12px 0; color:#444;">
+                    You’re live on TeaseMe 🎉
+                  </h2>
+
+                  <p style="font-size:16px;color:#666;margin:0 0 22px 0;">
+                    Your influencer profile is now active. Fans can find you and join your page instantly.
+                  </p>
+
+                  {temp_pw_block}
+
+                  <a href="{public_url}"
+                    style="background:#FF5C74;border-radius:8px;color:#fff;text-decoration:none;display:inline-block;padding:16px 42px;font-size:20px;font-weight:bold;box-shadow:0 6px 24px #ffb5c7;margin:10px 0 6px 0;">
+                    View my profile
+                  </a>
+
+                  <p style="margin:26px 0 0 0; font-size:14px; color:#bbb;">
+                    If you didn’t request this, you can safely ignore the email.<br/>
+                    Let’s get you discovered. ❤️
+                  </p>
+                </td>
+              </tr>
+
+              <tr>
+                <td align="center" style="padding:20px 0 12px 0;background:#e5e5e5;color:#bbb;font-size:14px;border-bottom-left-radius:24px;border-bottom-right-radius:24px;">
+                  © {datetime.now().year} TeaseMe. All rights reserved.
+                </td>
+              </tr>
+            </table>
+
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
+    """
+
+    body_text = f"""
+Your TeaseMe profile is live 🎉
+
+Open your profile:
+{public_url}
 
 © {datetime.now().year} TeaseMe. All rights reserved.
 """.strip()

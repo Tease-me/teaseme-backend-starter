@@ -39,7 +39,6 @@ async def validate_social_media(
     if platform != "instagram":
         raise HTTPException(400, "Only instagram supported for now.")
 
-    # normaliza handle
     username = handle.lstrip("@").strip()
     normalized = username
     with_at = "@" + username
@@ -147,7 +146,6 @@ async def fetch_followers(service: str, username: str) -> int:
     if service == "instagram":
         return await get_instagram_followers(username)
     elif service == "twitter":
-        # Try official API first if token is available
         import os
         from dotenv import load_dotenv
         load_dotenv()
@@ -156,7 +154,6 @@ async def fetch_followers(service: str, username: str) -> int:
             try:
                 return await get_twitter_followers_api(username, bearer_token)
             except:
-                # Fall back to scraping if API fails
                 pass
         return await get_twitter_followers(username)
     elif service == "tiktok":
@@ -193,7 +190,6 @@ async def get_instagram_followers(username: str) -> int:
             
             html = response.text
             
-            # Method 1: Look for JSON-LD structured data
             soup = BeautifulSoup(html, 'html.parser')
             json_scripts = soup.find_all('script', type='application/ld+json')
             
@@ -209,17 +205,13 @@ async def get_instagram_followers(username: str) -> int:
                 except:
                     continue
             
-            # Method 2: Look for window._sharedData or similar JSON in script tags
             scripts = soup.find_all('script')
             for script in scripts:
                 if script.string and ('_sharedData' in script.string or 'profilePage' in script.string):
-                    # Try to extract JSON data
                     try:
-                        # Find JSON object in script
                         json_match = re.search(r'window\._sharedData\s*=\s*({.+?});', script.string, re.DOTALL)
                         if json_match:
                             data = json.loads(json_match.group(1))
-                            # Navigate through the data structure
                             entry_data = data.get('entry_data', {})
                             profile_page = entry_data.get('ProfilePage', [])
                             if profile_page:
@@ -231,7 +223,6 @@ async def get_instagram_followers(username: str) -> int:
                     except:
                         continue
             
-            # Method 3: Look for meta tags with og:description or similar
             meta_tags = soup.find_all('meta')
             for meta in meta_tags:
                 property_attr = meta.get('property', '')
@@ -241,9 +232,7 @@ async def get_instagram_followers(username: str) -> int:
                     if numbers:
                         return int(numbers[0].replace(',', ''))
             
-            # Method 4: Search in page text for follower patterns
             page_text = soup.get_text()
-            # Look for patterns like "1,234 followers" or "1.2M followers"
             patterns = [
                 r'([\d,]+)\s*followers?',
                 r'([\d.]+[KMB]?)\s*followers?',
@@ -252,7 +241,6 @@ async def get_instagram_followers(username: str) -> int:
                 matches = re.findall(pattern, page_text, re.I)
                 if matches:
                     count_str = matches[0].replace(',', '').upper()
-                    # Handle K, M, B suffixes
                     if 'K' in count_str:
                         return int(float(count_str.replace('K', '')) * 1000)
                     elif 'M' in count_str:
@@ -262,7 +250,6 @@ async def get_instagram_followers(username: str) -> int:
                     else:
                         return int(count_str)
             
-            # Method 5: Try using Instagram's public API endpoint
             try:
                 api_url = f"https://www.instagram.com/api/v1/users/web_profile_info/?username={username}"
                 api_headers = {
@@ -283,10 +270,8 @@ async def get_instagram_followers(username: str) -> int:
                         if count > 0:
                             return count
             except Exception as api_error:
-                # If API fails, continue to error message
                 pass
             
-            # If nothing found, raise an informative error
             raise ValueError(
                 f"Could not extract follower count for @{username}. "
                 "Instagram requires official API access for reliable data. "
@@ -321,13 +306,11 @@ async def get_twitter_followers(username: str) -> int:
             html = response.text
             soup = BeautifulSoup(html, 'html.parser')
             
-            # Method 1: Look for JSON-LD structured data
             json_scripts = soup.find_all('script', type='application/ld+json')
             for script in json_scripts:
                 try:
                     data = json.loads(script.string)
                     if isinstance(data, dict):
-                        # Look for interactionStatistic
                         if 'interactionStatistic' in data:
                             for stat in data.get('interactionStatistic', []):
                                 if 'interactionType' in stat and 'userInteractionCount' in stat:
@@ -339,23 +322,19 @@ async def get_twitter_followers(username: str) -> int:
                 except:
                     continue
             
-            # Method 2: Look for Twitter's API data in script tags
             scripts = soup.find_all('script')
             for script in scripts:
                 if script.string and ('User' in script.string or 'followers_count' in script.string):
                     try:
-                        # Try to find JSON data with user info
                         json_match = re.search(r'"followers_count":\s*(\d+)', script.string)
                         if json_match:
                             count = int(json_match.group(1))
                             if count > 0:
                                 return count
                         
-                        # Try to find in window.__INITIAL_STATE__ or similar
                         state_match = re.search(r'__INITIAL_STATE__\s*=\s*({.+?});', script.string, re.DOTALL)
                         if state_match:
                             data = json.loads(state_match.group(1))
-                            # Navigate through the data structure
                             entities = data.get('entities', {})
                             users = entities.get('users', {})
                             for user_id, user_data in users.items():
@@ -367,7 +346,6 @@ async def get_twitter_followers(username: str) -> int:
                     except:
                         continue
             
-            # Method 3: Look for meta tags
             meta_tags = soup.find_all('meta')
             for meta in meta_tags:
                 property_attr = meta.get('property', '')
@@ -379,9 +357,7 @@ async def get_twitter_followers(username: str) -> int:
                     if numbers:
                         return int(numbers[0].replace(',', ''))
             
-            # Method 4: Search in page text for follower patterns
             page_text = soup.get_text()
-            # Look for patterns like "1,234 Followers" or "1.2M Followers"
             patterns = [
                 r'([\d,]+)\s+[Ff]ollowers?',
                 r'([\d.]+[KMB]?)\s+[Ff]ollowers?',
@@ -390,7 +366,6 @@ async def get_twitter_followers(username: str) -> int:
                 matches = re.findall(pattern, page_text)
                 if matches:
                     count_str = str(matches[0]).replace(',', '').upper()
-                    # Handle K, M, B suffixes
                     if 'K' in count_str:
                         return int(float(count_str.replace('K', '')) * 1000)
                     elif 'M' in count_str:
@@ -400,9 +375,7 @@ async def get_twitter_followers(username: str) -> int:
                     else:
                         return int(count_str)
             
-            # Method 5: Try to extract from raw HTML (Twitter embeds data in various formats)
             try:
-                # Look for patterns in the raw HTML
                 patterns = [
                     r'"followers_count":\s*(\d+)',
                     r'"follower_count":\s*(\d+)',
@@ -416,10 +389,8 @@ async def get_twitter_followers(username: str) -> int:
                     all_matches.extend([int(m) for m in matches if m.isdigit()])
                 
                 if all_matches:
-                    # Filter reasonable follower counts (between 1 and 1 billion)
                     valid_counts = [m for m in all_matches if 1 <= m <= 1000000000]
                     if valid_counts:
-                        # Return the most common or largest reasonable number
                         from collections import Counter
                         counter = Counter(valid_counts)
                         most_common = counter.most_common(1)[0][0]
@@ -427,11 +398,6 @@ async def get_twitter_followers(username: str) -> int:
             except:
                 pass
             
-            # Method 6: Try using a third-party API or fallback
-            # Note: Twitter/X is very restrictive, so scraping often fails
-            # For production, you MUST use Twitter API v2 with Bearer token
-            
-            # If nothing found, raise an informative error
             raise ValueError(
                 f"Could not extract follower count for @{username}. "
                 "Twitter/X heavily restricts web scraping. "
@@ -460,7 +426,6 @@ async def get_tiktok_followers(username: str) -> int:
             
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # TikTok embeds data in script tags
             scripts = soup.find_all('script')
             for script in scripts:
                 if script.string and 'follower' in script.string.lower():
@@ -485,7 +450,6 @@ async def get_telegram_followers(username: str) -> int:
             
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Look for member count
             member_text = soup.find(string=re.compile(r'members?|subscribers?', re.I))
             
             if member_text:

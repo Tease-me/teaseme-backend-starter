@@ -5,11 +5,12 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.turn_handler import redis_history
-from app.db.models import CallRecord, Message, Memory, Message18
+from app.db.models import CallRecord, Message, Memory, Message18, ContentViolation
 from app.db.session import get_db
+from app.utils.deps import get_current_user
 
-from sqlalchemy import select
-from app.db.models import RelationshipState, User, Influencer
+from sqlalchemy import select, func, desc
+from app.db.models import RelationshipState, Influencer,User
 from app.utils.s3 import save_sample_audio_to_s3, generate_presigned_url, delete_file_from_s3
 
 from pydantic import BaseModel, Field
@@ -23,8 +24,11 @@ log = logging.getLogger("admin")
 async def clear_chat_history_admin(
     chat_id: str,
     is_18: bool = False,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    if current_user.id != 1:
+        raise HTTPException(status_code=403, detail="Not authorized")
     try:
         deleted_msg_ids = []
         deleted_mem_ids = []
@@ -91,7 +95,14 @@ def sentiment_label(score: float) -> str:
         return "IN_LOVE"
     
 @router.get("/relationships")
-async def list_relationships(user_id: int, db: AsyncSession = Depends(get_db)):
+async def list_relationships(
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if current_user.id != 1:
+        raise HTTPException(status_code=403, detail="Admin only")
+
     q = select(RelationshipState).where(RelationshipState.user_id == user_id)
     res = await db.execute(q)
     rows = res.scalars().all()
@@ -116,8 +127,16 @@ async def list_relationships(user_id: int, db: AsyncSession = Depends(get_db)):
     ]
 
 @router.get("/users")
-async def list_users(q: str | None = None, db: AsyncSession = Depends(get_db)):
+async def list_users(
+    q: str | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     stmt = select(User)
+    if current_user.id != 1:
+        
+
+        raise HTTPException(status_code=403, detail="Admin only")
 
     if q:
         like = f"%{q}%"
@@ -163,7 +182,14 @@ class RelationshipPatch(BaseModel):
 
 
 @router.patch("/relationships")
-async def patch_relationship(payload: RelationshipPatch, db: AsyncSession = Depends(get_db)):
+async def patch_relationship(
+    payload: RelationshipPatch,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):    
+    if current_user.id != 1:
+        raise HTTPException(status_code=403, detail="Admin only")
+
     q = select(RelationshipState).where(
         RelationshipState.user_id == payload.user_id,
         RelationshipState.influencer_id == payload.influencer_id,
@@ -174,7 +200,6 @@ async def patch_relationship(payload: RelationshipPatch, db: AsyncSession = Depe
     if not rel:
         raise HTTPException(status_code=404, detail="Relationship not found")
 
-    # apply updates if provided
     if payload.trust is not None:
         rel.trust = payload.trust
     if payload.closeness is not None:
@@ -206,7 +231,6 @@ async def patch_relationship(payload: RelationshipPatch, db: AsyncSession = Depe
     if payload.last_interaction_at is not None:
         rel.last_interaction_at = payload.last_interaction_at
 
-    # optional: keep girlfriend sticky
     if rel.girlfriend_confirmed:
         rel.state = "GIRLFRIEND"
         rel.exclusive_agreed = True
@@ -237,7 +261,14 @@ async def patch_relationship(payload: RelationshipPatch, db: AsyncSession = Depe
     }
 
 @router.post("/relationships/update")
-async def update_relationship(payload: RelationshipPatch, db: AsyncSession = Depends(get_db)):
+async def update_relationship(
+    payload: RelationshipPatch,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):  
+    if current_user.id != 1:
+        raise HTTPException(status_code=403, detail="Admin only")
+
     q = select(RelationshipState).where(
         RelationshipState.user_id == payload.user_id,
         RelationshipState.influencer_id == payload.influencer_id,
@@ -286,8 +317,12 @@ async def update_relationship(payload: RelationshipPatch, db: AsyncSession = Dep
 async def upload_influencer_sample(
     influencer_id: str,
     file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    if current_user.id != 1:
+        raise HTTPException(status_code=403, detail="Admin only")
+
     influencer = await db.get(Influencer, influencer_id)
     if not influencer:
         raise HTTPException(status_code=404, detail="Influencer not found")
@@ -331,8 +366,12 @@ async def upload_influencer_sample(
 async def delete_influencer_sample(
     influencer_id: str,
     sample_id: str,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    if current_user.id != 1:
+        raise HTTPException(status_code=403, detail="Admin only")
+
     influencer = await db.get(Influencer, influencer_id)
     if not influencer:
         raise HTTPException(status_code=404, detail="Influencer not found")
@@ -354,3 +393,71 @@ async def delete_influencer_sample(
     await db.commit()
 
     return {"ok": True, "deleted_id": sample_id}
+
+@router.get("/moderation")
+async def get_moderation_dashboard(
+    page: int = 1,
+    page_size: int = 20,
+    category: str | None = None,
+    current_user: User = Depends(get_current_user),
+
+    user_id: int | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    if current_user.id != 1:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    users_stmt = select(User).where(User.moderation_status != "CLEAN")
+    users_stmt = users_stmt.order_by(desc(User.last_violation_at))
+    users_result = await db.execute(users_stmt)
+    flagged_users = users_result.scalars().all()
+    
+    violations_stmt = select(ContentViolation)
+    if category:
+        violations_stmt = violations_stmt.where(ContentViolation.category == category)
+    if user_id:
+        violations_stmt = violations_stmt.where(ContentViolation.user_id == user_id)
+    
+    count_stmt = select(func.count()).select_from(violations_stmt.subquery())
+    total_violations = (await db.execute(count_stmt)).scalar() or 0
+    
+    violations_stmt = violations_stmt.order_by(desc(ContentViolation.created_at))
+    violations_stmt = violations_stmt.offset((page - 1) * page_size).limit(page_size)
+    violations_result = await db.execute(violations_stmt)
+    violations = violations_result.scalars().all()
+    
+    return {
+        "flagged_users": [
+            {
+                "id": u.id,
+                "username": u.username,
+                "email": u.email,
+                "moderation_status": u.moderation_status,
+                "violation_count": u.violation_count,
+                "first_violation_at": u.first_violation_at.isoformat() if u.first_violation_at else None,
+                "last_violation_at": u.last_violation_at.isoformat() if u.last_violation_at else None,
+            }
+            for u in flagged_users
+        ],
+        "violations": {
+            "total": total_violations,
+            "page": page,
+            "page_size": page_size,
+            "items": [
+                {
+                    "id": v.id,
+                    "user_id": v.user_id,
+                    "chat_id": v.chat_id,
+                    "influencer_id": v.influencer_id,
+                    "message_content": v.message_content,
+                    "category": v.category,
+                    "severity": v.severity,
+                    "keyword_matched": v.keyword_matched,
+                    "ai_confidence": v.ai_confidence,
+                    "detection_tier": v.detection_tier,
+                    "created_at": v.created_at.isoformat() if v.created_at else None,
+                }
+                for v in violations
+            ]
+        }
+    }

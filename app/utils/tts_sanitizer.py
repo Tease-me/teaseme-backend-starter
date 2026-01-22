@@ -1,7 +1,6 @@
 import re
 from html import unescape
 
-# ElevenLabs V3 expression tags that should be preserved
 _ALLOWED_AUDIO_TAGS = {
     # Emotions
     "sad", "angry", "happily", "sorrowful",
@@ -57,8 +56,6 @@ def sanitize_tts_text(text: str) -> str:
     text = _BREAK_RE.sub(_break_filter, text)
     text = re.sub(r'</?[^>]+>', '', text)
 
-    # Restore ElevenLabs V3 tags
-    # Restore in reverse order to avoid conflicts if placeholders overlap
     for placeholder, original_tag in sorted(tag_placeholders.items(), reverse=True):
         if placeholder in text:
             text = text.replace(placeholder, original_tag)
