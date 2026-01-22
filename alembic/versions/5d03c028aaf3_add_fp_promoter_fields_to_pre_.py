@@ -19,8 +19,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column("pre_influencers", sa.Column("fp_promoter_id", sa.String(), nullable=True))
-    op.add_column("pre_influencers", sa.Column("fp_ref_id", sa.String(), nullable=True))
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_cols = {col["name"] for col in inspector.get_columns("pre_influencers")}
+    if "fp_promoter_id" not in existing_cols:
+        op.add_column("pre_influencers", sa.Column("fp_promoter_id", sa.String(), nullable=True))
+    if "fp_ref_id" not in existing_cols:
+        op.add_column("pre_influencers", sa.Column("fp_ref_id", sa.String(), nullable=True))
 
 def downgrade() -> None:
     op.drop_column("pre_influencers", "fp_ref_id")
