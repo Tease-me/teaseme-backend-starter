@@ -3,6 +3,11 @@ import httpx
 from app.core.config import settings
 
 async def paypal_access_token() -> str:
+    if not settings.PAYPAL_BASE_URL:
+        raise RuntimeError("PAYPAL_BASE_URL not configured")
+    if not settings.PAYPAL_CLIENT_ID or not settings.PAYPAL_CLIENT_SECRET:
+        raise RuntimeError("PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET not configured")
+
     auth = base64.b64encode(
         f"{settings.PAYPAL_CLIENT_ID}:{settings.PAYPAL_CLIENT_SECRET}".encode()
     ).decode()

@@ -5,7 +5,9 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from app.db.models import Influencer
+from app.db.models import Influencer, User
+from app.utils.deps import get_current_user
+
 from app.db.session import get_db
 from app.schemas.influencer import InfluencerCreate, InfluencerOut, InfluencerUpdate, InfluencerDetail
 from app.utils.s3 import (
@@ -61,10 +63,11 @@ async def get_influencer(id: str, db: AsyncSession = Depends(get_db)):
     return await _build_influencer_detail(influencer)
 
 @router.post("", response_model=InfluencerOut, status_code=201)
-async def create_influencer(data: InfluencerCreate, db: AsyncSession = Depends(get_db)):
+async def create_influencer(data: InfluencerCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     if await db.get(Influencer, data.id):
         raise HTTPException(400, "Influencer with this id already exists")
     influencer = Influencer(**data.model_dump())
+    influencer.owner_id = current_user.id
     db.add(influencer)
     await db.flush()
     await db.commit()
@@ -85,7 +88,7 @@ async def update_influencer(id: str, data: InfluencerUpdate, db: AsyncSession = 
     return influencer
 
 @router.delete("/{id}")
-async def delete_influencer(id: str, db: AsyncSession = Depends(get_db)):
+async def delete_influencer(id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     influencer = await db.get(Influencer, id)
     if not influencer:
         raise HTTPException(404, "Influencer not found")
@@ -118,6 +121,7 @@ async def delete_influencer(id: str, db: AsyncSession = Depends(get_db)):
 async def update_influencer_profile(
     influencer_id: str,
     request: Request,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     influencer = await db.get(Influencer, influencer_id)
@@ -165,7 +169,6 @@ async def update_influencer_profile(
             )
             influencer.profile_video_key = uploaded_video_key
 
-        # Update metadata
         if native_language:
             influencer.native_language = native_language
 
@@ -173,7 +176,6 @@ async def update_influencer_profile(
         if dt_val:
             influencer.date_of_birth = dt_val
 
-        # Save profile JSON (about + native language) to S3; keep extras minimal
         await save_influencer_profile_to_s3(
             influencer_id,
             about=about,
@@ -202,10 +204,10 @@ async def update_influencer_profile(
         if isinstance(exc, HTTPException):
             raise
 
-        if photo and not uploaded_photo_key:
+        if photo_bytes and not uploaded_photo_key:
             log.error("Failed to upload influencer photo: %s", exc, exc_info=True)
             raise HTTPException(status_code=500, detail="Failed to upload photo")
-        if video and not uploaded_video_key:
+        if video_bytes and not uploaded_video_key:
             log.error("Failed to upload influencer video: %s", exc, exc_info=True)
             raise HTTPException(status_code=500, detail="Failed to upload video")
 
@@ -229,7 +231,6 @@ async def update_influencer_profile(
         log.error("Failed to persist influencer profile: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to persist influencer profile")
 
-    # Best-effort cleanup: remove previous objects if the key changed (e.g., photo.jpg -> photo.png)
     for key, new_key in (
         (previous_photo_key, influencer.profile_photo_key),
         (previous_video_key, influencer.profile_video_key),
@@ -259,8 +260,7 @@ async def update_influencer_profile(
 async def upload_influencer_audio(
     influencer_id: str,
     file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db),
-):
+):  
     file_bytes = await file.read()
     if not file_bytes:
         raise HTTPException(400, "Empty file")
@@ -277,9 +277,10 @@ async def upload_influencer_audio(
 
 
 @router.get("/influencer-audio/{influencer_id}")
-async def list_influencer_audio(influencer_id: str):
+async def list_influencer_audio(
+    influencer_id: str,
+):
     keys = await list_influencer_audio_keys(influencer_id)
-
     if not keys:
         raise HTTPException(status_code=404, detail="Influencer has no audio file stored")
 

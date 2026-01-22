@@ -26,6 +26,7 @@ router = APIRouter(prefix="/user", tags=["user"])
 @router.get("/{id}/usage")
 async def get_user_usage(
     id: int,
+    influencer_id: str | None = Query(None, description="Filter by specific influencer ID"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -34,21 +35,18 @@ async def get_user_usage(
 
     today = date.today()
 
-    normal_balance_result = await db.execute(
-        select(func.coalesce(func.sum(InfluencerWallet.balance_cents), 0)).where(
-            InfluencerWallet.user_id == id,
-            InfluencerWallet.is_18.is_(False),
+    if influencer_id:
+        wallets_result = await db.execute(
+            select(InfluencerWallet).where(
+                InfluencerWallet.user_id == id,
+                InfluencerWallet.influencer_id == influencer_id,
+            )
         )
-    )
-    normal_balance = normal_balance_result.scalar() or 0
-
-    adult_balance_result = await db.execute(
-        select(func.coalesce(func.sum(InfluencerWallet.balance_cents), 0)).where(
-            InfluencerWallet.user_id == id,
-            InfluencerWallet.is_18.is_(True),
+    else:
+        wallets_result = await db.execute(
+            select(InfluencerWallet).where(InfluencerWallet.user_id == id)
         )
-    )
-    adult_balance = adult_balance_result.scalar() or 0
+    wallets = wallets_result.scalars().all()
 
     normal_usage = await db.get(DailyUsage, (id, today, False))
     adult_usage = await db.get(DailyUsage, (id, today, True))
@@ -58,47 +56,120 @@ async def get_user_usage(
     )
     pricing_map = {p.feature: p for p in pricing_result.scalars().all()}
 
-    def calc(balance: int, usage, feature: str, usage_field: str) -> dict:
+    def get_price_info(feature: str) -> tuple[int, int]:
         price = pricing_map.get(feature)
         if not price:
-            return {"remaining": 0, "free_left": 0, "used_today": 0}
-        
-        used = getattr(usage, usage_field, 0) or 0 if usage else 0
-        free_allowance = price.free_allowance or 0
-        free_left = max(free_allowance - used, 0)
-        unit_price = price.price_cents or 1
+            return (0, 0)
+        return (price.price_cents or 0, price.free_allowance or 0)
+
+    def get_used_today(usage, usage_field: str) -> int:
+        if not usage:
+            return 0
+        return getattr(usage, usage_field, 0) or 0
+
+    def calc_remaining(balance: int, unit_price: int, free_left: int) -> int:
         paid_units = balance // unit_price if unit_price > 0 else 0
-        
+        return free_left + paid_units
+
+    text_price, text_free = get_price_info("text")
+    live_price, live_free = get_price_info("live_chat")
+    text_18_price, text_18_free = get_price_info("text_18")
+    voice_18_price, voice_18_free = get_price_info("voice_18")
+
+    normal_text_used = get_used_today(normal_usage, "text_count")
+    normal_live_used = get_used_today(normal_usage, "live_secs")
+    adult_text_used = get_used_today(adult_usage, "text_count")
+    adult_voice_used = get_used_today(adult_usage, "voice_secs")
+
+    normal_text_free_left = max(text_free - normal_text_used, 0)
+    normal_live_free_left = max(live_free - normal_live_used, 0)
+    adult_text_free_left = max(text_18_free - adult_text_used, 0)
+    adult_voice_free_left = max(voice_18_free - adult_voice_used, 0)
+
+    def build_normal_wallet(balance: int) -> dict:
+        text_remaining = calc_remaining(balance, text_price, normal_text_free_left)
+        live_remaining = calc_remaining(balance, live_price, normal_live_free_left)
         return {
-            "remaining": free_left + paid_units,
-            "free_left": free_left,
-            "used_today": used,
+            "balance_cents": balance,
+            "messages": {
+                "remaining": text_remaining,
+                "free_left": normal_text_free_left,
+                "used_today": normal_text_used,
+                "unit_price_cents": text_price,
+            },
+            "live_chat": {
+                "remaining": live_remaining,
+                "remaining_minutes": round(live_remaining / 60, 2),
+                "free_left": normal_live_free_left,
+                "used_today": normal_live_used,
+                "unit_price_cents": live_price,
+            },
         }
 
-    normal_msgs = calc(normal_balance, normal_usage, "text", "text_count")
-    normal_live = calc(normal_balance, normal_usage, "live_chat", "live_secs")
-    adult_msgs = calc(adult_balance, adult_usage, "text_18", "text_count")
-    adult_voice = calc(adult_balance, adult_usage, "voice_18", "voice_secs")
+    def build_adult_wallet(balance: int) -> dict:
+        text_remaining = calc_remaining(balance, text_18_price, adult_text_free_left)
+        voice_remaining = calc_remaining(balance, voice_18_price, adult_voice_free_left)
+        return {
+            "balance_cents": balance,
+            "messages": {
+                "remaining": text_remaining,
+                "free_left": adult_text_free_left,
+                "used_today": adult_text_used,
+                "unit_price_cents": text_18_price,
+            },
+            "voice": {
+                "remaining": voice_remaining,
+                "remaining_minutes": round(voice_remaining / 60, 2),
+                "free_left": adult_voice_free_left,
+                "used_today": adult_voice_used,
+                "unit_price_cents": voice_18_price,
+            },
+        }
+
+    if influencer_id:
+        normal_wallet = None
+        adult_wallet = None
+
+        for wallet in wallets:
+            balance = wallet.balance_cents or 0
+            if wallet.is_18:
+                adult_wallet = build_adult_wallet(balance)
+            else:
+                normal_wallet = build_normal_wallet(balance)
+
+        if normal_wallet is None:
+            normal_wallet = build_normal_wallet(0)
+        if adult_wallet is None:
+            adult_wallet = build_adult_wallet(0)
+
+        return {
+            "influencer_id": influencer_id,
+            "normal": normal_wallet,
+            "adult": adult_wallet,
+        }
+
+    influencer_wallets: dict[str, dict] = {}
+    for wallet in wallets:
+        inf_id = wallet.influencer_id
+        if inf_id not in influencer_wallets:
+            influencer_wallets[inf_id] = {"normal": None, "adult": None}
+
+        balance = wallet.balance_cents or 0
+        if wallet.is_18:
+            influencer_wallets[inf_id]["adult"] = build_adult_wallet(balance)
+        else:
+            influencer_wallets[inf_id]["normal"] = build_normal_wallet(balance)
+
+    total_normal_balance = sum((w.balance_cents or 0) for w in wallets if not w.is_18)
+    total_adult_balance = sum((w.balance_cents or 0) for w in wallets if w.is_18)
 
     return {
-        "normal": {
-            "balance_cents": normal_balance,
-            "messages": normal_msgs,
-            "live_chat": {
-                **normal_live,
-                "remaining_minutes": round(normal_live["remaining"] / 60, 2),
-            },
-        },
-        "adult": {
-            "balance_cents": adult_balance,
-            "messages": adult_msgs,
-            "voice": {
-                **adult_voice,
-                "remaining_minutes": round(adult_voice["remaining"] / 60, 2),
-            },
+        "influencers": influencer_wallets,
+        "totals": {
+            "normal": build_normal_wallet(total_normal_balance),
+            "adult": build_adult_wallet(total_adult_balance),
         },
     }
-
 
 @router.get("/{id}", response_model=UserOut)
 async def get_user_by_id(
@@ -116,22 +187,6 @@ async def get_user_by_id(
         
     return user_out
 
-
-@router.get("/{id}", response_model=UserOut)
-async def get_user_by_id(
-    id: int,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    if id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to view this profile")
-
-    user_out = UserOut.model_validate(current_user)
-
-    if current_user.profile_photo_key:
-        user_out.profile_photo_url = generate_user_presigned_url(current_user.profile_photo_key)
-
-    return user_out
 
 
 @router.patch("/{id}/profile", response_model=UserOut)
@@ -154,7 +209,6 @@ async def update_user(
     await db.commit()
     await db.refresh(current_user)
     
-    # Re-generate response
     user_out = UserOut.model_validate(current_user)
     if current_user.profile_photo_key:
         user_out.profile_photo_url = generate_user_presigned_url(current_user.profile_photo_key)

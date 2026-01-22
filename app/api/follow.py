@@ -1,35 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
-from app.db.models import Influencer, InfluencerFollower, User
+from app.db.models import InfluencerFollower, User
 from app.db.session import get_db
 from app.schemas.follow import FollowActionResponse, FollowListResponse, FollowStatus
+from app.services.follow import create_follow_if_missing, get_follow
+from app.services.influencer import ensure_influencer
 from app.utils.deps import get_current_user
 
 router = APIRouter(prefix="/follow", tags=["follow"])
-
-
-async def _get_follow(
-    db: AsyncSession,
-    influencer_id: str,
-    user_id: int,
-) -> InfluencerFollower | None:
-    result = await db.execute(
-        select(InfluencerFollower).where(
-            InfluencerFollower.influencer_id == influencer_id,
-            InfluencerFollower.user_id == user_id,
-        )
-    )
-    return result.scalar_one_or_none()
-
-
-async def _ensure_influencer(db: AsyncSession, influencer_id: str) -> Influencer:
-    influencer = await db.get(Influencer, influencer_id)
-    if not influencer:
-        raise HTTPException(status_code=404, detail="Influencer not found")
-    return influencer
-
 
 @router.post("/{influencer_id}", response_model=FollowActionResponse, status_code=201)
 async def follow_influencer(
@@ -37,37 +16,9 @@ async def follow_influencer(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    await _ensure_influencer(db, influencer_id)
+    await ensure_influencer(db, influencer_id)
 
-    existing = await _get_follow(db, influencer_id, user.id)
-    if existing:
-        return FollowActionResponse(
-            influencer_id=influencer_id,
-            user_id=user.id,
-            following=True,
-            created_at=existing.created_at,
-        )
-
-    follow = InfluencerFollower(influencer_id=influencer_id, user_id=user.id)
-    db.add(follow)
-    try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        existing = await _get_follow(db, influencer_id, user.id)
-        if existing:
-            return FollowActionResponse(
-                influencer_id=influencer_id,
-                user_id=user.id,
-                following=True,
-                created_at=existing.created_at,
-            )
-        raise
-    except Exception:
-        await db.rollback()
-        raise
-
-    await db.refresh(follow)
+    follow = await create_follow_if_missing(db, influencer_id, user.id)
     return FollowActionResponse(
         influencer_id=influencer_id,
         user_id=user.id,
@@ -82,8 +33,8 @@ async def unfollow_influencer(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    await _ensure_influencer(db, influencer_id)
-    existing = await _get_follow(db, influencer_id, user.id)
+    await ensure_influencer(db, influencer_id)
+    existing = await get_follow(db, influencer_id, user.id)
 
     if not existing:
         return FollowActionResponse(

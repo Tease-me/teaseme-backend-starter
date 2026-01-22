@@ -54,8 +54,6 @@ async def push_send_test(
         try:
             await send_push(sub, "Oi lindão, vem conversar comigo! 😘")
         except Exception as e:
-            # Optionally remove bad subscriptions if push fails
-            # await db.delete(sub); await db.commit()
             print(f"Push failed for subscription {sub.id}: {e}")
 
     return {"status": "Notifications sent successfully"}

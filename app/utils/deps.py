@@ -18,6 +18,7 @@ async def get_current_user(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    
     token_value = token or request.cookies.get(settings.ACCESS_TOKEN_COOKIE_NAME)
     if not token_value:
         raise credentials_exception

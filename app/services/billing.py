@@ -4,9 +4,12 @@ import os
 import math
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import date
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert
+
 from fastapi import HTTPException
-from app.db.models import InfluencerWallet, InfluencerCreditTransaction, DailyUsage, Pricing, User, Chat
+from app.db.models import InfluencerWallet, InfluencerCreditTransaction, DailyUsage, Pricing, User, Chat, Influencer
+from datetime import datetime, timezone, date
 
 async def charge_feature(
     db: AsyncSession,
@@ -20,7 +23,6 @@ async def charge_feature(
 ) -> int:
     today = date.today()
 
-    # DailyUsage stays global per user (free allowance per day)
     usage = await db.get(DailyUsage, (user_id, today, is_18))
     if not usage:
         usage = DailyUsage(user_id=user_id, date=today, is_18=is_18)
@@ -47,7 +49,6 @@ async def charge_feature(
     billable = max(units - free_left, 0)
     cost = billable * (price.price_cents or 0)
 
-    # Update usage counters
     if "text" in feature:
         usage.text_count += units
     elif "voice" in feature:
@@ -56,7 +57,6 @@ async def charge_feature(
         usage.live_secs += units
     db.add(usage)
 
-    # Debit influencer wallet (per user + influencer)
     if cost:
         wallet = await db.scalar(
             select(InfluencerWallet).where(
@@ -85,7 +85,6 @@ async def charge_feature(
         wallet.balance_cents = old_balance - cost
         db.add(wallet)
 
-        # Low balance notification (per influencer wallet)
         new_balance = wallet.balance_cents
         THRESHOLD = 1000
         if old_balance >= THRESHOLD and new_balance < THRESHOLD:
@@ -97,7 +96,6 @@ async def charge_feature(
                 except Exception as e:
                     print(f"Error sending low balance notification: {e}")
 
-    # Ledger
     db.add(
         InfluencerCreditTransaction(
             user_id=user_id,
@@ -112,24 +110,67 @@ async def charge_feature(
     await db.commit()
     return cost
 
-async def topup_wallet(db, user_id: int, cents: int, source: str):
-    """Add credits to user's wallet and log the transaction."""
-    wallet = await db.get(InfluencerWallet, user_id) or InfluencerWallet(user_id=user_id)
-    if wallet.balance_cents is None:
-        wallet.balance_cents = 0
-    wallet.balance_cents += cents
-    db.add_all([
-        wallet,
+async def topup_wallet(
+    db: AsyncSession,
+    user_id: int,
+    influencer_id: str,
+    cents: int,
+    source: str,
+    *,
+    is_18: bool = False,
+) -> int:
+    """Add credits to a specific (user, influencer, mode) wallet and log the transaction."""
+    influencer_id = (influencer_id or "").strip()
+    if not influencer_id:
+        raise HTTPException(status_code=400, detail="Missing influencer_id for wallet topup")
+
+    infl = await db.get(Influencer, influencer_id)
+    if not infl:
+        raise HTTPException(status_code=404, detail="Influencer not found")
+
+    # Race-safe get-or-create without rolling back the surrounding transaction
+    await db.execute(
+        insert(InfluencerWallet)
+        .values(
+            user_id=user_id,
+            influencer_id=influencer_id,
+            is_18=is_18,
+            balance_cents=0,
+        )
+        .on_conflict_do_nothing(
+            index_elements=["user_id", "influencer_id", "is_18"],
+        )
+    )
+
+    wallet = await db.scalar(
+        select(InfluencerWallet).where(
+            and_(
+                InfluencerWallet.user_id == user_id,
+                InfluencerWallet.influencer_id == influencer_id,
+                InfluencerWallet.is_18.is_(is_18),
+            )
+        )
+    )
+    if not wallet:
+        raise HTTPException(status_code=500, detail="Wallet not found/created")
+
+    wallet.balance_cents = int(wallet.balance_cents or 0) + int(cents)
+    db.add(wallet)
+
+    db.add(
         InfluencerCreditTransaction(
+            influencer_id=influencer_id,
             user_id=user_id,
             feature="topup",
-            units=cents,
-            amount_cents=cents,
-            meta={"source": source}
+            units=int(cents),
+            amount_cents=int(cents),
+            meta={"source": source},
         )
-    ])
-    await db.commit()
-    return wallet.balance_cents
+    )
+
+    # Intentionally no commit/rollback here: caller controls transaction boundaries.
+    await db.flush()
+    return int(wallet.balance_cents or 0)
 
 def get_audio_duration_ffmpeg(file_bytes: bytes) -> float:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as tmp:
@@ -271,12 +312,6 @@ async def can_afford(
     units: int,
     is_18: bool = False,
 ) -> tuple[bool, int, int]:
-    """
-    Returns (ok, cost_cents, free_left)
-
-    - Uses DailyUsage for free allowance (shared)
-    - Uses InfluencerWallet filtered by is_18
-    """
 
     price: Pricing | None = await db.scalar(
         select(Pricing).where(
@@ -317,39 +352,59 @@ async def can_afford(
     ok = balance >= cost_cents
     return (ok or cost_cents == 0), cost_cents, free_left
 
-async def get_remaining_units(db: AsyncSession, user_id: int, influencer_id: str, feature: str) -> int:
+
+def _today_midnight_naive() -> datetime:
+    d = date.today()
+    return datetime(d.year, d.month, d.day)
+
+async def get_remaining_units(
+    db: AsyncSession,
+    user_id: int,
+    influencer_id: str,
+    feature: str,
+    is_18: bool = False,
+) -> int:
     price: Pricing | None = await db.scalar(
         select(Pricing).where(Pricing.feature == feature, Pricing.is_active.is_(True))
     )
     if not price:
         return 0
 
-    unit_price_cents = price.price_cents or 0
-    free_allowance = price.free_allowance or 0
+    unit_price_cents = int(price.price_cents or 0)
+    free_allowance = int(price.free_allowance or 0)
 
-    today = date.today()
-    usage: DailyUsage | None = await db.get(DailyUsage, (user_id, today))
+    today_dt = _today_midnight_naive()
 
-    if "text" in feature:
-        used = getattr(usage, "text_count", 0) if usage else 0
-    elif "voice" in feature:
-        used = getattr(usage, "voice_secs", 0) if usage else 0
-    else:
-        used = getattr(usage, "live_secs", 0) if usage else 0
-        
-
-    free_left = max(free_allowance - (used or 0), 0)
-
-    wallet = await db.scalar(
-        select(InfluencerWallet).where(
-            InfluencerWallet.user_id == user_id,
-            InfluencerWallet.influencer_id == influencer_id,
-            InfluencerWallet.is_18 == False,
+    usage: DailyUsage | None = await db.scalar(
+        select(DailyUsage).where(
+            and_(
+                DailyUsage.user_id == user_id,
+                DailyUsage.date == today_dt,
+            )
         )
     )
-    balance_cents = wallet.balance_cents if wallet and wallet.balance_cents is not None else 0
 
+    if "text" in feature:
+        used = int(getattr(usage, "text_count", 0) if usage else 0)
+    elif "voice" in feature:
+        used = int(getattr(usage, "voice_secs", 0) if usage else 0)
+    else:
+        used = int(getattr(usage, "live_secs", 0) if usage else 0)
+
+    free_left = max(free_allowance - used, 0)
+
+    wallet: InfluencerWallet | None = await db.scalar(
+        select(InfluencerWallet).where(
+            and_(
+                InfluencerWallet.user_id == user_id,
+                InfluencerWallet.influencer_id == influencer_id,
+                InfluencerWallet.is_18.is_(is_18),
+            )
+        )
+    )
+    balance_cents = int(wallet.balance_cents) if wallet and wallet.balance_cents is not None else 0
     paid = (balance_cents // unit_price_cents) if unit_price_cents > 0 else 0
+
     return int(free_left + paid)
 
 
