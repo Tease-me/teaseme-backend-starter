@@ -40,7 +40,7 @@ class Influencer(Base):
     
     fp_promoter_id: Mapped[str | None] = mapped_column(String, nullable=True)
     fp_ref_id: Mapped[str | None] = mapped_column(String, nullable=True)
-
+    email: Mapped[str] = mapped_column(String, unique=True, nullable=True)
     custom_adult_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     custom_audio_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -70,7 +70,7 @@ class User(Base):
     profile_photo_key: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     
-    moderation_status: Mapped[str] = mapped_column(String, default="CLEAN")  # CLEAN, FLAGGED, UNDER_REVIEW, BANNED
+    moderation_status: Mapped[str] = mapped_column(String, default="CLEAN") 
     violation_count: Mapped[int] = mapped_column(Integer, default=0)
     first_violation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_violation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -84,12 +84,11 @@ class User(Base):
 class Chat(Base):
     __tablename__ = "chats"
 
-    id:           Mapped[str]  = mapped_column(String, primary_key=True)  # UUID
+    id:           Mapped[str]  = mapped_column(String, primary_key=True)  
     user_id:      Mapped[int]  = mapped_column(ForeignKey("users.id"))
     influencer_id:Mapped[str]  = mapped_column(ForeignKey("influencers.id"))
     started_at:   Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
-    # relationships
     user = relationship("User", back_populates="chats")
     influencer:  Mapped["Influencer"] = relationship(back_populates="chats")
     messages = relationship("Message", back_populates="chat", cascade="all, delete-orphan")
@@ -98,8 +97,8 @@ class Message(Base):
     __tablename__ = "messages"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     chat_id: Mapped[str] = mapped_column(ForeignKey("chats.id"), index=True)
-    sender: Mapped[str] = mapped_column(String)  # 'user' ou 'ai'
-    channel: Mapped[str] = mapped_column(String, default="text")  # 'text' or 'call'
+    sender: Mapped[str] = mapped_column(String) 
+    channel: Mapped[str] = mapped_column(String, default="text")  
     content: Mapped[str] = mapped_column(Text)
     audio_url: Mapped[str] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -110,7 +109,7 @@ class Message(Base):
 class Chat18(Base):
     __tablename__ = "chats_18"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True)  # UUID
+    id: Mapped[str] = mapped_column(String, primary_key=True) 
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     influencer_id: Mapped[str] = mapped_column(ForeignKey("influencers.id"))
     started_at: Mapped[datetime] = mapped_column(
@@ -228,7 +227,6 @@ class InfluencerCreditTransaction(Base):
     )
 
 class DailyUsage(Base):
-    """Daily counter that resets at midnight UTC (for free tier usage)."""
     __tablename__ = "daily_usage"
     user_id: Mapped[int]     = mapped_column(ForeignKey("users.id"), primary_key=True)
     date:    Mapped[datetime]= mapped_column(DateTime, primary_key=True)  # YYYY-MM-DD 00:00 UTC
@@ -289,10 +287,6 @@ class InfluencerFollower(Base):
     )
 
 
-
-# -----------------------------
-# InfluencerSubscription
-# -----------------------------
 class InfluencerSubscription(Base):
     """
     One paid subscription per (user_id, influencer_id).
@@ -314,18 +308,14 @@ class InfluencerSubscription(Base):
         index=True,
     )
 
-    # Money / Plan
     price_cents: Mapped[int] = mapped_column(Integer, nullable=False)
     currency: Mapped[str] = mapped_column(String, nullable=False, default="AUD")
 
     interval: Mapped[str] = mapped_column(String, nullable=False, default="monthly")
-    # interval: "weekly" | "monthly" | "yearly"
 
-    # Status lifecycle
     status: Mapped[str] = mapped_column(String, nullable=False, default="active")
-    # status: "active" | "paused" | "canceled" | "expired"
+    # status: "active" | "paused" | "cancelled" | "expired"
 
-    # Dates
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -341,12 +331,10 @@ class InfluencerSubscription(Base):
     canceled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancel_reason: Mapped[str | None] = mapped_column(String, nullable=True)
 
-    # Provider refs (super important)
     provider: Mapped[str | None] = mapped_column(String, nullable=True)  # "paypal" | "stripe"
     provider_customer_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     provider_subscription_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
 
-    # Extra metadata / debugging
     meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     is_18_selected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -364,7 +352,6 @@ class InfluencerSubscription(Base):
         nullable=False,
     )
 
-    # relationships
     payments = relationship(
         "InfluencerSubscriptionPayment",
         back_populates="subscription",
@@ -378,9 +365,6 @@ class InfluencerSubscription(Base):
     )
 
 
-# -----------------------------
-# SubscriptionPayment (ledger)
-# -----------------------------
 class InfluencerSubscriptionPayment(Base):
     """
     Immutable ledger of payment attempts/events for a subscription.
@@ -408,21 +392,15 @@ class InfluencerSubscriptionPayment(Base):
         index=True,
     )
 
-    # Amount
     amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
     currency: Mapped[str] = mapped_column(String, nullable=False, default="AUD")
 
-    # Type + status
     kind: Mapped[str] = mapped_column(String, nullable=False, default="charge")
-    # kind: "charge" | "refund" | "chargeback"
 
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
-    # status: "pending" | "succeeded" | "failed" | "refunded"
 
-    # Provider refs
     provider: Mapped[str | None] = mapped_column(String, nullable=True)  # "paypal"
     provider_event_id: Mapped[str | None] = mapped_column(String, nullable=True, unique=True, index=True)
-    # ex: PayPal capture_id OR PayPal order_id OR webhook event id
 
     provider_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
@@ -490,7 +468,7 @@ class PreInfluencer(Base):
 
     status: Mapped[str] = mapped_column(
         String, default="pending", nullable=False
-    )  # pending / approved / rejected / converted 
+    ) 
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -591,24 +569,21 @@ class ContentViolation(Base):
     chat_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     influencer_id: Mapped[str | None] = mapped_column(String, nullable=True)
     
-    # What they said
     message_content: Mapped[str] = mapped_column(Text, nullable=False)
     message_context: Mapped[str | None] = mapped_column(Text, nullable=True)
     
-    # Classification
-    category: Mapped[str] = mapped_column(String, nullable=False)  # CSAM, BESTIALITY, DRUGS
-    severity: Mapped[str] = mapped_column(String, nullable=False)  # LOW, MEDIUM, HIGH, CRITICAL
+    category: Mapped[str] = mapped_column(String, nullable=False) 
+    severity: Mapped[str] = mapped_column(String, nullable=False)  
     
-    # How we caught it
     keyword_matched: Mapped[str | None] = mapped_column(String, nullable=True)
     ai_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     ai_reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
-    detection_tier: Mapped[str] = mapped_column(String, nullable=False)  # KEYWORD_ONLY, AI_CONFIRMED
+    detection_tier: Mapped[str] = mapped_column(String, nullable=False)  
     
     reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     reviewed_by: Mapped[str | None] = mapped_column(String, nullable=True)
-    review_action: Mapped[str | None] = mapped_column(String, nullable=True)  # CONFIRMED, FALSE_POSITIVE
+    review_action: Mapped[str | None] = mapped_column(String, nullable=True) 
     review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     
     created_at: Mapped[datetime] = mapped_column(
@@ -621,5 +596,47 @@ class ContentViolation(Base):
         Index("ix_violations_user_created", "user_id", "created_at"),
         Index("ix_violations_category", "category"),
         Index("ix_violations_reviewed", "reviewed"),
+    )
+
+
+class ReEngagementLog(Base):
+    __tablename__ = "re_engagement_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    influencer_id: Mapped[str] = mapped_column(
+        ForeignKey("influencers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    notification_type: Mapped[str] = mapped_column(String, nullable=False)  # "text" | "image" | "video"
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    media_url: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    delivered: Mapped[bool] = mapped_column(Boolean, default=False)
+    delivery_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    subscriptions_targeted: Mapped[int] = mapped_column(Integer, default=0)
+    subscriptions_succeeded: Mapped[int] = mapped_column(Integer, default=0)
+
+    wallet_balance_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    days_inactive: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    triggered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        Index("ix_reeng_user_infl_triggered", "user_id", "influencer_id", "triggered_at"),
+        Index("ix_reeng_triggered_at", "triggered_at"),
     )
 

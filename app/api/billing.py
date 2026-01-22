@@ -30,7 +30,6 @@ async def get_balance(
     user=Depends(get_current_user),
     is_18: bool = True,
 ):
-    # optional: validate influencer exists
     infl = await db.get(Influencer, influencer_id)
     if not infl:
         raise HTTPException(status_code=404, detail="Influencer not found")
