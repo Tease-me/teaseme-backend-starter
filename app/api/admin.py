@@ -27,6 +27,8 @@ async def clear_chat_history_admin(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    if current_user.id != 1:
+        raise HTTPException(status_code=403, detail="Not authorized")
     try:
         deleted_msg_ids = []
         deleted_mem_ids = []
@@ -98,6 +100,9 @@ async def list_relationships(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    if current_user.id != 1:
+        raise HTTPException(status_code=403, detail="Admin only")
+
     q = select(RelationshipState).where(RelationshipState.user_id == user_id)
     res = await db.execute(q)
     rows = res.scalars().all()
@@ -128,6 +133,10 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(User)
+    if current_user.id != 1:
+        
+
+        raise HTTPException(status_code=403, detail="Admin only")
 
     if q:
         like = f"%{q}%"
@@ -177,7 +186,10 @@ async def patch_relationship(
     payload: RelationshipPatch,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+):    
+    if current_user.id != 1:
+        raise HTTPException(status_code=403, detail="Admin only")
+
     q = select(RelationshipState).where(
         RelationshipState.user_id == payload.user_id,
         RelationshipState.influencer_id == payload.influencer_id,
@@ -253,7 +265,10 @@ async def update_relationship(
     payload: RelationshipPatch,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+):  
+    if current_user.id != 1:
+        raise HTTPException(status_code=403, detail="Admin only")
+
     q = select(RelationshipState).where(
         RelationshipState.user_id == payload.user_id,
         RelationshipState.influencer_id == payload.influencer_id,
@@ -305,6 +320,9 @@ async def upload_influencer_sample(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    if current_user.id != 1:
+        raise HTTPException(status_code=403, detail="Admin only")
+
     influencer = await db.get(Influencer, influencer_id)
     if not influencer:
         raise HTTPException(status_code=404, detail="Influencer not found")
@@ -351,6 +369,9 @@ async def delete_influencer_sample(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    if current_user.id != 1:
+        raise HTTPException(status_code=403, detail="Admin only")
+
     influencer = await db.get(Influencer, influencer_id)
     if not influencer:
         raise HTTPException(status_code=404, detail="Influencer not found")
@@ -378,9 +399,14 @@ async def get_moderation_dashboard(
     page: int = 1,
     page_size: int = 20,
     category: str | None = None,
+    current_user: User = Depends(get_current_user),
+
     user_id: int | None = None,
     db: AsyncSession = Depends(get_db),
 ):
+    if current_user.id != 1:
+        raise HTTPException(status_code=403, detail="Admin only")
+
     users_stmt = select(User).where(User.moderation_status != "CLEAN")
     users_stmt = users_stmt.order_by(desc(User.last_violation_at))
     users_result = await db.execute(users_stmt)

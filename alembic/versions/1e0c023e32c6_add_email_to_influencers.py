@@ -20,7 +20,16 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade():
     op.execute("ALTER TABLE influencers ADD COLUMN IF NOT EXISTS email VARCHAR")
+    op.execute(
+        """
+        UPDATE influencers
+        SET email = 'dummy_' || md5(random()::text || clock_timestamp()::text) || '@example.com'
+        WHERE email IS NULL OR email = ''
+        """
+    )
+    op.execute("ALTER TABLE influencers ALTER COLUMN email SET NOT NULL")
 
 
 def downgrade():
+    op.execute("ALTER TABLE influencers ALTER COLUMN email DROP NOT NULL")
     op.execute("ALTER TABLE influencers DROP COLUMN IF EXISTS email")
