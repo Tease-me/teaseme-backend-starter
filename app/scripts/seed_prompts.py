@@ -920,6 +920,8 @@ SYSTEM_PROMPTS = [
         "key": "SURVEY_QUESTIONS_JSON",
         "description": "JSON survey questions used for influencer onboarding.",
         "prompt": SURVEY_QUESTIONS_JSON,
+    },
+    {
         "key": "MBTI_JSON",
         "description": "MBTI personality definitions used for profiling and prompt generation.",
         "prompt": MBTIJSON,
