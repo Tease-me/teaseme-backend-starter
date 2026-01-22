@@ -846,8 +846,7 @@ RELATIONSHIP= """
         {message}
         
 """
-BASE_SYSTEM = 
-"""
+BASE_SYSTEM = """
 # MBTI Personality
 {mbti_rules}
 
