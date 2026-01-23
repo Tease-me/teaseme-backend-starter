@@ -22,9 +22,31 @@ COMPOSE="docker-compose" make seed-all
 - `make db-wipe-conversations` — truncates messages, memories, chats, and calls tables. **Destructive**.
 
 ## Alembic migrations
+
+### Docker (dentro do container)
 - `make alembic-revision MESSAGE="add new table"` — create an autogen migration.
 - `make alembic-upgrade` — apply migrations to `head`.
 - `make alembic-downgrade` — roll back one revision.
+- `make alembic-current` — show current migration version.
+- `make alembic-history` — show migration history.
+- `make alembic-stamp-production` — ⚠️ mark production DB as current (first deploy only).
+
+### Local (fora do Docker)
+- `make alembic-local-revision MESSAGE="add new field"` — create migration locally.
+- `make alembic-local-upgrade` — apply migrations locally.
+- `make alembic-local-current` — show current version locally.
+
+### ⚠️ IMPORTANTE - Deploy em Produção
+Após limpar as migrações antigas, na primeira vez em produção, use:
+```sh
+make alembic-stamp-production
+```
+Isto marca o banco como atualizado **sem** executar as migrações (evita recriar tabelas existentes).
+
+Para deploys futuros, use normalmente:
+```sh
+make alembic-upgrade
+```
 
 ## Running with a different service/container
 If your API container is named differently:
