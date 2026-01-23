@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.services.billing import topup_wallet
@@ -19,6 +19,8 @@ from datetime import date
 from sqlalchemy import and_
 import traceback
 from fastapi.responses import JSONResponse
+from app.utils.rate_limiter import rate_limit
+from app.utils.idempotency import idempotent
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -48,7 +50,10 @@ async def get_balance(
     }
 
 @router.post("/topup")
+@rate_limit(max_requests=settings.RATE_LIMIT_BILLING_MAX, window_seconds=settings.RATE_LIMIT_BILLING_WINDOW, key_prefix="billing:topup")
+@idempotent(ttl=settings.IDEMPOTENCY_TTL, key_prefix="topup")
 async def topup(
+    request: Request,
     req: TopUpRequest,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
@@ -92,7 +97,9 @@ class PayPalCreateReq(BaseModel):
     currency: str | None = None
 
 @router.post("/paypal/create-order")
-async def paypal_create_order(req: PayPalCreateReq, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+@rate_limit(max_requests=settings.RATE_LIMIT_BILLING_MAX, window_seconds=settings.RATE_LIMIT_BILLING_WINDOW, key_prefix="billing:paypal-create")
+@idempotent(ttl=settings.IDEMPOTENCY_TTL, key_prefix="paypal-create")
+async def paypal_create_order(request: Request, req: PayPalCreateReq, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     token = await paypal_access_token()
 
     influencer_id = (req.influencer_id or "").strip()
@@ -171,7 +178,9 @@ class PayPalCaptureReq(BaseModel):
     influencer_id: str | None = None
 
 @router.post("/paypal/capture")
+@rate_limit(max_requests=settings.RATE_LIMIT_BILLING_MAX, window_seconds=settings.RATE_LIMIT_BILLING_WINDOW, key_prefix="billing:paypal-capture")
 async def paypal_capture(
+    request: Request,
     req: PayPalCaptureReq,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),

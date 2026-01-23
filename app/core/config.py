@@ -48,6 +48,17 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+    
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_AUTH_MAX: int = 5
+    RATE_LIMIT_AUTH_WINDOW: int = 60
+    RATE_LIMIT_CHAT_MAX: int = 30
+    RATE_LIMIT_CHAT_WINDOW: int = 60
+    RATE_LIMIT_BILLING_MAX: int = 10
+    RATE_LIMIT_BILLING_WINDOW: int = 60
+    IDEMPOTENCY_TTL: int = 3600 #1hr 
+    LOCK_TIMEOUT: int = 30
+    
     LANDING_PAGE_AGENT_ID: str
     BUCKET_NAME: str
     INFLUENCER_PREFIX: str

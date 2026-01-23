@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from datetime import datetime, timedelta, timezone
@@ -13,56 +13,74 @@ from app.db.models import (
     User
 )
 from app.services.influencer_subscriptions import require_active_subscription
+from app.utils.rate_limiter import rate_limit
+from app.utils.idempotency import idempotent
+from app.utils.concurrency import advisory_lock
+from app.core.config import settings
 
 
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
 
 
 @router.post("/start")
+@rate_limit(max_requests=settings.RATE_LIMIT_BILLING_MAX, window_seconds=settings.RATE_LIMIT_BILLING_WINDOW, key_prefix="sub:start")
+@idempotent(ttl=settings.IDEMPOTENCY_TTL, key_prefix="sub-start")
 async def start_subscription(
+    request: Request,
     influencer_id: str,
     price_cents: int,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    res = await db.execute(
-        select(InfluencerSubscription).where(
-            InfluencerSubscription.user_id == user.id,
-            InfluencerSubscription.influencer_id == influencer_id,
-        )
-    )
-    sub = res.scalar_one_or_none()
+    # Use advisory lock to prevent race conditions on subscription state
+    async with advisory_lock(f"subscription:{user.id}:{influencer_id}", timeout=settings.LOCK_TIMEOUT):
+        try:
+            res = await db.execute(
+                select(InfluencerSubscription).where(
+                    InfluencerSubscription.user_id == user.id,
+                    InfluencerSubscription.influencer_id == influencer_id,
+                )
+            )
+            sub = res.scalar_one_or_none()
 
-    now = datetime.now(timezone.utc)
-    next_month = now + timedelta(days=30)
+            now = datetime.now(timezone.utc)
+            next_month = now + timedelta(days=30)
 
-    if sub:
-        sub.status = "active"
-        sub.price_cents = price_cents
-        sub.started_at = now
-        sub.current_period_start = now
-        sub.current_period_end = next_month
-        sub.next_payment_at = next_month
-        await db.commit()
-        return {"status": "reactivated", "subscription_id": sub.id}
+            if sub:
+                sub.status = "active"
+                sub.price_cents = price_cents
+                sub.started_at = now
+                sub.current_period_start = now
+                sub.current_period_end = next_month
+                sub.next_payment_at = next_month
+                await db.commit()
+                return {"status": "reactivated", "subscription_id": sub.id}
 
-    sub = InfluencerSubscription(
-        user_id=user.id,
-        influencer_id=influencer_id,
-        price_cents=price_cents,
-        started_at=now,
-        current_period_start=now,
-        current_period_end=next_month,
-        next_payment_at=next_month,
-    )
-    db.add(sub)
-    await db.commit()
-    await db.refresh(sub)
+            sub = InfluencerSubscription(
+                user_id=user.id,
+                influencer_id=influencer_id,
+                price_cents=price_cents,
+                started_at=now,
+                current_period_start=now,
+                current_period_end=next_month,
+                next_payment_at=next_month,
+            )
+            db.add(sub)
+            await db.commit()
+            await db.refresh(sub)
 
-    return {"status": "created", "subscription_id": sub.id}
+            return {"status": "created", "subscription_id": sub.id}
+        except HTTPException:
+            raise
+        except Exception as e:
+            await db.rollback()
+            log.exception("Failed to start subscription for user %s: %s", user.id, e)
+            raise HTTPException(status_code=500, detail="Failed to start subscription")
 
 @router.post("/paypal/capture")
+@rate_limit(max_requests=settings.RATE_LIMIT_BILLING_MAX, window_seconds=settings.RATE_LIMIT_BILLING_WINDOW, key_prefix="sub:paypal-capture")
 async def paypal_capture_subscription(
+    request: Request,
     subscription_id: int,
     order_id: str,
     amount_cents: int,
