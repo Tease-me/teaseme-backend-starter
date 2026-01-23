@@ -95,18 +95,17 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         }
     )
 
-# we cant have this due to need to launch asap 
-# @app.exception_handler(StarletteHTTPException)
-# async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-#     """Handle HTTP exceptions with consistent format."""
-#     return JSONResponse(
-#         status_code=exc.status_code,
-#         content={
-#             "ok": False,
-#             "error": exc.detail if isinstance(exc.detail, str) else "Request failed",
-#             "details": exc.detail if isinstance(exc.detail, dict) else None,
-#         }
-#     )
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Handle HTTP exceptions with consistent format."""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "ok": False,
+            "error": exc.detail if isinstance(exc.detail, str) else "Request failed",
+            "details": exc.detail if isinstance(exc.detail, dict) else None,
+        }
+    )
 
 
 app.include_router(auth_router)

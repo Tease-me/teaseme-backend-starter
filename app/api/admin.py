@@ -103,28 +103,34 @@ async def list_relationships(
     if current_user.id != 1:
         raise HTTPException(status_code=403, detail="Admin only")
 
-    q = select(RelationshipState).where(RelationshipState.user_id == user_id)
-    res = await db.execute(q)
-    rows = res.scalars().all()
-    return [
-        {
-            "id": r.id,
-            "user_id": r.user_id,
-            "influencer_id": r.influencer_id,
-            "trust": r.trust,
-            "closeness": r.closeness,
-            "attraction": r.attraction,
-            "safety": r.safety,
-            "state": r.state,
-            "stage_points": r.stage_points,
-            "sentiment": sentiment_label(r.sentiment_score),
-            "exclusive_agreed": r.exclusive_agreed,
-            "girlfriend_confirmed": r.girlfriend_confirmed,
-            "sentiment_score": r.sentiment_score,
-            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
-        }
-        for r in rows
-    ]
+    try:
+        q = select(RelationshipState).where(RelationshipState.user_id == user_id)
+        res = await db.execute(q)
+        rows = res.scalars().all()
+        return [
+            {
+                "id": r.id,
+                "user_id": r.user_id,
+                "influencer_id": r.influencer_id,
+                "trust": r.trust,
+                "closeness": r.closeness,
+                "attraction": r.attraction,
+                "safety": r.safety,
+                "state": r.state,
+                "stage_points": r.stage_points,
+                "sentiment": sentiment_label(r.sentiment_score),
+                "exclusive_agreed": r.exclusive_agreed,
+                "girlfriend_confirmed": r.girlfriend_confirmed,
+                "sentiment_score": r.sentiment_score,
+                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            }
+            for r in rows
+        ]
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception("Failed to list relationships for user %s: %s", user_id, e)
+        raise HTTPException(status_code=500, detail="Failed to list relationships")
 
 @router.get("/users")
 async def list_users(
@@ -132,32 +138,36 @@ async def list_users(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(User)
     if current_user.id != 1:
-        
-
         raise HTTPException(status_code=403, detail="Admin only")
 
-    if q:
-        like = f"%{q}%"
-        stmt = stmt.where(
-            (User.email.ilike(like)) |
-            (User.username.ilike(like)) |
-            (User.full_name.ilike(like))
-        )
+    try:
+        stmt = select(User)
+        if q:
+            like = f"%{q}%"
+            stmt = stmt.where(
+                (User.email.ilike(like)) |
+                (User.username.ilike(like)) |
+                (User.full_name.ilike(like))
+            )
 
-    res = await db.execute(stmt)
-    users = res.scalars().all()
+        res = await db.execute(stmt)
+        users = res.scalars().all()
 
-    return [
-        {
-            "id": u.id,
-            "username": u.username,
-            "email": u.email,
-            "full_name": u.full_name,
-        }
-        for u in users
-    ]
+        return [
+            {
+                "id": u.id,
+                "username": u.username,
+                "email": u.email,
+                "full_name": u.full_name,
+            }
+            for u in users
+        ]
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception("Failed to list users: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to list users")
 
 class RelationshipPatch(BaseModel):
     user_id: int
