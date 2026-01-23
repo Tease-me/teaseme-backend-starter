@@ -24,6 +24,7 @@ from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
 from app.services.system_prompt_service import get_system_prompt
+from app.constants import prompt_keys
 
 from app.db.session import get_db
 from app.db.models import PreInfluencer, Influencer
@@ -66,7 +67,7 @@ SURVEY_SUMMARIZER = ChatOpenAI(
 
 @lru_cache(maxsize=1)
 async def _load_survey_questions(db: AsyncSession):
-    raw = await get_system_prompt(db, "SURVEY_QUESTIONS_JSON")
+    raw = await get_system_prompt(db, prompt_keys.SURVEY_QUESTIONS_JSON)
     if not raw:
         raise HTTPException(500, "Missing system prompt: SURVEY_QUESTIONS_JSON")
     try:
@@ -145,7 +146,7 @@ def _require_pre_influencer_survey_access(
 
 async def _generate_prompt_from_markdown(markdown: str, additional_prompt: str | None, db:AsyncSession) -> str:
 
-    sys_msg = await get_system_prompt(db, "SURVEY_PROMPT_JSON_SCHEMA")
+    sys_msg = await get_system_prompt(db, prompt_keys.SURVEY_PROMPT_JSON_SCHEMA)
     if not sys_msg:
         raise HTTPException(500, "Missing system prompt: SURVEY_PROMPT_JSON_SCHEMA")
     user_msg = f"Survey markdown:\n{markdown}\n\nExtra instructions for style/tone:\n{additional_prompt or '(none)'}"

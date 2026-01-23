@@ -9,14 +9,15 @@ from datetime import date
 from fastapi import Depends, HTTPException
 from app.db.session import get_db
 from app.services.system_prompt_service import get_system_prompt
+from app.constants import prompt_keys
 
 import logging
 log = logging.getLogger("teaseme-script")
 
 async def get_base_system(db: AsyncSession, isAudio: bool) -> str:
-    base = await get_system_prompt(db, "BASE_SYSTEM")
+    base = await get_system_prompt(db, prompt_keys.BASE_SYSTEM)
     if isAudio: 
-        audio_base = await get_system_prompt(db, "BASE_AUDIO_SYSTEM")
+        audio_base = await get_system_prompt(db, prompt_keys.BASE_AUDIO_SYSTEM)
         base += "\n" + audio_base
     return base
 
@@ -115,4 +116,3 @@ async def get_today_script(
     idx = date.today().timetuple().tm_yday % len(scripts)
     frase = scripts[idx]
     return frase
-

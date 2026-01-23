@@ -8,6 +8,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 from app.core.config import settings
 from app.services.system_prompt_service import get_system_prompt
+from app.constants import prompt_keys
 
 log = logging.getLogger("moderation.grok")
 
@@ -76,8 +77,8 @@ async def verify_with_grok(
             reasoning="Moderation prompts unavailable - defaulting to confirmed"
         )
 
-    system_prompt = await get_system_prompt(db, "GROK_SYSTEM_PROMPT")
-    user_prompt_template = await get_system_prompt(db, "GROK_USER_PROMPT_TEMPLATE")
+    system_prompt = await get_system_prompt(db, prompt_keys.GROK_SYSTEM_PROMPT)
+    user_prompt_template = await get_system_prompt(db, prompt_keys.GROK_USER_PROMPT_TEMPLATE)
 
     if not system_prompt or not user_prompt_template:
         return GrokVerification(
