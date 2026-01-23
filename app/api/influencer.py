@@ -50,51 +50,83 @@ async def _build_influencer_detail(influencer: Influencer) -> InfluencerDetail:
 
 @router.get("", response_model=List[InfluencerDetail])
 async def list_influencers(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Influencer))
-    influencers = result.scalars().all()
-    return [await _build_influencer_detail(influencer) for influencer in influencers]
+    try:
+        result = await db.execute(select(Influencer))
+        influencers = result.scalars().all()
+        return [await _build_influencer_detail(influencer) for influencer in influencers]
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception("Failed to list influencers: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to list influencers")
 
 @router.get("/{id}", response_model=InfluencerDetail)
 async def get_influencer(id: str, db: AsyncSession = Depends(get_db)):
-    influencer = await db.get(Influencer, id)
-    if not influencer:
-        raise HTTPException(404, "Influencer not found")
-
-    return await _build_influencer_detail(influencer)
+    try:
+        influencer = await db.get(Influencer, id)
+        if not influencer:
+            raise HTTPException(404, "Influencer not found")
+        return await _build_influencer_detail(influencer)
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception("Failed to get influencer %s: %s", id, e)
+        raise HTTPException(status_code=500, detail="Failed to get influencer")
 
 @router.post("", response_model=InfluencerOut, status_code=201)
 async def create_influencer(data: InfluencerCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    if await db.get(Influencer, data.id):
-        raise HTTPException(400, "Influencer with this id already exists")
-    influencer = Influencer(**data.model_dump())
-    influencer.owner_id = current_user.id
-    db.add(influencer)
-    await db.flush()
-    await db.commit()
-    await db.refresh(influencer)
-    return influencer
+    try:
+        if await db.get(Influencer, data.id):
+            raise HTTPException(400, "Influencer with this id already exists")
+        influencer = Influencer(**data.model_dump())
+        influencer.owner_id = current_user.id
+        db.add(influencer)
+        await db.flush()
+        await db.commit()
+        await db.refresh(influencer)
+        return influencer
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        log.exception("Failed to create influencer: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to create influencer")
 
 @router.patch("/{id}", response_model=InfluencerOut)
 async def update_influencer(id: str, data: InfluencerUpdate, db: AsyncSession = Depends(get_db)):
-    influencer = await db.get(Influencer, id)
-    if not influencer:
-        raise HTTPException(404, "Influencer not found")
-    update_payload = data.model_dump(exclude_unset=True)
-    for key, value in update_payload.items():
-        setattr(influencer, key, value)
-    db.add(influencer)
-    await db.commit()
-    await db.refresh(influencer)
-    return influencer
+    try:
+        influencer = await db.get(Influencer, id)
+        if not influencer:
+            raise HTTPException(404, "Influencer not found")
+        update_payload = data.model_dump(exclude_unset=True)
+        for key, value in update_payload.items():
+            setattr(influencer, key, value)
+        db.add(influencer)
+        await db.commit()
+        await db.refresh(influencer)
+        return influencer
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        log.exception("Failed to update influencer %s: %s", id, e)
+        raise HTTPException(status_code=500, detail="Failed to update influencer")
 
 @router.delete("/{id}")
 async def delete_influencer(id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    influencer = await db.get(Influencer, id)
-    if not influencer:
-        raise HTTPException(404, "Influencer not found")
-    await db.delete(influencer)
-    await db.commit()
-    return {"ok": True}
+    try:
+        influencer = await db.get(Influencer, id)
+        if not influencer:
+            raise HTTPException(404, "Influencer not found")
+        await db.delete(influencer)
+        await db.commit()
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        log.exception("Failed to delete influencer %s: %s", id, e)
+        raise HTTPException(status_code=500, detail="Failed to delete influencer")
 
 
 @router.post("/{influencer_id}/profile", 

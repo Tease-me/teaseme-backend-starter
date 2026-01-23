@@ -70,74 +70,94 @@ def _clear_auth_cookies(response: Response) -> None:
 
 @router.post("/register")
 async def register(data: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db)):
-    existing_user = await db.execute(
-        select(User).where((User.email == data.email))
-    )
-    if existing_user.scalar():
-        raise HTTPException(status_code=200, detail="Username or email already registered")
-
-    if data.influencer_id:
-        await ensure_influencer(db, data.influencer_id)
-
-    verify_token = secrets.token_urlsafe(32)           
-
-    user = User(
-        password_hash=pwd_context.hash(data.password),
-        email=data.email,
-        is_verified=False,
-        email_token=verify_token
-    )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-
-    if data.influencer_id:
-        await create_follow_if_missing(db, data.influencer_id, user.id)
-
     try:
-        tid = getattr(data, "fp_tid", None) or request.cookies.get("_fprom_tid")
-
-        log.info(
-            "FP signup: tid_body=%s tid_cookie=%s chosen=%s",
-            getattr(data, "fp_tid", None),
-            request.cookies.get("_fprom_tid"),
-            tid,
+        existing_user = await db.execute(
+            select(User).where((User.email == data.email))
         )
+        if existing_user.scalar():
+            raise HTTPException(status_code=200, detail="Username or email already registered")
 
-        if tid:
-            await fp_track_signup(
-                email=user.email,
-                uid=str(user.id),
-                tid=tid,
+        if data.influencer_id:
+            await ensure_influencer(db, data.influencer_id)
+
+        verify_token = secrets.token_urlsafe(32)           
+
+        user = User(
+            password_hash=pwd_context.hash(data.password),
+            email=data.email,
+            is_verified=False,
+            email_token=verify_token
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+
+        if data.influencer_id:
+            await create_follow_if_missing(db, data.influencer_id, user.id)
+
+        try:
+            tid = getattr(data, "fp_tid", None) or request.cookies.get("_fprom_tid")
+
+            log.info(
+                "FP signup: tid_body=%s tid_cookie=%s chosen=%s",
+                getattr(data, "fp_tid", None),
+                request.cookies.get("_fprom_tid"),
+                tid,
             )
-    except Exception:
-        log.exception("FirstPromoter track/signup failed")
-    
-    send_verification_email(user.email, verify_token)
 
-    return {
-        "ok": True,
-        "user_id": user.id,
-        "email": user.email,
-        "message": "Check your email to verify your account before logging in."
-    }
+            if tid:
+                await fp_track_signup(
+                    email=user.email,
+                    uid=str(user.id),
+                    tid=tid,
+                )
+        except Exception:
+            log.exception("FirstPromoter track/signup failed")
+        
+        try:
+            send_verification_email(user.email, verify_token)
+        except Exception:
+            log.exception("Failed to send verification email to %s", user.email)
+
+        return {
+            "ok": True,
+            "user_id": user.id,
+            "email": user.email,
+            "message": "Check your email to verify your account before logging in."
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        log.exception("Registration failed: %s", e)
+        raise HTTPException(status_code=500, detail="Registration failed. Please try again.")
 
 @router.get("/confirm-email")
 async def confirm_email(token: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.email_token == token))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="Invalid or expired token")
-    user.is_verified = True
-    user.email_token = None
-    await db.commit()
-   
-    await notify_email_verified(user.email)
+    try:
+        result = await db.execute(select(User).where(User.email_token == token))
+        user = result.scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=404, detail="Invalid or expired token")
+        user.is_verified = True
+        user.email_token = None
+        await db.commit()
+       
+        try:
+            await notify_email_verified(user.email)
+        except Exception:
+            log.exception("Failed to send email verified notification")
 
-    return {
-        "ok": True,
-        "message": "Email verified successfully! You can now log in.",
-    }
+        return {
+            "ok": True,
+            "message": "Email verified successfully! You can now log in.",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        log.exception("Email confirmation failed: %s", e)
+        raise HTTPException(status_code=500, detail="Email confirmation failed. Please try again.")
 
 
 @router.post("/login", response_model=Token)
