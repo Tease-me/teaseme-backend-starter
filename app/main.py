@@ -1,9 +1,13 @@
 import logging
 import os
+import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api.chat import router
 from app.api.chat_18 import router as chat_18_router
 from app.api.auth import router as auth_router
@@ -59,6 +63,51 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch all unhandled exceptions and return a safe JSON response."""
+    error_id = str(uuid.uuid4())[:8]
+    log.exception("[%s] Unhandled exception on %s %s: %s", error_id, request.method, request.url.path, exc)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "ok": False,
+            "error": "An unexpected error occurred. Please try again.",
+            "error_id": error_id,
+        }
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle request validation errors with detailed feedback."""
+    error_id = str(uuid.uuid4())[:8]
+    log.warning("[%s] Validation error on %s %s: %s", error_id, request.method, request.url.path, exc.errors())
+    return JSONResponse(
+        status_code=422,
+        content={
+            "ok": False,
+            "error": "Validation error",
+            "error_id": error_id,
+            "details": exc.errors(),
+        }
+    )
+
+# we cant have this due to need to launch asap 
+# @app.exception_handler(StarletteHTTPException)
+# async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+#     """Handle HTTP exceptions with consistent format."""
+#     return JSONResponse(
+#         status_code=exc.status_code,
+#         content={
+#             "ok": False,
+#             "error": exc.detail if isinstance(exc.detail, str) else "Request failed",
+#             "details": exc.detail if isinstance(exc.detail, dict) else None,
+#         }
+#     )
+
 
 app.include_router(auth_router)
 app.include_router(router)

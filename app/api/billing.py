@@ -7,6 +7,7 @@ from app.schemas.billing import TopUpRequest
 from app.db.session import get_db
 from app.utils.deps import get_current_user
 
+import logging
 import httpx
 from decimal import Decimal
 from pydantic import BaseModel, PositiveInt
@@ -20,6 +21,8 @@ from sqlalchemy import and_
 import traceback
 from fastapi.responses import JSONResponse
 
+log = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/billing", tags=["billing"])
 
 
@@ -30,22 +33,28 @@ async def get_balance(
     user=Depends(get_current_user),
     is_18: bool = True,
 ):
-    infl = await db.get(Influencer, influencer_id)
-    if not infl:
-        raise HTTPException(status_code=404, detail="Influencer not found")
+    try:
+        infl = await db.get(Influencer, influencer_id)
+        if not infl:
+            raise HTTPException(status_code=404, detail="Influencer not found")
 
-    wallet = await db.scalar(
-        select(InfluencerWallet).where(
-            InfluencerWallet.user_id == user.id,
-            InfluencerWallet.influencer_id == influencer_id,
-            InfluencerWallet.is_18.is_(is_18),
+        wallet = await db.scalar(
+            select(InfluencerWallet).where(
+                InfluencerWallet.user_id == user.id,
+                InfluencerWallet.influencer_id == influencer_id,
+                InfluencerWallet.is_18.is_(is_18),
+            )
         )
-    )
 
-    return {
-        "influencer_id": influencer_id,
-        "balance_cents": wallet.balance_cents if wallet else 0,
-    }
+        return {
+            "influencer_id": influencer_id,
+            "balance_cents": wallet.balance_cents if wallet else 0,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception("get_balance failed for user=%s influencer=%s: %s", user.id, influencer_id, e)
+        raise HTTPException(status_code=500, detail="Failed to retrieve balance")
 
 @router.post("/topup")
 async def topup(
@@ -53,38 +62,45 @@ async def topup(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    if not req.influencer_id:
-        raise HTTPException(status_code=400, detail="Missing influencer_id")
+    try:
+        if not req.influencer_id:
+            raise HTTPException(status_code=400, detail="Missing influencer_id")
 
-    wallet = await db.scalar(
-        select(InfluencerWallet).where(
-            InfluencerWallet.user_id == user.id,
-            InfluencerWallet.influencer_id == req.influencer_id,
-            InfluencerWallet.is_18 == False,
+        wallet = await db.scalar(
+            select(InfluencerWallet).where(
+                InfluencerWallet.user_id == user.id,
+                InfluencerWallet.influencer_id == req.influencer_id,
+                InfluencerWallet.is_18 == False,
+            )
         )
-    )
 
-    if not wallet:
-        wallet = InfluencerWallet(
-            user_id=user.id,
-            influencer_id=req.influencer_id,
-            balance_cents=0,
-        )
+        if not wallet:
+            wallet = InfluencerWallet(
+                user_id=user.id,
+                influencer_id=req.influencer_id,
+                balance_cents=0,
+            )
+            db.add(wallet)
+            await db.flush()
+
+        wallet.balance_cents = (wallet.balance_cents or 0) + int(req.cents)
         db.add(wallet)
-        await db.flush()
 
-    wallet.balance_cents = (wallet.balance_cents or 0) + int(req.cents)
-    db.add(wallet)
+        await db.commit()
+        await db.refresh(wallet)
 
-    await db.commit()
-    await db.refresh(wallet)
-
-    return {
-        "ok": True,
-        "user_id": user.id,
-        "influencer_id": wallet.influencer_id,
-        "balance_cents": wallet.balance_cents,
-    }
+        return {
+            "ok": True,
+            "user_id": user.id,
+            "influencer_id": wallet.influencer_id,
+            "balance_cents": wallet.balance_cents,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        log.exception("topup failed for user=%s: %s", user.id, e)
+        raise HTTPException(status_code=500, detail="Top-up failed. Please try again.")
 
 class PayPalCreateReq(BaseModel):
     cents: PositiveInt
@@ -115,7 +131,6 @@ async def paypal_create_order(req: PayPalCreateReq, db: AsyncSession = Depends(g
         "intent": "CAPTURE",
         "purchase_units": [{"amount": {"currency_code": currency, "value": value}}],
     }
-    # Only include redirect URLs if they're configured; sending nulls causes PayPal 400.
     if return_url and cancel_url:
         payload["application_context"] = {
             "user_action": "PAY_NOW",
@@ -133,7 +148,6 @@ async def paypal_create_order(req: PayPalCreateReq, db: AsyncSession = Depends(g
             r.raise_for_status()
             data = r.json()
         except httpx.HTTPStatusError as e:
-            # PayPal returns helpful JSON (name/message/details/debug_id). Bubble it up.
             try:
                 paypal_body = e.response.json()
             except Exception:
@@ -177,7 +191,6 @@ async def paypal_capture(
     user=Depends(get_current_user),
 ):
     try:
-        # Capture PayPal (safe to call multiple times; PayPal returns completed on repeats)
         token = await paypal_access_token()
         if not settings.PAYPAL_BASE_URL:
             raise HTTPException(status_code=500, detail="PAYPAL_BASE_URL not configured")
@@ -336,8 +349,6 @@ async def paypal_capture(
     except HTTPException:
         raise
     except Exception as e:
-        # Keep `detail` a string so frontends that render it directly don't crash,
-        # while still returning rich debug info for development.
         return JSONResponse(
             status_code=500,
             content={
