@@ -680,7 +680,7 @@ async def purchase_addon(
         plan_id=addon_plan.id,
         amount_paid_cents=addon_plan.price_cents,
         credits_granted=credits_to_add,
-        currency="USD",
+        currency=addon_plan.currency,
         provider="simulated",  # Replace with actual provider (paypal/stripe)
         provider_transaction_id=transaction_id,
         purchased_at=datetime.now(timezone.utc),
