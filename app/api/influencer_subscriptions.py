@@ -535,7 +535,7 @@ async def change_subscription_plan(
     # Store change in meta
     if not sub.meta:
         sub.meta = {}
-    sub.meta["previous_plan_id"] = sub.plan_id if old_plan else None
+    sub.meta["previous_plan_id"] = old_plan.id if old_plan else None
     sub.meta["plan_changed_at"] = datetime.now(timezone.utc).isoformat()
     
     db.add(sub)
