@@ -29,7 +29,7 @@ from app.api import system_prompts as system_prompts_router
 from .api import health_router
 from app.scheduler import start_scheduler, stop_scheduler
 
-log = logging.getLogger("teaseme")
+log = logging.getLogger("tm-service")
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s"

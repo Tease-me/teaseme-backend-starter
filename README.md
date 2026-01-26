@@ -7,8 +7,8 @@ TeaseMe is a multi-persona conversational AI platform with audio, long-term memo
 1. **Clone & prep env**
 
    ```bash
-   git clone https://github.com/your-org/teaseme-backend.git
-   cd teaseme-backend
+   git clone https://github.com/your-org/tm-service-backend.git
+   cd tm-service-backend
    cp .env.example .env                         # edit secrets
    add certs to .cert/cert.pem and .cert/key.pem
    ```

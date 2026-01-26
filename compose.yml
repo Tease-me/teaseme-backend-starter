@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: teaseme
+      POSTGRES_DB: tm_service
     ports:
       - "5432:5432"
     volumes:
@@ -19,7 +19,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: teaseme-backend
+    container_name: tm-service-backend
     volumes:
       - ./:/usr/src/app
     working_dir: /usr/src/app
