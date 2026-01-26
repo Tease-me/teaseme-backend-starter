@@ -274,7 +274,7 @@ async def paypal_capture_subscription(
         select(InfluencerWallet).where(
             InfluencerWallet.user_id == user.id,
             InfluencerWallet.influencer_id == sub.influencer_id,
-            InfluencerWallet.is_18 == True,
+            InfluencerWallet.is_18.is_(True),
         )
     )
 
@@ -418,7 +418,7 @@ async def get_subscription_plans(db: AsyncSession = Depends(get_db)):
     """
     result = await db.execute(
         select(InfluencerSubscriptionPlan).where(
-            InfluencerSubscriptionPlan.is_active == True
+            InfluencerSubscriptionPlan.is_active.is_(True)
         ).order_by(InfluencerSubscriptionPlan.display_order)
     )
     all_plans = result.scalars().all()
@@ -644,7 +644,7 @@ async def purchase_addon(
         select(InfluencerWallet).where(
             InfluencerWallet.user_id == user.id,
             InfluencerWallet.influencer_id == req.influencer_id,
-            InfluencerWallet.is_18 == True,
+            InfluencerWallet.is_18.is_(True),
         )
     )
     
@@ -854,7 +854,7 @@ async def get_wallet_balance(
         select(InfluencerWallet).where(
             InfluencerWallet.user_id == user.id,
             InfluencerWallet.influencer_id == influencer_id,
-            InfluencerWallet.is_18 == True,
+            InfluencerWallet.is_18.is_(True),
         )
     )
     
