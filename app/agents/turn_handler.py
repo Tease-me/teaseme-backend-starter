@@ -18,7 +18,7 @@ from app.utils.tts_sanitizer import sanitize_tts_text
 
 from app.relationship.processor import process_relationship_turn
 
-log = logging.getLogger("tm-service-turn")
+log = logging.getLogger("teaseme-turn")
 
 
 def redis_history(chat_id: str):

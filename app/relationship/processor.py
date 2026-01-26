@@ -9,7 +9,7 @@ from app.relationship.signals import classify_signals
 from app.relationship.engine import Signals, update_relationship
 from app.relationship.dtr import plan_dtr_goal
 
-log = logging.getLogger("tm-service-relationship")
+log = logging.getLogger("teaseme-relationship")
 
 
 STAGES = ["HATE", "DISLIKE", "STRANGERS", "TALKING", "FLIRTING", "DATING"]

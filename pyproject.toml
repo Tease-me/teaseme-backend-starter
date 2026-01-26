@@ -1,6 +1,6 @@
 
 [tool.poetry]
-name = "tm-service-backend"
+name = "teaseme-backend"
 version = "0.1.0"
 description = "TeaseMe chat backend (FastAPI + Parlant)"
 authors = ["Kako"]

@@ -11,7 +11,7 @@ from app.db.session import get_db
 from app.services.system_prompt_service import get_system_prompt
 
 import logging
-log = logging.getLogger("tm-service-script")
+log = logging.getLogger("teaseme-script")
 
 async def get_base_system(db: AsyncSession, isAudio: bool) -> str:
     base = await get_system_prompt(db, "BASE_SYSTEM")

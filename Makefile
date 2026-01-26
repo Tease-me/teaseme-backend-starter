@@ -22,7 +22,7 @@ seed-all: seed-influencers seed-pricing seed-users seed-prompts seed-subscriptio
 
 .PHONY: db-wipe-conversations
 db-wipe-conversations:
-	$(COMPOSE) exec db psql -U postgres -d tm_service -c "TRUNCATE messages, memories, chats, calls CASCADE;"
+	$(COMPOSE) exec db psql -U postgres -d teaseme -c "TRUNCATE messages, memories, chats, calls CASCADE;"
 
 .PHONY: alembic-revision alembic-upgrade alembic-downgrade alembic-current alembic-history alembic-stamp-production
 alembic-revision:
@@ -55,13 +55,13 @@ alembic-stamp-production:
 # Desenvolvimento local (fora do Docker)
 .PHONY: alembic-local-revision alembic-local-upgrade alembic-local-current
 alembic-local-revision:
-	DATABASE_URL="postgresql+psycopg2://postgres:postgres@localhost:5432/tm_service" \
+	DATABASE_URL="postgresql+psycopg2://postgres:postgres@localhost:5432/teaseme" \
 	poetry run alembic revision --autogenerate -m "$(MESSAGE)"
 
 alembic-local-upgrade:
-	DATABASE_URL="postgresql+psycopg2://postgres:postgres@localhost:5432/tm_service" \
+	DATABASE_URL="postgresql+psycopg2://postgres:postgres@localhost:5432/teaseme" \
 	poetry run alembic upgrade head
 
 alembic-local-current:
-	DATABASE_URL="postgresql+psycopg2://postgres:postgres@localhost:5432/tm_service" \
+	DATABASE_URL="postgresql+psycopg2://postgres:postgres@localhost:5432/teaseme" \
 	poetry run alembic current

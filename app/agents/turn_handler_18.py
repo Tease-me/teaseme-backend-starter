@@ -19,7 +19,7 @@ from langchain_core.prompts import (
     ChatPromptTemplate,
     MessagesPlaceholder,
 )
-log = logging.getLogger("tm-service-turn-18")
+log = logging.getLogger("teaseme-turn-18")
 
 _TIME_RANGE_RE = re.compile(r"^\s*(\d{1,2})\s*(AM|PM)\s*-\s*(\d{1,2})\s*(AM|PM)\s*$", re.IGNORECASE)
 
