@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel
+import uuid
 
 from app.db.session import get_db
 from app.utils.deps import get_current_user
@@ -670,6 +671,8 @@ async def purchase_addon(
     db.add(wallet)
     
     # Record add-on purchase
+    # Generate unique transaction ID using UUID to prevent race conditions
+    transaction_id = f"addon_{uuid.uuid4()}"
     addon_purchase = InfluencerSubscriptionAddonPurchase(
         subscription_id=sub.id,
         user_id=user.id,
@@ -679,7 +682,7 @@ async def purchase_addon(
         credits_granted=credits_to_add,
         currency="USD",
         provider="simulated",  # Replace with actual provider (paypal/stripe)
-        provider_transaction_id=f"addon_{addon_plan.id}_{datetime.now(timezone.utc).timestamp()}",
+        provider_transaction_id=transaction_id,
         purchased_at=datetime.now(timezone.utc),
     )
     db.add(addon_purchase)
@@ -693,7 +696,7 @@ async def purchase_addon(
         kind="addon_purchase",
         status="succeeded",
         provider="simulated",
-        provider_event_id=f"addon_{addon_plan.id}_{datetime.now(timezone.utc).timestamp()}",
+        provider_event_id=transaction_id,
         occurred_at=datetime.now(timezone.utc),
     )
     db.add(payment)
