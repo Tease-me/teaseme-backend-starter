@@ -712,7 +712,7 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
     prompt = await _generate_prompt_from_markdown(markdown, additional_prompt=None, db=db)
     
     DEFAULT_VOICE_ID = "YKG78i9n8ybMZ42crVbJ"
-    DEFAULT_PROMPT_TEMPLATE = prompt
+    DEFAULT_PROMPT_TEMPLATE = json.dumps(prompt, ensure_ascii=False)
     
     if not influencer:
         influencer = Influencer(
