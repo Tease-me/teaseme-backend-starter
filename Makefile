@@ -1,4 +1,4 @@
-.PHONY: seed-influencers seed-pricing seed-users seed-all seed-prompts
+.PHONY: seed-influencers seed-pricing seed-users seed-all seed-prompts seed-subscription-plans
 
 COMPOSE ?= docker compose
 SERVICE ?= backend
@@ -15,7 +15,10 @@ seed-users:
 seed-prompts:
 	$(COMPOSE) exec $(SERVICE) poetry run python -m app.scripts.seed_prompts
 
-seed-all: seed-influencers seed-pricing seed-users seed-prompts
+seed-subscription-plans:
+	$(COMPOSE) exec $(SERVICE) poetry run python -m app.scripts.seed_subscription_plans
+
+seed-all: seed-influencers seed-pricing seed-users seed-prompts seed-subscription-plans
 
 .PHONY: db-wipe-conversations
 db-wipe-conversations:

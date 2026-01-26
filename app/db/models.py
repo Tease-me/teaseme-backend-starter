@@ -182,6 +182,7 @@ class InfluencerWallet(Base):
         server_default="false",
     )
 
+    # Single balance for all credits (subscription + add-ons)
     balance_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     created_at: Mapped[datetime] = mapped_column(
@@ -287,6 +288,49 @@ class InfluencerFollower(Base):
     )
 
 
+class InfluencerSubscriptionPlan(Base):
+    """
+    Defines available subscription plans.
+    Examples: Basic ($99), Plus ($149), Premium ($199)
+    """
+    __tablename__ = "influencer_subscription_plans"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    plan_name: Mapped[str] = mapped_column(String, nullable=False)  # "Basic", "Plus", "Premium"
+    price_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String, nullable=False, default="USD")
+    interval: Mapped[str] = mapped_column(String, nullable=False, default="monthly")  # "monthly", "yearly", "addon"
+    plan_type: Mapped[str] = mapped_column(String, nullable=False, default="recurring")  # "recurring", "addon"
+    
+    # Plan details (JSON for flexibility)
+    features: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Example: {"credits_per_month": 14900, "priority_support": true}
+    
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    
+    # Ordering and availability
+    display_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_featured: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        Index("ix_plan_active", "is_active"),
+    )
+
+
 class InfluencerSubscription(Base):
     """
     One paid subscription per (user_id, influencer_id).
@@ -305,6 +349,12 @@ class InfluencerSubscription(Base):
     influencer_id: Mapped[str] = mapped_column(
         ForeignKey("influencers.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
+    )
+
+    plan_id: Mapped[int | None] = mapped_column(
+        ForeignKey("influencer_subscription_plans.id"),
+        nullable=True,
         index=True,
     )
 
@@ -362,6 +412,63 @@ class InfluencerSubscription(Base):
         UniqueConstraint("user_id", "influencer_id", name="uq_user_influencer_subscription"),
         Index("ix_inf_sub_user_infl", "user_id", "influencer_id"),
         Index("ix_inf_sub_status_nextpay", "status", "next_payment_at"),
+    )
+
+
+class InfluencerSubscriptionAddonPurchase(Base):
+    """
+    Tracks add-on pack purchases.
+    Records each time a user buys an add-on pack.
+    """
+    __tablename__ = "influencer_subscription_addon_purchases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    subscription_id: Mapped[int] = mapped_column(
+        ForeignKey("influencer_subscriptions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    influencer_id: Mapped[str] = mapped_column(
+        ForeignKey("influencers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    plan_id: Mapped[int] = mapped_column(
+        ForeignKey("influencer_subscription_plans.id"),
+        nullable=False,
+        index=True,
+    )
+
+    amount_paid_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    credits_granted: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String, nullable=False, default="USD")
+
+    provider: Mapped[str | None] = mapped_column(String, nullable=True)  # "paypal" | "stripe"
+    provider_transaction_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+
+    purchased_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        Index("ix_addon_purchase_user_infl", "user_id", "influencer_id", "purchased_at"),
     )
 
 
