@@ -813,6 +813,15 @@ async def get_addon_stats(
     most_common_plan_id = plan_counts.most_common(1)[0][0]
     most_common_plan = await db.get(InfluencerSubscriptionPlan, most_common_plan_id)
     
+    # Build most_purchased_addon dict only if plan exists
+    most_purchased_addon = None
+    if most_common_plan:
+        most_purchased_addon = {
+            "plan_id": most_common_plan.id,
+            "plan_name": most_common_plan.plan_name,
+            "purchase_count": plan_counts[most_common_plan_id],
+        }
+    
     last_purchase = max(purchases_list, key=lambda p: p.purchased_at)
     
     return {
@@ -821,11 +830,7 @@ async def get_addon_stats(
         "total_spent_display": f"${total_spent/100:.2f}",
         "total_credits_granted": total_credits,
         "total_credits_display": f"${total_credits/100:.2f}",
-        "most_purchased_addon": {
-            "plan_id": most_common_plan.id,
-            "plan_name": most_common_plan.plan_name,
-            "purchase_count": plan_counts[most_common_plan_id],
-        } if most_common_plan else None,
+        "most_purchased_addon": most_purchased_addon,
         "average_purchase_cents": total_spent // len(purchases_list),
         "average_purchase_display": f"${(total_spent // len(purchases_list))/100:.2f}",
         "last_purchase_at": last_purchase.purchased_at.isoformat(),
