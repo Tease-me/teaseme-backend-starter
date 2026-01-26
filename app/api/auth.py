@@ -22,6 +22,8 @@ from app.schemas.user import UserOut
 from app.utils.s3 import generate_user_presigned_url
 from app.services.follow import create_follow_if_missing
 from app.services.influencer import ensure_influencer
+from app.utils.rate_limiter import rate_limit
+
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -69,6 +71,7 @@ def _clear_auth_cookies(response: Response) -> None:
         )
 
 @router.post("/register")
+@rate_limit(max_requests=settings.RATE_LIMIT_AUTH_MAX, window_seconds=settings.RATE_LIMIT_AUTH_WINDOW, key_prefix="auth:register")
 async def register(data: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db)):
     existing_user = await db.execute(
         select(User).where((User.email == data.email))
@@ -141,7 +144,9 @@ async def confirm_email(token: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login", response_model=Token)
+@rate_limit(max_requests=settings.RATE_LIMIT_AUTH_MAX, window_seconds=settings.RATE_LIMIT_AUTH_WINDOW, key_prefix="auth:login")
 async def login(
+    request: Request,
     data: LoginRequest,
     response: Response,
     db: AsyncSession = Depends(get_db),
@@ -223,7 +228,8 @@ async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
     return {"ok": True, "message": "Email verified! You can now login."}
 
 @router.post("/resend-verification-email")
-async def resend_verification_email(email: str, db: AsyncSession = Depends(get_db)):
+@rate_limit(max_requests=3, window_seconds=300, key_prefix="auth:resend-verify")
+async def resend_verification_email(request: Request, email: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
 
@@ -245,7 +251,8 @@ async def resend_verification_email(email: str, db: AsyncSession = Depends(get_d
     }
 
 @router.post("/forgot-password")
-async def forgot_password(email: str, db: AsyncSession = Depends(get_db)):
+@rate_limit(max_requests=3, window_seconds=300, key_prefix="auth:forgot-password")
+async def forgot_password(request: Request, email: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
 
