@@ -21,6 +21,7 @@ from enum import Enum
 class PromptType(str, Enum):
     NORMAL = "normal"
     ADULT = "adult"
+    OTHERS = "others"
 
 
 class SystemPromptUpdate(BaseModel):
