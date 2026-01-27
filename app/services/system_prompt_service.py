@@ -45,9 +45,14 @@ async def update_system_prompt(
     key: str,
     new_prompt: str,
     description: Optional[str] = None,
+    name: Optional[str] = None,
+    prompt_type: Optional[str] = None,
 ) -> SystemPrompt:
     """
     Creates or updates a system prompt by key.
+    
+    Args:
+        prompt_type: One of "18+", "normal", or "adult". Defaults to "normal".
     """
     result = await db.execute(
         select(SystemPrompt).where(SystemPrompt.key == key)
@@ -59,12 +64,18 @@ async def update_system_prompt(
         row.prompt = new_prompt
         if description is not None:
             row.description = description
+        if name is not None:
+            row.name = name
+        if prompt_type is not None:
+            row.type = prompt_type
         row.updated_at = now
     else:
         row = SystemPrompt(
             key=key,
+            name=name,
             prompt=new_prompt,
             description=description,
+            type=prompt_type or "normal",
             created_at=now,
             updated_at=now,
         )
