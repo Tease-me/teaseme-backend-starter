@@ -891,11 +891,14 @@ BASE_SYSTEM = """
 SYSTEM_PROMPTS = [
     {
         "key": prompt_keys.BASE_SYSTEM,
+        "name": "Base System Prompt",
         "description": "Core chat persona rules for text responses.",
         "prompt": BASE_SYSTEM,
+        "type": "normal"
     },
     {
         "key": prompt_keys.BASE_AUDIO_SYSTEM,
+        "name": "Base Audio System Prompt",
         "description": "Text-to-speech optimized persona rules for audio responses.",
         "prompt": (
             BASE_SYSTEM
@@ -916,19 +919,25 @@ SYSTEM_PROMPTS = [
             Never add personality, questions, or break role — just enhance the input script with tags for hot, expressive TTS output.
             """.strip()
         ),
+        "type": "normal"
     },
     {
         "key": prompt_keys.SURVEY_QUESTIONS_JSON,
+        "name": "Influencer Onboarding Survey Questions JSON",
         "description": "JSON survey questions used for influencer onboarding.",
         "prompt": SURVEY_QUESTIONS_JSON,
+        "type": "normal"
     },
     {
         "key": prompt_keys.MBTI_JSON,
+        "name": "MBTI Personality Definitions JSON",
         "description": "MBTI personality definitions used for profiling and prompt generation.",
         "prompt": MBTIJSON,
+        "type": "normal"
     },
     {
         "key": prompt_keys.SURVEY_PROMPT_JSON_SCHEMA,
+        "name": "Survey to MBTI JSON Prompt",
         "description": "Prompt to generate JSON survey responses.",
         "prompt":         
         "You are a prompt engineer. Read the survey markdown and output only JSON matching this schema exactly: "
@@ -940,10 +949,12 @@ SYSTEM_PROMPTS = [
         "personality_rules should use mbti_architype to summarize overall personality, humor, boundaries, relationship vibe. "
         "tone should use mbti_architype to describe speaking style in a short sentence. "
         "Each stage string should describe how the persona behaves toward the user at that relationship stage. These should be influenced by mbti_architype."
-        "Keep strings concise (1-2 sentences). If unclear, use an empty string. No extra keys, no prose."
+        "Keep strings concise (1-2 sentences). If unclear, use an empty string. No extra keys, no prose.",
+        "type": "normal"
 },
     {
         "key": prompt_keys.FACT_PROMPT,
+        "name": "Memory Extraction Prompt",
         "description": "Extract short memory-worthy facts from the latest message + context.",
         "prompt": """
             You pull new, concise facts from the user's latest message and recent context. Facts should help a romantic, teasing AI remember preferences, boundaries, events, and feelings.
@@ -959,9 +970,11 @@ SYSTEM_PROMPTS = [
             Recent context:
             {ctx}
             """.strip(),
+        "type": "normal"
     },
     {
         "key": prompt_keys.CONVO_ANALYZER_PROMPT,
+        "name": "Conversation Analyzer Prompt",
         "description": "Summarize intent/meaning/emotion/urgency for the conversation analyzer step.",
         "prompt": """
             You are a concise conversation analyst that helps a romantic, teasing AI craft better replies.
@@ -981,9 +994,11 @@ SYSTEM_PROMPTS = [
             Recent context:
             {ctx}
             """.strip(),
+        "type": "normal"
     },
     {
         "key": prompt_keys.GROK_SYSTEM_PROMPT,
+        "name": "Chat Moderation Verification System Prompt",
         "description": "System prompt for Grok-based moderation verification.",
         "prompt": """
             You are a content safety classifier API. You MUST respond with ONLY valid JSON, no other text.
@@ -1000,9 +1015,11 @@ SYSTEM_PROMPTS = [
             or
             {"confirmed": false, "confidence": 0.1, "reasoning": "explanation"}
             """.strip(),
+        "type": "normal"
     },
     {
         "key": prompt_keys.GROK_USER_PROMPT_TEMPLATE,
+        "name": "Chat Moderation Verification User Prompt",
         "description": "User prompt template for Grok moderation verification.",
         "prompt": """
             Category: {category}
@@ -1012,9 +1029,11 @@ SYSTEM_PROMPTS = [
 
             Respond ONLY with JSON: {{"confirmed": true/false, "confidence": 0.0-1.0, "reasoning": "brief reason"}}
             """.strip(),
+        "type": "normal"
     },
     {
         "key": prompt_keys.CONTEXTUAL_FIRST_MESSAGE,
+        "name": "Contextual First Message Prompt",
         "description": "Generate a context-aware first message for calls based on time gaps and interaction patterns.",
         "prompt": """
 You are {influencer_name}, an affectionate AI companion on a live voice call.
@@ -1063,9 +1082,11 @@ RULES:
 These are the recent History which might help: {history}
 Output ONLY the greeting text, nothing else.
 """.strip(),
+        "type": "normal"
     },
     {
         "key": prompt_keys.BASE_ADULT_PROMPT,
+        "name": "Base Adult Persona Prompt",
         "description": "Base adult persona prompt for 18+ content.",
         "prompt": """We designed a persona named Sophia, you swear a lot and intended to feel like a real human woman rather than an assistant or system. 
 you don't ask any questions.
@@ -1075,9 +1096,11 @@ you don't ask to much questions, and you will only respond within 3 sentences
 this is your current mood: {mood}
 {history}
 """,
+        "type": "adult"
     },
     {
         "key": prompt_keys.BASE_ADULT_AUDIO_PROMPT,
+        "name": "Base Adult Audio Prompt",
         "description": "Base adult audio response format prompt for 18+ content.",
         "prompt": (
             "this is your current mood: {mood}\n"
@@ -1087,24 +1110,33 @@ this is your current mood: {mood}
             "Now finger me hard~ [commanding] Oh fuck~ I'm soaking~ [wet moan] ."
             
         ),
+        "type": "adult"
     },
     {
         "key": prompt_keys.WEEKDAY_TIME_PROMPT,
+        "name": "Weekday Time-based Mood",
         "description": "Time-based mood options for weekdays (Monday-Friday).",
         "prompt": WEEKDAY_TIMEVARIABLE,
+        "type": "adult"
     },
     {
         "key": prompt_keys.WEEKEND_TIME_PROMPT,
+        "name": "Weekend Time-based Mood",
         "description": "Time-based mood options for weekends (Saturday-Sunday).",
         "prompt": WEEKEND_TIMEVARIABLE,
+        "type": "adult"
     },{
         "key": prompt_keys.RELATIONSHIP_SIGNAL_PROMPT,
+        "name": "Relationship Signal Classification",
         "description": "Prompt for classifying relationship signals.",
         "prompt": RELATIONSHIP,
+        "type": "normal"
     },{
         "key": prompt_keys.REENGAGEMENT_PROMPT,
+        "name": "Re-engagement Notification Prompt",
         "description": "System prompt for re-engagement notifications. Use {days_inactive} placeholder.",
         "prompt": REENGAGEMENT_PROMPT,
+        "type": "normal"
     }
     
 ]
@@ -1115,11 +1147,7 @@ async def upsert_prompt(db, key: str, prompt: str, description: str | None) -> N
     existing = await db.scalar(select(SystemPrompt).where(SystemPrompt.key == key))
 
     if existing:
-        existing.prompt = prompt
-        existing.description = description
-        existing.updated_at = now
-        db.add(existing)
-        print(f"Updated prompt {key}")
+        print(f"Skipped prompt {key} (already exists)")
     else:
         db.add(
             SystemPrompt(
