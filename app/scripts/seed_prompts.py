@@ -926,7 +926,7 @@ SYSTEM_PROMPTS = [
         "name": "Influencer Onboarding Survey Questions JSON",
         "description": "JSON survey questions used for influencer onboarding.",
         "prompt": SURVEY_QUESTIONS_JSON,
-        "type": "normal"
+        "type": "others"
     },
     {
         "key": prompt_keys.MBTI_JSON,
@@ -1142,7 +1142,7 @@ this is your current mood: {mood}
 ]
 
 
-async def upsert_prompt(db, key: str, prompt: str, description: str | None) -> None:
+async def upsert_prompt(db, key: str, name: str, prompt: str, description: str | None, type: str) -> None:
     now = datetime.now(timezone.utc)
     existing = await db.scalar(select(SystemPrompt).where(SystemPrompt.key == key))
 
@@ -1152,19 +1152,21 @@ async def upsert_prompt(db, key: str, prompt: str, description: str | None) -> N
         db.add(
             SystemPrompt(
                 key=key,
+                name=name,
                 prompt=prompt,
+                type=type,
                 description=description,
                 created_at=now,
                 updated_at=now,
             )
         )
-        print(f"Inserted prompt {key}")
+    print(f"Inserted prompt {key}")
 
 
 async def main():
     async with SessionLocal() as db:
         for entry in SYSTEM_PROMPTS:
-            await upsert_prompt(db, entry["key"], entry["prompt"], entry.get("description"))
+            await upsert_prompt(db, entry["key"], entry["name"], entry["prompt"], entry.get("description"), entry["type"])
         await db.commit()
     print("Done.")
 
