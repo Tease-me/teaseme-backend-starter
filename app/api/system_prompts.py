@@ -19,7 +19,6 @@ from enum import Enum
 
 
 class PromptType(str, Enum):
-    EIGHTEEN_PLUS = "18+"
     NORMAL = "normal"
     ADULT = "adult"
 
