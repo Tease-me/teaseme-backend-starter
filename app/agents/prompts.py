@@ -3,6 +3,7 @@ from langchain_openai import ChatOpenAI
 from langchain_xai import ChatXAI
 from app.core.config import settings
 from app.services.system_prompt_service import get_system_prompt
+from app.constants import prompt_keys
 
 MODEL = ChatOpenAI(
     api_key=settings.OPENAI_API_KEY,
@@ -33,11 +34,10 @@ XAI_MODEL = ChatXAI(
 )
 
 async def get_fact_prompt(db) -> ChatPromptTemplate:
-    template_str = await get_system_prompt(db, "FACT_PROMPT")
+    template_str = await get_system_prompt(db, prompt_keys.FACT_PROMPT)
     return ChatPromptTemplate.from_template(template_str)
 
 
 async def get_convo_analyzer_prompt(db) -> ChatPromptTemplate:
-    template_str = await get_system_prompt(db, "CONVO_ANALYZER_PROMPT")
+    template_str = await get_system_prompt(db, prompt_keys.CONVO_ANALYZER_PROMPT)
     return ChatPromptTemplate.from_template(template_str)
-

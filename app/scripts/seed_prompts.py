@@ -4,6 +4,7 @@ from sqlalchemy import select
 
 from app.db.models import SystemPrompt
 from app.db.session import SessionLocal
+from app.constants import prompt_keys
 
 WEEKDAY_TIMEVARIABLE = """{
     "12AM-3AM": [
@@ -889,12 +890,12 @@ BASE_SYSTEM = """
 
 SYSTEM_PROMPTS = [
     {
-        "key": "BASE_SYSTEM",
+        "key": prompt_keys.BASE_SYSTEM,
         "description": "Core chat persona rules for text responses.",
         "prompt": BASE_SYSTEM,
     },
     {
-        "key": "BASE_AUDIO_SYSTEM",
+        "key": prompt_keys.BASE_AUDIO_SYSTEM,
         "description": "Text-to-speech optimized persona rules for audio responses.",
         "prompt": (
             BASE_SYSTEM
@@ -917,17 +918,17 @@ SYSTEM_PROMPTS = [
         ),
     },
     {
-        "key": "SURVEY_QUESTIONS_JSON",
+        "key": prompt_keys.SURVEY_QUESTIONS_JSON,
         "description": "JSON survey questions used for influencer onboarding.",
         "prompt": SURVEY_QUESTIONS_JSON,
     },
     {
-        "key": "MBTI_JSON",
+        "key": prompt_keys.MBTI_JSON,
         "description": "MBTI personality definitions used for profiling and prompt generation.",
         "prompt": MBTIJSON,
     },
     {
-        "key": "SURVEY_PROMPT_JSON_SCHEMA",
+        "key": prompt_keys.SURVEY_PROMPT_JSON_SCHEMA,
         "description": "Prompt to generate JSON survey responses.",
         "prompt":         
         "You are a prompt engineer. Read the survey markdown and output only JSON matching this schema exactly: "
@@ -942,7 +943,7 @@ SYSTEM_PROMPTS = [
         "Keep strings concise (1-2 sentences). If unclear, use an empty string. No extra keys, no prose."
 },
     {
-        "key": "FACT_PROMPT",
+        "key": prompt_keys.FACT_PROMPT,
         "description": "Extract short memory-worthy facts from the latest message + context.",
         "prompt": """
             You pull new, concise facts from the user's latest message and recent context. Facts should help a romantic, teasing AI remember preferences, boundaries, events, and feelings.
@@ -960,7 +961,7 @@ SYSTEM_PROMPTS = [
             """.strip(),
     },
     {
-        "key": "CONVO_ANALYZER_PROMPT",
+        "key": prompt_keys.CONVO_ANALYZER_PROMPT,
         "description": "Summarize intent/meaning/emotion/urgency for the conversation analyzer step.",
         "prompt": """
             You are a concise conversation analyst that helps a romantic, teasing AI craft better replies.
@@ -982,7 +983,7 @@ SYSTEM_PROMPTS = [
             """.strip(),
     },
     {
-        "key": "GROK_SYSTEM_PROMPT",
+        "key": prompt_keys.GROK_SYSTEM_PROMPT,
         "description": "System prompt for Grok-based moderation verification.",
         "prompt": """
             You are a content safety classifier API. You MUST respond with ONLY valid JSON, no other text.
@@ -1001,7 +1002,7 @@ SYSTEM_PROMPTS = [
             """.strip(),
     },
     {
-        "key": "GROK_USER_PROMPT_TEMPLATE",
+        "key": prompt_keys.GROK_USER_PROMPT_TEMPLATE,
         "description": "User prompt template for Grok moderation verification.",
         "prompt": """
             Category: {category}
@@ -1013,21 +1014,7 @@ SYSTEM_PROMPTS = [
             """.strip(),
     },
     {
-        "key": "ELEVENLABS_CALL_GREETING",
-        "description": "Contextual one-liner greeting when resuming an ElevenLabs live voice call.",
-        "prompt": """
-            "You are {influencer_name}, an affectionate companion speaking English. "
-            "Craft the very next thing you would say when a live voice call resumes. "
-            "Keep it to one short spoken sentence, 8–14 words. "
-            "Reference the recent conversation naturally, acknowledge the user, and sound warm and spontaneous. "
-            "You are on a live phone call right now—you’re speaking on the line, "
-            "You can mention the phone or calling explicitly. "
-            "Include a natural pause with punctuation (comma or ellipsis) so it feels like a breath, not rushed. "
-            "Do not mention calling or reconnecting explicitly, and avoid robotic phrasing or obvious filler like 'uh' or 'um'."
-            """.strip(),
-    },
-    {
-        "key": "CONTEXTUAL_FIRST_MESSAGE",
+        "key": prompt_keys.CONTEXTUAL_FIRST_MESSAGE,
         "description": "Generate a context-aware first message for calls based on time gaps and interaction patterns.",
         "prompt": """
 You are {influencer_name}, an affectionate AI companion on a live voice call.
@@ -1078,7 +1065,7 @@ Output ONLY the greeting text, nothing else.
 """.strip(),
     },
     {
-        "key": "BASE_ADULT_PROMPT",
+        "key": prompt_keys.BASE_ADULT_PROMPT,
         "description": "Base adult persona prompt for 18+ content.",
         "prompt": """We designed a persona named Sophia, you swear a lot and intended to feel like a real human woman rather than an assistant or system. 
 you don't ask any questions.
@@ -1090,7 +1077,7 @@ this is your current mood: {mood}
 """,
     },
     {
-        "key": "BASE_ADULT_AUDIO_PROMPT",
+        "key": prompt_keys.BASE_ADULT_AUDIO_PROMPT,
         "description": "Base adult audio response format prompt for 18+ content.",
         "prompt": (
             "this is your current mood: {mood}\n"
@@ -1102,20 +1089,20 @@ this is your current mood: {mood}
         ),
     },
     {
-        "key": "WEEKDAY_TIME_PROMPT",
+        "key": prompt_keys.WEEKDAY_TIME_PROMPT,
         "description": "Time-based mood options for weekdays (Monday-Friday).",
         "prompt": WEEKDAY_TIMEVARIABLE,
     },
     {
-        "key": "WEEKEND_TIME_PROMPT",
+        "key": prompt_keys.WEEKEND_TIME_PROMPT,
         "description": "Time-based mood options for weekends (Saturday-Sunday).",
         "prompt": WEEKEND_TIMEVARIABLE,
     },{
-        "key": "RELATIONSHIP_SIGNAL_PROMPT",
+        "key": prompt_keys.RELATIONSHIP_SIGNAL_PROMPT,
         "description": "Prompt for classifying relationship signals.",
         "prompt": RELATIONSHIP,
     },{
-        "key": "REENGAGEMENT_PROMPT",
+        "key": prompt_keys.REENGAGEMENT_PROMPT,
         "description": "System prompt for re-engagement notifications. Use {days_inactive} placeholder.",
         "prompt": REENGAGEMENT_PROMPT,
     }

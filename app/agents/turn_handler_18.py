@@ -15,6 +15,7 @@ from app.agents.prompt_utils import get_global_prompt, get_today_script, build_r
 from app.agents.prompts import XAI_MODEL
 from app.utils.tts_sanitizer import sanitize_tts_text
 from app.services.system_prompt_service import get_system_prompt
+from app.constants import prompt_keys
 from langchain_core.prompts import (
     ChatPromptTemplate,
     MessagesPlaceholder,
@@ -149,10 +150,10 @@ async def handle_turn_18(
 
     influencer, base_adult_prompt, base_audio_prompt, weekday_prompt, weekend_prompt, recent_ctx = await asyncio.gather(
         db.get(Influencer, influencer_id),
-        get_system_prompt(db, "BASE_ADULT_PROMPT"),
-        get_system_prompt(db, "BASE_ADULT_AUDIO_PROMPT"),
-        get_system_prompt(db, "WEEKDAY_TIME_PROMPT"),
-        get_system_prompt(db, "WEEKEND_TIME_PROMPT"),
+        get_system_prompt(db, prompt_keys.BASE_ADULT_PROMPT),
+        get_system_prompt(db, prompt_keys.BASE_ADULT_AUDIO_PROMPT),
+        get_system_prompt(db, prompt_keys.WEEKDAY_TIME_PROMPT),
+        get_system_prompt(db, prompt_keys.WEEKEND_TIME_PROMPT),
         _load_recent_ctx_18(db, chat_id, limit=12),
     )
 

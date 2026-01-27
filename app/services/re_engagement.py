@@ -19,6 +19,7 @@ from app.utils.push import send_push_rich
 from app.agents.turn_handler import handle_turn
 from app.services.chat_service import get_or_create_chat
 from app.services.system_prompt_service import get_system_prompt
+from app.constants import prompt_keys
 # from app.utils.s3 import generate_presigned_url  # - text only for now
 
 log = logging.getLogger("re_engagement")
@@ -95,7 +96,7 @@ async def generate_reengagement_via_turn_handler(
     influencer_name: str,
     days_inactive: int,
 ) -> tuple[str, str]:
-    prompt_template = await get_system_prompt(db, "REENGAGEMENT_PROMPT")
+    prompt_template = await get_system_prompt(db, prompt_keys.REENGAGEMENT_PROMPT)
     #backup can be removed later after testing
     if not prompt_template:
         prompt_template = (

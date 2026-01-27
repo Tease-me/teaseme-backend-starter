@@ -30,6 +30,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from app.db.session import SessionLocal
 from app.api.utils import get_embedding
 from app.services.system_prompt_service import get_system_prompt
+from app.constants import prompt_keys
 
 router = APIRouter(prefix="/elevenlabs", tags=["elevenlabs"])
 log = logging.getLogger(__name__)
@@ -234,7 +235,7 @@ def _extract_last_message(db_messages: List[Message], transcript: Optional[str])
 
 
 async def _get_contextual_first_message_prompt(db: AsyncSession) -> ChatPromptTemplate:
-    system_prompt = await get_system_prompt(db, "CONTEXTUAL_FIRST_MESSAGE")
+    system_prompt = await get_system_prompt(db, prompt_keys.CONTEXTUAL_FIRST_MESSAGE)
     if not system_prompt:
         system_prompt = (
             "You are {influencer_name}, an affectionate companion. "
