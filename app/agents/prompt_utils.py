@@ -1,3 +1,5 @@
+import json
+from typing import Optional
 
 from langchain_core.prompts import (
     ChatPromptTemplate,
@@ -12,6 +14,53 @@ from app.services.system_prompt_service import get_system_prompt
 
 import logging
 log = logging.getLogger("teaseme-script")
+
+
+_mbti_cache: Optional[dict] = None
+
+
+async def get_mbti_rules_for_archetype(
+    db: AsyncSession,
+    mbti_archetype: str,
+    mbti_addon: str = "",
+) -> str:
+    global _mbti_cache
+    
+    if not mbti_archetype:
+        return mbti_addon.strip() if mbti_addon else ""
+    
+    if _mbti_cache is None:
+        mbti_json_str = await get_system_prompt(db, "MBTI_JSON")
+        if mbti_json_str:
+            try:
+                _mbti_cache = json.loads(mbti_json_str)
+            except json.JSONDecodeError as exc:
+                log.warning("Failed to parse MBTI_JSON: %s", exc)
+                _mbti_cache = {}
+        else:
+            log.warning("MBTI_JSON system prompt not found")
+            _mbti_cache = {}
+    
+    base_rules = ""
+    personalities = _mbti_cache.get("personalities", [])
+    archetype_upper = mbti_archetype.strip().upper()
+    
+    for personality in personalities:
+        if personality.get("code", "").upper() == archetype_upper:
+            name = personality.get("name", "")
+            rules_list = personality.get("rules", [])
+            if rules_list:
+                rules_str = "\n".join(f"- {rule}" for rule in rules_list)
+                base_rules = f"**{archetype_upper} - {name}**\n{rules_str}"
+            break
+    
+    parts = []
+    if base_rules:
+        parts.append(base_rules)
+    if mbti_addon and mbti_addon.strip():
+        parts.append(f"\n**Additional personality notes:**\n{mbti_addon.strip()}")
+    
+    return "\n".join(parts)
 
 async def get_base_system(db: AsyncSession, isAudio: bool) -> str:
     base = await get_system_prompt(db, "BASE_SYSTEM")

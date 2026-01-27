@@ -3,7 +3,7 @@ import logging
 import math
 import random
 from uuid import uuid4
-from app.agents.prompt_utils import build_relationship_prompt, get_global_prompt
+from app.agents.prompt_utils import build_relationship_prompt, get_global_prompt, get_mbti_rules_for_archetype
 from app.relationship.dtr import plan_dtr_goal
 from app.relationship.inactivity import apply_inactivity_decay
 from app.relationship.repo import get_or_create_relationship
@@ -1144,7 +1144,8 @@ async def get_conversation_token(
     stages = bio.get("stages", {})
     if not isinstance(stages, dict):
         stages = {}
-    mbti_rules = bio.get("mbti_rules", "")
+    mbti_archetype = bio.get("mbti_architype", "")  
+    mbti_rules = await get_mbti_rules_for_archetype(db, mbti_archetype, mbti_addon)
     personality_rules = bio.get("personality_rules", "")
     tone = bio.get("tone", "")
 
