@@ -36,8 +36,3 @@ XAI_MODEL = ChatXAI(
 async def get_fact_prompt(db) -> ChatPromptTemplate:
     template_str = await get_system_prompt(db, prompt_keys.FACT_PROMPT)
     return ChatPromptTemplate.from_template(template_str)
-
-
-async def get_convo_analyzer_prompt(db) -> ChatPromptTemplate:
-    template_str = await get_system_prompt(db, prompt_keys.CONVO_ANALYZER_PROMPT)
-    return ChatPromptTemplate.from_template(template_str)

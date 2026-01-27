@@ -973,30 +973,6 @@ SYSTEM_PROMPTS = [
         "type": "normal"
     },
     {
-        "key": prompt_keys.CONVO_ANALYZER_PROMPT,
-        "name": "Conversation Analyzer Prompt",
-        "description": "Summarize intent/meaning/emotion/urgency for the conversation analyzer step.",
-        "prompt": """
-            You are a concise conversation analyst that helps a romantic, teasing AI craft better replies.
-            Using the latest user message and short recent context, summarize the following (short phrases, no bullet noise):
-            - Intent: what the user wants or is trying to do.
-            - Meaning: key facts/requests implied or stated.
-            - Emotion: the user's emotional state and tone (e.g., flirty, frustrated, sad, excited).
-            - Urgency/Risk: any urgency, boundaries, or safety concerns.
-\            Format exactly as:
-            Intent: ...
-            Meaning: ...
-            Emotion: ...
-            Urgency/Risk: ...
-            Keep it under 70 words. Do not address the user directly. If something is unknown, say "unknown".
-
-            User message: {msg}
-            Recent context:
-            {ctx}
-            """.strip(),
-        "type": "normal"
-    },
-    {
         "key": prompt_keys.GROK_SYSTEM_PROMPT,
         "name": "Chat Moderation Verification System Prompt",
         "description": "System prompt for Grok-based moderation verification.",
@@ -1138,7 +1114,6 @@ this is your current mood: {mood}
         "prompt": REENGAGEMENT_PROMPT,
         "type": "normal"
     }
-    
 ]
 
 
