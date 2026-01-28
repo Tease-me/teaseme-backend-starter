@@ -1133,10 +1133,10 @@ async def get_conversation_token(
     stages = bio.get("stages", {})
     if not isinstance(stages, dict):
         stages = {}
-    personality_rules = bio.get("personality_rules", "")
-    tone = bio.get("tone", "")
-    mbti_rules = bio.get("mbti_rules", "")
-    persona_rules = influencer.prompt_template or ""
+    # personality_rules = bio.get("personality_rules", "")
+    # tone = bio.get("tone", "")
+    # mbti_rules = bio.get("mbti_rules", "")
+    # persona_rules = influencer.prompt_template or ""
 
     history = redis_history(chat_id)
 
@@ -1162,8 +1162,8 @@ async def get_conversation_token(
     prompt = build_relationship_prompt(
         prompt_template,
         rel=rel,
-        days_idle=days_idle,
-        dtr_goal=dtr_goal,
+        # days_idle=days_idle,
+        # dtr_goal=dtr_goal,
         # personality_rules=personality_rules,
         # stages=stages,
         persona_likes=persona_likes,
@@ -1174,10 +1174,10 @@ async def get_conversation_token(
         # tone=tone,
         analysis="",
         # persona_rules=persona_rules,
+        influencer_name=influencer.display_name,
     )
     
-    hist_msgs = history.messages
-    log_prompt(log, prompt, cid="", input="", history=hist_msgs)
+    log_prompt(log, prompt, cid="", input="")
 
     try:
         async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
@@ -1217,7 +1217,7 @@ async def get_conversation_token(
         "agent_id": agent_id, 
         "credits_remainder_secs": credits_remainder_secs, 
         "greeting_used": greeting,
-        "prompt": prompt.format(input="", history=history.messages),
+        "prompt": prompt.format(input=""),
         "native_language": influencer.native_language if influencer else "en",
     }
 

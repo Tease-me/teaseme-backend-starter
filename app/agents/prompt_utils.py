@@ -167,19 +167,6 @@ async def get_global_prompt(
     return ChatPromptTemplate.from_messages(
         [
             ("system", system_prompt),
-            (
-                "system",
-                "Your current mood/vibe: {mood}"
-            ),
-            (
-                "system",
-                "These past memories may help:\n{memories}\n"
-                "If you see the user's preferred name here, use it *occasionally and naturally, only when it fits the conversation or for affection*. Don't overuse the name.\n"
-                "Here is the user's latest message for your reference only:\n"
-                "\"{last_user_message}\"\n"
-                "If the user changed topic, you do NOT need to talk about this. Use only if it makes the reply feel natural."
-            ),
-            MessagesPlaceholder("history"),
             ("user", "{input}"),
         ]
     )
@@ -188,8 +175,8 @@ async def get_global_prompt(
 def build_relationship_prompt(
     prompt_template: ChatPromptTemplate,
     rel,
-    days_idle: float,
-    dtr_goal: str,
+    # days_idle: float,
+    # dtr_goal: str,
     # personality_rules: str = "",
     # stages: dict | None = None,
     persona_likes: list[str] | None = None,
@@ -201,19 +188,21 @@ def build_relationship_prompt(
 #     tone: str = "",
     mood: str = "",
     analysis: str | None = None,
+    influencer_name: str = "",
 ):
     # stages = stages or {}
 
     partial_vars = {
         "relationship_state": rel.state,
-        "trust": int(rel.trust or 0),
-        "closeness": int(rel.closeness or 0),
-        "attraction": int(rel.attraction or 0),
-        "safety": int(rel.safety or 0),
-        "exclusive_agreed": bool(rel.exclusive_agreed),
-        "girlfriend_confirmed": bool(rel.girlfriend_confirmed),
-        "days_idle_before_message": round(float(days_idle or 0.0), 1),
-        "dtr_goal": dtr_goal,
+        "influencer_name": influencer_name,
+        # "trust": int(rel.trust or 0),
+        # "closeness": int(rel.closeness or 0),
+        # "attraction": int(rel.attraction or 0),
+        # "safety": int(rel.safety or 0),
+        # "exclusive_agreed": bool(rel.exclusive_agreed),
+        # "girlfriend_confirmed": bool(rel.girlfriend_confirmed),
+        # "days_idle_before_message": round(float(days_idle or 0.0), 1),
+        # "dtr_goal": dtr_goal,
         # "personality_rules": personality_rules,
         # "dating_stage": stages.get("dating", ""),
         # "dislike_stage": stages.get("dislike", ""),
