@@ -15,9 +15,20 @@ from app.services.system_prompt_service import (
 router = APIRouter(prefix="/admin/system-prompts", tags=["system-prompts"])
 
 
+from enum import Enum
+
+
+class PromptType(str, Enum):
+    NORMAL = "normal"
+    ADULT = "adult"
+    OTHERS = "others"
+
+
 class SystemPromptUpdate(BaseModel):
     prompt: str
     description: Optional[str] = None
+    name: Optional[str] = None
+    type: Optional[PromptType] = None
 
 
 @router.get("/", response_model=List[dict])
@@ -29,7 +40,9 @@ async def list_prompts(
     return [
         {
             "key": r.key,
+            "name": r.name,
             "description": r.description,
+            "type": r.type,
             "updated_at": r.updated_at,
         }
         for r in rows
@@ -60,9 +73,13 @@ async def upsert_prompt(
         key=key,
         new_prompt=body.prompt,
         description=body.description,
+        name=body.name,
+        prompt_type=body.type.value if body.type else None,
     )
     return {
         "key": row.key,
+        "name": row.name,
         "description": row.description,
+        "type": row.type,
         "updated_at": row.updated_at,
     }

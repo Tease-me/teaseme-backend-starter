@@ -3,7 +3,7 @@ import logging
 import math
 import random
 from uuid import uuid4
-from app.agents.prompt_utils import build_relationship_prompt, get_global_prompt
+from app.agents.prompt_utils import build_relationship_prompt, get_global_prompt, get_mbti_rules_for_archetype
 from app.relationship.dtr import plan_dtr_goal
 from app.relationship.inactivity import apply_inactivity_decay
 from app.relationship.repo import get_or_create_relationship
@@ -25,11 +25,13 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.services.billing import can_afford, get_remaining_units
 from app.services.chat_service import get_or_create_chat
 from app.agents.turn_handler import redis_history
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from app.db.session import SessionLocal
 from app.api.utils import get_embedding
 from app.services.system_prompt_service import get_system_prompt
+from app.constants import prompt_keys
+from app.agents.prompts import GREETING_GENERATOR
+from app.utils.prompt_logging import log_prompt
 
 router = APIRouter(prefix="/elevenlabs", tags=["elevenlabs"])
 log = logging.getLogger(__name__)
@@ -100,19 +102,6 @@ def _pick_greeting(influencer_id: str, mode: str) -> str:
         _rr_index[influencer_id] = i
         return _add_natural_pause(options[i])
     return _add_natural_pause(random.choice(options))
-
-
-try:
-    GREETING_GENERATOR: Optional[ChatOpenAI] = ChatOpenAI(
-        api_key=settings.OPENAI_API_KEY,
-        model="gpt-4.1",
-        temperature=0.7,
-        max_tokens=120,
-    )
-except Exception as exc: 
-    GREETING_GENERATOR = None
-    log.warning("Contextual greeting generator disabled: %s", exc)
-
 
 
 def _format_history(messages: List[Message]) -> str:
@@ -234,7 +223,7 @@ def _extract_last_message(db_messages: List[Message], transcript: Optional[str])
 
 
 async def _get_contextual_first_message_prompt(db: AsyncSession) -> ChatPromptTemplate:
-    system_prompt = await get_system_prompt(db, "CONTEXTUAL_FIRST_MESSAGE")
+    system_prompt = await get_system_prompt(db, prompt_keys.CONTEXTUAL_FIRST_MESSAGE)
     if not system_prompt:
         system_prompt = (
             "You are {influencer_name}, an affectionate companion. "
@@ -1133,7 +1122,7 @@ async def get_conversation_token(
 
     if not influencer:
         raise HTTPException(404, "Influencer not found")
-    persona_rules = influencer.prompt_template
+    
     bio = influencer.bio_json or {}
     persona_likes = bio.get("likes", [])
     persona_dislikes = bio.get("dislikes", [])
@@ -1144,9 +1133,10 @@ async def get_conversation_token(
     stages = bio.get("stages", {})
     if not isinstance(stages, dict):
         stages = {}
-    mbti_rules = bio.get("mbti_rules", "")
-    personality_rules = bio.get("personality_rules", "")
-    tone = bio.get("tone", "")
+    # personality_rules = bio.get("personality_rules", "")
+    # tone = bio.get("tone", "")
+    # mbti_rules = bio.get("mbti_rules", "")
+    # persona_rules = influencer.prompt_template or ""
 
     history = redis_history(chat_id)
 
@@ -1172,28 +1162,22 @@ async def get_conversation_token(
     prompt = build_relationship_prompt(
         prompt_template,
         rel=rel,
-        days_idle=days_idle,
-        dtr_goal=dtr_goal,
-        personality_rules=personality_rules,
-        stages=stages,
+        # days_idle=days_idle,
+        # dtr_goal=dtr_goal,
+        # personality_rules=personality_rules,
+        # stages=stages,
         persona_likes=persona_likes,
         persona_dislikes=persona_dislikes,
-        mbti_rules=mbti_rules,
+        # mbti_rules=mbti_rules,
         memories="",
-        daily_context="",
         last_user_message="",
-        tone=tone,
-        persona_rules=persona_rules,
+        # tone=tone,
         analysis="",
+        # persona_rules=persona_rules,
+        influencer_name=influencer.display_name,
     )
     
-    try:
-        hist_msgs = history.messages
-        rendered = prompt.format_prompt(input="", history=hist_msgs)
-        full_prompt_text = rendered.to_string()
-        log.info("[%s] ==== FULL PROMPT ====\n%s", "", full_prompt_text)
-    except Exception as log_ex:
-        log.info("[%s] Prompt logging failed: %s", "", log_ex)
+    log_prompt(log, prompt, cid="", input="")
 
     try:
         async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
@@ -1233,7 +1217,7 @@ async def get_conversation_token(
         "agent_id": agent_id, 
         "credits_remainder_secs": credits_remainder_secs, 
         "greeting_used": greeting,
-        "prompt": prompt.format(input="", history=history.messages),
+        "prompt": prompt.format(input=""),
         "native_language": influencer.native_language if influencer else "en",
     }
 
