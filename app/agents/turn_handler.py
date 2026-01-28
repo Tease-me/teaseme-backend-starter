@@ -16,7 +16,6 @@ from app.agents.prompt_utils import (
     get_global_prompt,
     get_today_script,
     build_relationship_prompt,
-    get_mbti_rules_for_archetype,
     pick_time_mood,
 )
 from app.db.models import Influencer
@@ -105,13 +104,13 @@ async def handle_turn(
 
     recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
 
-    influencer, prompt_template, daily_context, weekday_prompt, weekend_prompt = await asyncio.gather(
+    influencer, prompt_template, weekday_prompt, weekend_prompt = await asyncio.gather(
         db.get(Influencer, influencer_id),
         get_global_prompt(db, is_audio),
-        get_today_script(db=db, influencer_id=influencer_id),
         get_system_prompt(db, prompt_keys.WEEKDAY_TIME_PROMPT),
         get_system_prompt(db, prompt_keys.WEEKEND_TIME_PROMPT),
     )
+    
     mood = pick_time_mood(weekday_prompt, weekend_prompt, user_timezone)
 
     if not influencer:
@@ -149,9 +148,9 @@ async def handle_turn(
     # personality_rules = bio.get("personality_rules", "")
     # tone = bio.get("tone", "")
 
-    stages = bio.get("stages", {})
-    if not isinstance(stages, dict):
-        stages = {}
+    # stages = bio.get("stages", {})
+    # if not isinstance(stages, dict):
+    #     stages = {}
 
     prompt = build_relationship_prompt(
         prompt_template,
