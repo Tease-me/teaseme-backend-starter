@@ -166,6 +166,7 @@ async def handle_turn(
         daily_context=daily_context,
         last_user_message=message,
         tone=tone,
+        mood=mood,
         persona_rules=getattr(influencer, "prompt_template", "") or "",
     )
 
