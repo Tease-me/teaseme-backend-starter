@@ -1181,12 +1181,10 @@ async def get_conversation_token(
         stages=stages,
         persona_likes=persona_likes,
         persona_dislikes=persona_dislikes,
-        mbti_rules=mbti_rules,
+        # mbti_rules=mbti_rules,
         memories="",
-        daily_context="",
         last_user_message="",
         tone=tone,
-        persona_rules=persona_rules,
         analysis="",
     )
     

@@ -11,15 +11,12 @@ from datetime import datetime, timezone
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 
 from app.db.models import Influencer, Message18
-from app.agents.prompt_utils import get_global_prompt, get_today_script, build_relationship_prompt
 from app.agents.prompts import XAI_MODEL
 from app.utils.tts_sanitizer import sanitize_tts_text
 from app.services.system_prompt_service import get_system_prompt
 from app.constants import prompt_keys
-from langchain_core.prompts import (
-    ChatPromptTemplate,
-    MessagesPlaceholder,
-)
+from langchain_core.prompts import (ChatPromptTemplate)
+
 log = logging.getLogger("teaseme-turn-18")
 
 _TIME_RANGE_RE = re.compile(r"^\s*(\d{1,2})\s*(AM|PM)\s*-\s*(\d{1,2})\s*(AM|PM)\s*$", re.IGNORECASE)

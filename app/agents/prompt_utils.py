@@ -79,10 +79,10 @@ async def get_global_prompt(
     return ChatPromptTemplate.from_messages(
         [
             ("system", system_prompt),
-            (
-                "system",
-                "Today’s inspiration for you (use ONLY if it fits the current conversation, otherwise ignore): {daily_context}"
-            ),
+            # (
+            #     "system",
+            #     "Today’s inspiration for you (use ONLY if it fits the current conversation, otherwise ignore): {daily_context}"
+            # ),
             (
                 "system",
                 "These past memories may help:\n{memories}\n"
@@ -98,20 +98,18 @@ async def get_global_prompt(
 
 def build_relationship_prompt(
     prompt_template: ChatPromptTemplate,
-    *,
     rel,
     days_idle: float,
     dtr_goal: str,
-    personality_rules: str = "",
-    stages: dict | None = None,
+    # personality_rules: str = "",
+    # stages: dict | None = None,
     persona_likes: list[str] | None = None,
     persona_dislikes: list[str] | None = None,
-    mbti_rules: str = "",
+    # mbti_rules: str = "",
     memories: str = "",
-    daily_context: str = "",
+    # daily_context: str = "",
     last_user_message: str = "",
-    tone: str = "",
-    persona_rules: str | None = None,
+    # tone: str = "",
     analysis: str | None = None,
 ):
     stages = stages or {}
@@ -126,7 +124,7 @@ def build_relationship_prompt(
         "girlfriend_confirmed": bool(rel.girlfriend_confirmed),
         "days_idle_before_message": round(float(days_idle or 0.0), 1),
         "dtr_goal": dtr_goal,
-        "personality_rules": personality_rules,
+        # "personality_rules": personality_rules,
         "dating_stage": stages.get("dating", ""),
         "dislike_stage": stages.get("dislike", ""),
         "talking_stage": stages.get("talking", ""),
@@ -136,15 +134,15 @@ def build_relationship_prompt(
         "in_love_stage": stages.get("in_love", ""),
         "likes": ", ".join(map(str, persona_likes or [])),
         "dislikes": ", ".join(map(str, persona_dislikes or [])),
-        "mbti_rules": mbti_rules,
+        # "mbti_rules": mbti_rules,
         "memories": memories,
-        "daily_context": daily_context,
+        # "daily_context": daily_context,
         "last_user_message": last_user_message,
-        "tone": tone,
+        # "tone": tone,
     }
 
-    if persona_rules is not None:
-        partial_vars["persona_rules"] = persona_rules
+    # if persona_rules is not None:
+    #     partial_vars["persona_rules"] = persona_rules
     if analysis is not None:
         partial_vars["analysis"] = analysis
 
