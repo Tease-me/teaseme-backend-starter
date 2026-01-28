@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.agents.memory import find_similar_memories, store_fact
 from app.agents.prompts import MODEL, FACT_EXTRACTOR, CONVO_ANALYZER, get_fact_prompt
 from app.db.session import SessionLocal
-from app.agents.prompt_utils import get_global_prompt, get_today_script, build_relationship_prompt
+from app.agents.prompt_utils import get_global_prompt, get_today_script, build_relationship_prompt, get_mbti_rules_for_archetype
 from app.db.models import Influencer
 from app.utils.tts_sanitizer import sanitize_tts_text
 
@@ -130,7 +130,9 @@ async def handle_turn(
     mem_block = "\n".join(s for s in (_norm(m) for m in memories or []) if s)
 
     bio = influencer.bio_json or {}
-    mbti_rules = bio.get("mbti_rules", "")
+    mbti_archetype = bio.get("mbti_architype", "")  
+    mbti_addon = bio.get("mbti_rules", "")  
+    mbti_rules = await get_mbti_rules_for_archetype(db, mbti_archetype, mbti_addon)
     personality_rules = bio.get("personality_rules", "")
     tone = bio.get("tone", "")
 

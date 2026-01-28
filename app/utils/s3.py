@@ -5,6 +5,9 @@ import json
 import logging
 import botocore.exceptions
 
+from PIL import Image
+import pillow_heif
+
 from app.core.config import settings
 from app.schemas.chat import MessageSchema
 
@@ -148,12 +151,48 @@ def generate_presigned_urls_for_keys(keys: list[str], expires: int = 3600) -> li
 def _influencer_key(influencer_id: str, suffix: str) -> str:
     return f"{settings.INFLUENCER_PREFIX}/{influencer_id}/{suffix}"
 
+def _is_heic(filename: str | None, content_type: str | None) -> bool:
+    """Check if the file is HEIC/HEIF format."""
+    ext = (filename.rsplit(".", 1)[-1] if filename and "." in filename else "").lower()
+    if ext in {"heic", "heif"}:
+        return True
+    if content_type:
+        ct = content_type.lower().split(";", 1)[0].strip()
+        if ct in {"image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence"}:
+            return True
+    return False
+
+
+def _convert_heic_to_jpeg(file_obj, filename: str | None, content_type: str | None) -> tuple[io.BytesIO, str, str]:
+    if not _is_heic(filename, content_type):
+        return file_obj, content_type or "image/jpeg", _normalize_image_ext(filename, content_type)
+
+    file_obj.seek(0)
+    heif_file = pillow_heif.read_heif(file_obj)
+    image = Image.frombytes(
+        heif_file.mode,
+        heif_file.size,
+        heif_file.data,
+        "raw",
+    )
+
+    if image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info):
+        image = image.convert("RGB")
+
+    output = io.BytesIO()
+    image.save(output, format="JPEG", quality=92)
+    output.seek(0)
+
+    log.info("Converted HEIC to JPEG: original=%s", filename)
+    return output, "image/jpeg", "jpg"
+
+
 def _normalize_image_ext(filename: str | None, content_type: str | None) -> str:
     ext = (filename.rsplit(".", 1)[-1] if filename and "." in filename else "").lower()
     if ext == "jpeg":
         return "jpg"
-    if ext in {"jpg", "png", "webp"}:
-        return ext
+    if ext in {"jpg", "png", "webp", "heic", "heif"}:
+        return ext if ext not in {"heic", "heif"} else "jpg"
 
     if content_type:
         ct = content_type.lower().split(";", 1)[0].strip()
@@ -163,14 +202,17 @@ def _normalize_image_ext(filename: str | None, content_type: str | None) -> str:
             return "png"
         if ct == "image/webp":
             return "webp"
+        if ct in {"image/heic", "image/heif"}:
+            return "jpg" 
 
     return "jpg"
 
 async def save_influencer_photo_to_s3(file_obj, filename: str | None, content_type: str, influencer_id: str) -> str:
-    ext = _normalize_image_ext(filename, content_type)
+    converted_file, final_content_type, ext = _convert_heic_to_jpeg(file_obj, filename, content_type)
+    
     key = _influencer_key(influencer_id, f"profile.{ext}")
-    file_obj.seek(0)
-    s3.upload_fileobj(file_obj, settings.BUCKET_NAME, key, ExtraArgs={"ContentType": content_type})
+    converted_file.seek(0)
+    s3.upload_fileobj(converted_file, settings.BUCKET_NAME, key, ExtraArgs={"ContentType": final_content_type})
     return key
 
 async def save_influencer_video_to_s3(file_obj, filename: str | None, content_type: str, influencer_id: str) -> str:
