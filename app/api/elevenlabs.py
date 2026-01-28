@@ -25,12 +25,12 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.services.billing import can_afford, get_remaining_units
 from app.services.chat_service import get_or_create_chat
 from app.agents.turn_handler import redis_history
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from app.db.session import SessionLocal
 from app.api.utils import get_embedding
 from app.services.system_prompt_service import get_system_prompt
 from app.constants import prompt_keys
+from app.agents.prompts import GREETING_GENERATOR
 from app.utils.prompt_logging import log_prompt
 
 router = APIRouter(prefix="/elevenlabs", tags=["elevenlabs"])
@@ -102,19 +102,6 @@ def _pick_greeting(influencer_id: str, mode: str) -> str:
         _rr_index[influencer_id] = i
         return _add_natural_pause(options[i])
     return _add_natural_pause(random.choice(options))
-
-
-try:
-    GREETING_GENERATOR: Optional[ChatOpenAI] = ChatOpenAI(
-        api_key=settings.OPENAI_API_KEY,
-        model="gpt-4.1",
-        temperature=0.7,
-        max_tokens=120,
-    )
-except Exception as exc: 
-    GREETING_GENERATOR = None
-    log.warning("Contextual greeting generator disabled: %s", exc)
-
 
 
 def _format_history(messages: List[Message]) -> str:

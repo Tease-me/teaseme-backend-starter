@@ -20,7 +20,7 @@ from fastapi import (
     Response,
     status
 )
-from langchain_openai import ChatOpenAI
+from app.agents.prompts import SURVEY_SUMMARIZER
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
 from app.services.system_prompt_service import get_system_prompt
@@ -57,13 +57,6 @@ from app.services.firstpromoter import (
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/pre-influencers", tags=["pre-influencers"])
 SURVEY_QUESTIONS_PATH = Path(__file__).resolve().parent.parent / "raw" / "survey-questions.json"
-SURVEY_SUMMARIZER = ChatOpenAI(
-    api_key=settings.OPENAI_API_KEY,
-    model="gpt-4o",
-    temperature=1,
-)
-
-
 @lru_cache(maxsize=1)
 async def _load_survey_questions(db: AsyncSession):
     raw = await get_system_prompt(db, prompt_keys.SURVEY_QUESTIONS_JSON)
