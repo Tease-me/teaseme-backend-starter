@@ -3,12 +3,11 @@ import json
 from dataclasses import dataclass
 from typing import Optional
 
-from langchain_xai import ChatXAI
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from app.core.config import settings
 from app.services.system_prompt_service import get_system_prompt
 from app.constants import prompt_keys
+from app.agents.prompts import get_grok_model
 
 log = logging.getLogger("moderation.grok")
 
@@ -50,15 +49,6 @@ def parse_grok_response(content: str) -> Optional[dict]:
         pass
     
     return None
-
-
-def get_grok_model():
-    return ChatXAI(
-        xai_api_key=settings.XAI_API_KEY,
-        model="grok-4-1-fast-reasoning",
-        temperature=0.0,
-        max_tokens=150,
-    )
 
 
 async def verify_with_grok(

@@ -5,20 +5,11 @@ import logging
 from typing import Tuple
 
 from fastapi import HTTPException
-from langchain_openai import ChatOpenAI
-
-from app.core.config import settings
+from app.agents.prompts import OPENAI_ASSISTANT_LLM, DEFAULT_AGENT_MODEL as PROMPTS_DEFAULT_AGENT_MODEL
 
 log = logging.getLogger("openai.assistants")
 
-DEFAULT_AGENT_MODEL = "gpt-4.1"
-
-_chat_llm = ChatOpenAI(
-    api_key=settings.OPENAI_API_KEY,
-    model=DEFAULT_AGENT_MODEL,
-    temperature=0.7,
-    max_tokens=400,
-)
+DEFAULT_AGENT_MODEL = PROMPTS_DEFAULT_AGENT_MODEL
 
 
 async def upsert_influencer_agent(
@@ -49,7 +40,7 @@ async def send_agent_message(
     messages.append({"role": "user", "content": message})
 
     try:
-        resp = await _chat_llm.ainvoke(messages)
+        resp = await OPENAI_ASSISTANT_LLM.ainvoke(messages)
         reply_text = getattr(resp, "content", "") or ""
     except Exception as exc:
         log.error("Chat completion failed: %s", exc, exc_info=True)
