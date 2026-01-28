@@ -165,6 +165,7 @@ async def handle_turn(
         memories=mem_block,
         # daily_context=daily_context,
         last_user_message=message,
+        mood=mood,
         # tone=tone,
     )
 

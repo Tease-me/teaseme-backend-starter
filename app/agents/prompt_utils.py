@@ -167,15 +167,15 @@ async def get_global_prompt(
     return ChatPromptTemplate.from_messages(
         [
             ("system", system_prompt),
-            # (
-            #     "system",
-            #     "Today’s inspiration for you (use ONLY if it fits the current conversation, otherwise ignore): {daily_context}"
-            # ),
+            (
+                "system",
+                "Your current mood/vibe: {mood}"
+            ),
             (
                 "system",
                 "These past memories may help:\n{memories}\n"
-                "If you see the user’s preferred name here, use it *occasionally and naturally, only when it fits the conversation or for affection*. Don’t overuse the name.\n"
-                "Here is the user’s latest message for your reference only:\n"
+                "If you see the user's preferred name here, use it *occasionally and naturally, only when it fits the conversation or for affection*. Don't overuse the name.\n"
+                "Here is the user's latest message for your reference only:\n"
                 "\"{last_user_message}\"\n"
                 "If the user changed topic, you do NOT need to talk about this. Use only if it makes the reply feel natural."
             ),
@@ -183,6 +183,7 @@ async def get_global_prompt(
             ("user", "{input}"),
         ]
     )
+
 
 def build_relationship_prompt(
     prompt_template: ChatPromptTemplate,
@@ -197,7 +198,8 @@ def build_relationship_prompt(
     memories: str = "",
     # daily_context: str = "",
     last_user_message: str = "",
-    # tone: str = "",
+#     tone: str = "",
+    mood: str = "",
     analysis: str | None = None,
 ):
     # stages = stages or {}
@@ -226,7 +228,8 @@ def build_relationship_prompt(
         "memories": memories,
         # "daily_context": daily_context,
         "last_user_message": last_user_message,
-        # "tone": tone,
+#         "tone": tone,
+        "mood": mood,
     }
 
     # if persona_rules is not None:
