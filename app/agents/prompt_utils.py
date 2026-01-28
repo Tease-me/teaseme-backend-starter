@@ -173,10 +173,6 @@ async def get_global_prompt(
             ),
             (
                 "system",
-                "Today's inspiration for you (use ONLY if it fits the current conversation, otherwise ignore): {daily_context}"
-            ),
-            (
-                "system",
                 "These past memories may help:\n{memories}\n"
                 "If you see the user's preferred name here, use it *occasionally and naturally, only when it fits the conversation or for affection*. Don't overuse the name.\n"
                 "Here is the user's latest message for your reference only:\n"
@@ -204,7 +200,6 @@ def build_relationship_prompt(
     last_user_message: str = "",
 #     tone: str = "",
     mood: str = "",
-    persona_rules: str | None = None,
     analysis: str | None = None,
 ):
     # stages = stages or {}
