@@ -130,9 +130,9 @@ async def handle_turn(
     mem_block = "\n".join(s for s in (_norm(m) for m in memories or []) if s)
 
     bio = influencer.bio_json or {}
-    # mbti_archetype = bio.get("mbti_architype", "")  
-    # mbti_addon = bio.get("mbti_rules", "")  
-    # mbti_rules = await get_mbti_rules_for_archetype(db, mbti_archetype, mbti_addon)
+    mbti_archetype = bio.get("mbti_architype", "")  
+    mbti_addon = bio.get("mbti_rules", "")  
+    mbti_rules = await get_mbti_rules_for_archetype(db, mbti_archetype, mbti_addon)
     personality_rules = bio.get("personality_rules", "")
     tone = bio.get("tone", "")
 
@@ -149,7 +149,7 @@ async def handle_turn(
         stages=stages,
         persona_likes=persona_likes,
         persona_dislikes=persona_dislikes,
-        # mbti_rules=mbti_rules,
+        mbti_rules=mbti_rules,
         memories=mem_block,
         daily_context=daily_context,
         last_user_message=message,
