@@ -56,6 +56,64 @@ from app.services.firstpromoter import (
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/pre-influencers", tags=["pre-influencers"])
+
+def normalize_influencer_id(username: str) -> str:
+    return re.sub(r"[^a-z0-9_]", "", username.lower())
+
+@router.get("/check-ig/{instagram_username}")
+async def check_instagram_exists(
+    instagram_username: str,
+    db: AsyncSession = Depends(get_db),
+):
+    search_term = instagram_username.strip().lstrip("@")
+    
+    result = await db.execute(
+        select(PreInfluencer).where(
+            PreInfluencer.username.ilike(search_term)
+        )
+    )
+    all_matches = result.scalars().all()
+
+    normalized_id = normalize_influencer_id(search_term)
+    existing_influencer = await db.get(Influencer, normalized_id)
+
+    if existing_influencer:
+        return {
+            "exists": True,
+            "instagram_username": existing_influencer.display_name, 
+            "pre_influencer_id": all_matches[0].id if all_matches else None,
+            "status": "approved",
+            "is_approved": True,
+            "has_influencer_profile": True,
+            "display_name": existing_influencer.display_name,
+            "message": "This influencer is active in our system.",
+        }
+
+    if not all_matches:
+        return {
+            "exists": False,
+            "instagram_username": search_term,
+            "message": "This influencer is not in our system yet.",
+        }
+
+    best_match = sorted(
+        all_matches, 
+        key=lambda x: (1 if x.status == "approved" else 0, x.created_at), 
+        reverse=True
+    )[0]
+
+    return {
+        "exists": True,
+        "instagram_username": best_match.username,
+        "pre_influencer_id": best_match.id,
+        "status": best_match.status,
+        "is_approved": best_match.status == "approved",
+        "has_influencer_profile": False,
+        "display_name": best_match.full_name,
+        "message": f"This influencer is in our system with status: {best_match.status}",
+    }
+
+
 SURVEY_QUESTIONS_PATH = Path(__file__).resolve().parent.parent / "raw" / "survey-questions.json"
 @lru_cache(maxsize=1)
 async def _load_survey_questions(db: AsyncSession):
@@ -671,8 +729,6 @@ async def list_pre_influencers(status: str | None = None, db: AsyncSession = Dep
     rows = (await db.execute(q)).scalars().all()
     return [_pre_influencer_with_profile_picture_url(r) for r in rows]
 
-def normalize_influencer_id(username: str) -> str:
-    return re.sub(r"[^a-z0-9_]", "", username.lower())
 
 @router.get("/{pre_id}")
 async def get_pre_influencer(
