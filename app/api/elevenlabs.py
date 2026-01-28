@@ -1177,16 +1177,16 @@ async def get_conversation_token(
         rel=rel,
         days_idle=days_idle,
         dtr_goal=dtr_goal,
-        personality_rules=personality_rules,
-        stages=stages,
+        # personality_rules=personality_rules,
+        # stages=stages,
         persona_likes=persona_likes,
         persona_dislikes=persona_dislikes,
-        mbti_rules=mbti_rules,
+        # mbti_rules=mbti_rules,
         memories="",
         last_user_message="",
-        tone=tone,
+        # tone=tone,
         analysis="",
-        persona_rules=persona_rules,
+        # persona_rules=persona_rules,
     )
     
     hist_msgs = history.messages
