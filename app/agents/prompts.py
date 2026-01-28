@@ -7,7 +7,7 @@ from app.constants import prompt_keys
 
 MODEL = ChatOpenAI(
     api_key=settings.OPENAI_API_KEY,
-    model_name="gpt-4o-mini",
+    model_name="gpt-5.2",
     temperature=0.8,
     max_tokens=512,
 )
