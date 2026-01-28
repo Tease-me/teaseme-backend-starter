@@ -20,10 +20,11 @@ from fastapi import (
     Response,
     status
 )
-from langchain_openai import ChatOpenAI
+from app.agents.prompts import SURVEY_SUMMARIZER
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
 from app.services.system_prompt_service import get_system_prompt
+from app.constants import prompt_keys
 
 from app.db.session import get_db
 from app.db.models import PreInfluencer, Influencer
@@ -41,7 +42,6 @@ from app.core.config import settings
 from app.utils.email import (
     send_new_influencer_email_with_picture,
     send_profile_survey_email,
-    send_new_influencer_email,
     send_influencer_survey_completed_email_to_promoter,
 )
 
@@ -57,16 +57,9 @@ from app.services.firstpromoter import (
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/pre-influencers", tags=["pre-influencers"])
 SURVEY_QUESTIONS_PATH = Path(__file__).resolve().parent.parent / "raw" / "survey-questions.json"
-SURVEY_SUMMARIZER = ChatOpenAI(
-    api_key=settings.OPENAI_API_KEY,
-    model="gpt-4o",
-    temperature=1,
-)
-
-
 @lru_cache(maxsize=1)
 async def _load_survey_questions(db: AsyncSession):
-    raw = await get_system_prompt(db, "SURVEY_QUESTIONS_JSON")
+    raw = await get_system_prompt(db, prompt_keys.SURVEY_QUESTIONS_JSON)
     if not raw:
         raise HTTPException(500, "Missing system prompt: SURVEY_QUESTIONS_JSON")
     try:
@@ -145,7 +138,7 @@ def _require_pre_influencer_survey_access(
 
 async def _generate_prompt_from_markdown(markdown: str, additional_prompt: str | None, db:AsyncSession) -> str:
 
-    sys_msg = await get_system_prompt(db, "SURVEY_PROMPT_JSON_SCHEMA")
+    sys_msg = await get_system_prompt(db, prompt_keys.SURVEY_PROMPT_JSON_SCHEMA)
     if not sys_msg:
         raise HTTPException(500, "Missing system prompt: SURVEY_PROMPT_JSON_SCHEMA")
     user_msg = f"Survey markdown:\n{markdown}\n\nExtra instructions for style/tone:\n{additional_prompt or '(none)'}"
@@ -707,7 +700,7 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
 
     influencer = await db.get(Influencer, influencer_id)
 
-    sections = _load_survey_questions(db)
+    sections = await _load_survey_questions(db)
     markdown = _format_survey_markdown(sections, pre.survey_answers or {}, pre.username)
     prompt = await _generate_prompt_from_markdown(markdown, additional_prompt=None, db=db)
     
