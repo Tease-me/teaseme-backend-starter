@@ -1236,15 +1236,15 @@ this is your current mood: {mood}
     },
     {
         "key": prompt_keys.WEEKEND_TIME_PROMPT_ADULT,
-        "name": "Weekend Time-based Mood",
-        "description": "Time-based mood options for weekends (Saturday-Sunday).",
+        "name": "Adult Weekend Time-based Mood",
+        "description": "Adult Time-based mood options for weekends (Saturday-Sunday).",
         "prompt": WEEKEND_TIMEVARIABLE_ADULT,
         "type": "adult"
     },
     {
         "key": prompt_keys.WEEKDAY_TIME_PROMPT_ADULT,
-        "name": "Weekday Time-based Mood",
-        "description": "Time-based mood options for weekdays (Monday-Friday).",
+        "name": "Adult Weekday Time-based Mood",
+        "description": "Adult Time-based mood options for weekdays (Monday-Friday).",
         "prompt": WEEKDAY_TIMEVARIABLE_ADULT,
         "type": "adult"
     },
