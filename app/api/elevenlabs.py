@@ -1145,8 +1145,8 @@ async def get_conversation_token(
     stages = bio.get("stages", {})
     if not isinstance(stages, dict):
         stages = {}
-    mbti_archetype = bio.get("mbti_architype", "")  
-    mbti_rules = await get_mbti_rules_for_archetype(db, mbti_archetype, mbti_addon)
+    # mbti_archetype = bio.get("mbti_architype", "")  
+    # mbti_rules = await get_mbti_rules_for_archetype(db, mbti_archetype, mbti_addon)
     personality_rules = bio.get("personality_rules", "")
     tone = bio.get("tone", "")
 
@@ -1180,7 +1180,7 @@ async def get_conversation_token(
         stages=stages,
         persona_likes=persona_likes,
         persona_dislikes=persona_dislikes,
-        mbti_rules=mbti_rules,
+        # mbti_rules=mbti_rules,
         memories="",
         daily_context="",
         last_user_message="",

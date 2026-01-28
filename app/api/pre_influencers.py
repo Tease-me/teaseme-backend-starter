@@ -42,7 +42,6 @@ from app.core.config import settings
 from app.utils.email import (
     send_new_influencer_email_with_picture,
     send_profile_survey_email,
-    send_new_influencer_email,
     send_influencer_survey_completed_email_to_promoter,
 )
 
