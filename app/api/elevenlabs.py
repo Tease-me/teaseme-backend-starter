@@ -31,6 +31,7 @@ from app.db.session import SessionLocal
 from app.api.utils import get_embedding
 from app.services.system_prompt_service import get_system_prompt
 from app.constants import prompt_keys
+from app.utils.prompt_logging import log_prompt
 
 router = APIRouter(prefix="/elevenlabs", tags=["elevenlabs"])
 log = logging.getLogger(__name__)
@@ -1134,7 +1135,7 @@ async def get_conversation_token(
 
     if not influencer:
         raise HTTPException(404, "Influencer not found")
-    persona_rules = influencer.prompt_template
+    
     bio = influencer.bio_json or {}
     persona_likes = bio.get("likes", [])
     persona_dislikes = bio.get("dislikes", [])
@@ -1145,11 +1146,10 @@ async def get_conversation_token(
     stages = bio.get("stages", {})
     if not isinstance(stages, dict):
         stages = {}
-    mbti_archetype = bio.get("mbti_architype", "")  
-    mbti_addon = bio.get("mbti_rules", "")  
-    mbti_rules = await get_mbti_rules_for_archetype(db, mbti_archetype, mbti_addon)
     personality_rules = bio.get("personality_rules", "")
     tone = bio.get("tone", "")
+    mbti_rules = bio.get("mbti_rules", "")
+    persona_rules = influencer.prompt_template or ""
 
     history = redis_history(chat_id)
 
@@ -1181,20 +1181,16 @@ async def get_conversation_token(
         stages=stages,
         persona_likes=persona_likes,
         persona_dislikes=persona_dislikes,
-        # mbti_rules=mbti_rules,
+        mbti_rules=mbti_rules,
         memories="",
         last_user_message="",
         tone=tone,
         analysis="",
+        persona_rules=persona_rules,
     )
     
-    try:
-        hist_msgs = history.messages
-        rendered = prompt.format_prompt(input="", history=hist_msgs)
-        full_prompt_text = rendered.to_string()
-        log.info("[%s] ==== FULL PROMPT ====\n%s", "", full_prompt_text)
-    except Exception as log_ex:
-        log.info("[%s] Prompt logging failed: %s", "", log_ex)
+    hist_msgs = history.messages
+    log_prompt(log, prompt, cid="", input="", history=hist_msgs)
 
     try:
         async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:

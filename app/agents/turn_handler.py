@@ -15,6 +15,7 @@ from app.db.session import SessionLocal
 from app.agents.prompt_utils import get_global_prompt, get_today_script, build_relationship_prompt, get_mbti_rules_for_archetype
 from app.db.models import Influencer
 from app.utils.tts_sanitizer import sanitize_tts_text
+from app.utils.prompt_logging import log_prompt
 
 from app.relationship.processor import process_relationship_turn
 
@@ -130,11 +131,11 @@ async def handle_turn(
     mem_block = "\n".join(s for s in (_norm(m) for m in memories or []) if s)
 
     bio = influencer.bio_json or {}
-    mbti_archetype = bio.get("mbti_architype", "")  
+    # mbti_archetype = bio.get("mbti_architype", "")  
     # mbti_addon = bio.get("mbti_rules", "")  
     # mbti_rules = await get_mbti_rules_for_archetype(db, mbti_archetype, mbti_addon)
-    personality_rules = bio.get("personality_rules", "")
-    tone = bio.get("tone", "")
+    # personality_rules = bio.get("personality_rules", "")
+    # tone = bio.get("tone", "")
 
     stages = bio.get("stages", {})
     if not isinstance(stages, dict):
@@ -156,13 +157,8 @@ async def handle_turn(
         # tone=tone,
     )
 
-    try:
-        hist_msgs = history.messages
-        rendered = prompt.format_prompt(input=message, history=hist_msgs)
-        full_prompt_text = rendered.to_string()
-        log.info("[%s] ==== FULL PROMPT ====\n%s", cid, full_prompt_text)
-    except Exception as log_ex:
-        log.info("[%s] Prompt logging failed: %s", cid, log_ex)
+    hist_msgs = history.messages
+    log_prompt(log, prompt, cid=cid, input=message, history=hist_msgs)
 
     chain = prompt | MODEL
 

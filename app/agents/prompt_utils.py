@@ -112,7 +112,7 @@ def build_relationship_prompt(
     # tone: str = "",
     analysis: str | None = None,
 ):
-    stages = stages or {}
+    # stages = stages or {}
 
     partial_vars = {
         "relationship_state": rel.state,
@@ -125,13 +125,13 @@ def build_relationship_prompt(
         "days_idle_before_message": round(float(days_idle or 0.0), 1),
         "dtr_goal": dtr_goal,
         # "personality_rules": personality_rules,
-        "dating_stage": stages.get("dating", ""),
-        "dislike_stage": stages.get("dislike", ""),
-        "talking_stage": stages.get("talking", ""),
-        "flirting_stage": stages.get("flirting", ""),
-        "hate_stage": stages.get("hate", ""),
-        "strangers_stage": stages.get("strangers", ""),
-        "in_love_stage": stages.get("in_love", ""),
+        # "dating_stage": stages.get("dating", ""),
+        # "dislike_stage": stages.get("dislike", ""),
+        # "talking_stage": stages.get("talking", ""),
+        # "flirting_stage": stages.get("flirting", ""),
+        # "hate_stage": stages.get("hate", ""),
+        # "strangers_stage": stages.get("strangers", ""),
+        # "in_love_stage": stages.get("in_love", ""),
         "likes": ", ".join(map(str, persona_likes or [])),
         "dislikes": ", ".join(map(str, persona_dislikes or [])),
         # "mbti_rules": mbti_rules,
