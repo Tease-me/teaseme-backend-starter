@@ -6,9 +6,9 @@ from sqlalchemy import select
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 
 from app.db.models import Influencer, Message18
-from app.agents.prompt_utils import pick_time_mood
 from app.agents.prompts import XAI_MODEL
 from app.utils.tts_sanitizer import sanitize_tts_text
+from app.utils.prompt_logging import log_prompt
 from app.services.system_prompt_service import get_system_prompt
 from app.constants import prompt_keys
 from langchain_core.prompts import ChatPromptTemplate
@@ -91,9 +91,14 @@ async def handle_turn_18(
 
     try:
         result = await chain.ainvoke({"input": message})
-        rendered = prompt.format_prompt(input=message, history=recent_ctx, main_prompt=influencer.custom_adult_prompt)
-        full_prompt_text = rendered.to_string()
-        log.info("[%s] ==== FULL PROMPT ====\n%s", cid, full_prompt_text)
+        log_prompt(
+            log,
+            prompt,
+            cid=cid,
+            input=message,
+            history=recent_ctx,
+            main_prompt=influencer.custom_adult_prompt,
+        )
         reply = getattr(result, "content", None) or str(result)
 
         if is_audio:
