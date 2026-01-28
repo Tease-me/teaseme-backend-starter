@@ -17,9 +17,7 @@ log = logging.getLogger("teaseme-turn-18")
 
 
 def _render_recent_ctx(rows: list[Message18]) -> list[BaseMessage]:
-    """
-    IMPORTANT: LangChain expects history as a list of BaseMessage, not a string.
-    """
+
     msgs: list[BaseMessage] = []
     for m in rows:
         role = (m.sender or "").lower()
