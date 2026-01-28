@@ -74,14 +74,33 @@ async def check_instagram_exists(
     )
     all_matches = result.scalars().all()
 
-    normalized_id = normalize_influencer_id(search_term)
-    existing_influencer = await db.get(Influencer, normalized_id)
+    normalized_search_id = normalize_influencer_id(search_term)
+    existing_influencer = await db.get(Influencer, normalized_search_id)
 
+    best_pre = None
+    if all_matches:
+        best_pre = sorted(
+            all_matches, 
+            key=lambda x: (1 if x.status == "approved" else 0, x.created_at), 
+            reverse=True
+        )[0]
+        
+        if not existing_influencer:
+             if best_pre.email:
+                 res = await db.execute(select(Influencer).where(Influencer.email == best_pre.email))
+                 existing_influencer = res.scalar_one_or_none()
+        
+        if not existing_influencer:
+            if best_pre.full_name:
+                 res = await db.execute(select(Influencer).where(Influencer.display_name == best_pre.full_name))
+                 existing_influencer = res.scalar_one_or_none()
+
+    
     if existing_influencer:
         return {
             "exists": True,
             "instagram_username": existing_influencer.display_name, 
-            "pre_influencer_id": all_matches[0].id if all_matches else None,
+            "pre_influencer_id": best_pre.id if best_pre else None,
             "status": "approved",
             "is_approved": True,
             "has_influencer_profile": True,
@@ -89,28 +108,22 @@ async def check_instagram_exists(
             "message": "This influencer is active in our system.",
         }
 
-    if not all_matches:
-        return {
-            "exists": False,
-            "instagram_username": search_term,
-            "message": "This influencer is not in our system yet.",
+    if best_pre:
+         return {
+            "exists": True,
+            "instagram_username": best_pre.username,
+            "pre_influencer_id": best_pre.id,
+            "status": best_pre.status,
+            "is_approved": best_pre.status == "approved",
+            "has_influencer_profile": False,
+            "display_name": best_pre.full_name,
+            "message": f"This influencer is in our system with status: {best_pre.status}",
         }
 
-    best_match = sorted(
-        all_matches, 
-        key=lambda x: (1 if x.status == "approved" else 0, x.created_at), 
-        reverse=True
-    )[0]
-
     return {
-        "exists": True,
-        "instagram_username": best_match.username,
-        "pre_influencer_id": best_match.id,
-        "status": best_match.status,
-        "is_approved": best_match.status == "approved",
-        "has_influencer_profile": False,
-        "display_name": best_match.full_name,
-        "message": f"This influencer is in our system with status: {best_match.status}",
+        "exists": False,
+        "instagram_username": search_term,
+        "message": "This influencer is not in our system yet.",
     }
 
 
