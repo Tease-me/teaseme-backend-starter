@@ -12,9 +12,17 @@ from app.core.config import settings
 from app.agents.memory import find_similar_memories, store_fact
 from app.agents.prompts import MODEL, FACT_EXTRACTOR, CONVO_ANALYZER, get_fact_prompt
 from app.db.session import SessionLocal
-from app.agents.prompt_utils import get_global_prompt, get_today_script, build_relationship_prompt, get_mbti_rules_for_archetype
+from app.agents.prompt_utils import (
+    get_global_prompt,
+    get_today_script,
+    build_relationship_prompt,
+    get_mbti_rules_for_archetype,
+    pick_time_mood,
+)
 from app.db.models import Influencer
 from app.utils.tts_sanitizer import sanitize_tts_text
+from app.services.system_prompt_service import get_system_prompt
+from app.constants import prompt_keys
 
 from app.relationship.processor import process_relationship_turn
 
@@ -82,6 +90,7 @@ async def handle_turn(
     user_id: str | None = None,
     db=None,
     is_audio: bool = False,
+    user_timezone: str | None = None,
 ) -> str:
     cid = uuid4().hex[:8]
     log.info("[%s] START persona=%s chat=%s user=%s", cid, influencer_id, chat_id, user_id)
@@ -95,11 +104,14 @@ async def handle_turn(
 
     recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
 
-    influencer, prompt_template, daily_context = await asyncio.gather(
+    influencer, prompt_template, daily_context, weekday_prompt, weekend_prompt = await asyncio.gather(
         db.get(Influencer, influencer_id),
         get_global_prompt(db, is_audio),
         get_today_script(db=db, influencer_id=influencer_id),
+        get_system_prompt(db, prompt_keys.WEEKDAY_TIME_PROMPT),
+        get_system_prompt(db, prompt_keys.WEEKEND_TIME_PROMPT),
     )
+    mood = pick_time_mood(weekday_prompt, weekend_prompt, user_timezone)
 
     if not influencer:
         raise HTTPException(404, "Influencer not found")
