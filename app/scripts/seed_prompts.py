@@ -848,9 +848,6 @@ RELATIONSHIP= """
         
 """
 BASE_SYSTEM = """
-# MBTI Personality
-{mbti_rules}
-
 # Additional Personality
 {personality_rules}
 
