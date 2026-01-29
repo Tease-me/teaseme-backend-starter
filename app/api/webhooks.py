@@ -414,6 +414,27 @@ async def eleven_webhook_get_memories(
             ms, conversation_id, user_id, influencer_id, chat_id
         )
 
+    def _memories_empty(value) -> bool:
+        if not value:
+            return True
+        if isinstance(value, (list, tuple)) and all(not v for v in value):
+            return True
+        return False
+
+    if _memories_empty(memories):
+        try:
+            memories = await asyncio.wait_for(
+                find_similar_messages(
+                    message=user_text,
+                    chat_id=chat_id,
+                    influencer_id=influencer_id,
+                    db=db,
+                ),
+                timeout=6.0,
+            )
+        except Exception:
+            memories = []
+
     return {"memories": memories}
 
 @router.post("/reply")
