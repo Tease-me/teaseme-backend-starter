@@ -94,12 +94,6 @@ _WEBHOOK_NAME = "teaseme-post-call"
 
 
 async def _get_or_create_post_call_webhook(client: httpx.AsyncClient) -> Optional[str]:
-    """
-    Get or create the workspace-level post-call webhook.
-    ElevenLabs requires webhooks to be created at workspace level first,
-    then linked to agents via platform_settings.
-    Returns webhook_id or None on failure.
-    """
     global _POST_CALL_WEBHOOK_ID
     if _POST_CALL_WEBHOOK_ID:
         return _POST_CALL_WEBHOOK_ID
@@ -114,7 +108,6 @@ async def _get_or_create_post_call_webhook(client: httpx.AsyncClient) -> Optiona
         )
         if list_resp.status_code == 200:
             webhooks = list_resp.json()
-            # Handle both list and dict response formats
             webhook_list = webhooks if isinstance(webhooks, list) else webhooks.get("webhooks", [])
             for wh in webhook_list:
                 if wh.get("name") == _WEBHOOK_NAME or wh.get("webhook_url") == webhook_url:
@@ -124,7 +117,6 @@ async def _get_or_create_post_call_webhook(client: httpx.AsyncClient) -> Optiona
     except Exception as e:
         log.warning("Failed to list webhooks: %s", e)
 
-    # Create new webhook if not found
     try:
         create_resp = await client.post(
             "/workspace/webhooks",
