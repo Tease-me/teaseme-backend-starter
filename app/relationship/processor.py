@@ -9,7 +9,7 @@ from app.relationship.signals import classify_signals
 from app.relationship.engine import Signals, update_relationship
 from app.relationship.dtr import plan_dtr_goal
 
-log = logging.getLogger("teaseme-relationship")
+log = logging.getLogger("teachme-relationship")
 
 
 STAGES = ["HATE", "DISLIKE", "STRANGERS", "TALKING", "FLIRTING", "DATING"]
@@ -135,7 +135,25 @@ async def process_relationship_turn(
         min(100.0, float(rel.sentiment_score or 0.0) + d_sent)
     )
 
-    out = update_relationship(rel.trust, rel.closeness, rel.attraction, rel.safety, sig)
+    # For girlfriends, reduce negative signal impact by 60% (they're more forgiving)
+    if rel.girlfriend_confirmed:
+        dampened_sig = Signals(
+            support=sig.support,
+            affection=sig.affection,
+            flirt=sig.flirt,
+            respect=sig.respect,
+            rude=sig.rude * 0.4,  # Reduce negative signals
+            boundary_push=sig.boundary_push * 0.4,
+            dislike=getattr(sig, 'dislike', 0.0) * 0.4,
+            hate=getattr(sig, 'hate', 0.0) * 0.4,
+            apology=sig.apology,
+            commitment_talk=sig.commitment_talk,
+            accepted_exclusive=sig.accepted_exclusive,
+            accepted_girlfriend=sig.accepted_girlfriend,
+        )
+        out = update_relationship(rel.trust, rel.closeness, rel.attraction, rel.safety, dampened_sig)
+    else:
+        out = update_relationship(rel.trust, rel.closeness, rel.attraction, rel.safety, sig)
 
     log.info(
         "[%s] DIM before->after | t %.4f->%.4f c %.4f->%.4f a %.4f->%.4f s %.4f->%.4f",
@@ -155,7 +173,22 @@ async def process_relationship_turn(
     delta = compute_stage_delta(sig)
     rel.stage_points = max(0.0, min(100.0, prev_sp + delta))
 
-    rel.state = stage_from_signals_and_points(rel.stage_points, sig)
+    # CHECK girlfriend_confirmed FIRST to preserve relationship status
+    if rel.girlfriend_confirmed:
+        # Once girlfriend, maintain at least GIRLFRIEND level unless serious negative interaction
+        if sig.hate > 0.6 or getattr(sig, "threat", 0.0) > 0.20:
+            rel.state = "HATE"
+            rel.girlfriend_confirmed = False  # Reset on severe negativity
+            rel.exclusive_agreed = False
+        elif sig.dislike > 0.4 or getattr(sig, "rejecting", 0.0) > 0.40:
+            rel.state = "DISLIKE"
+            rel.girlfriend_confirmed = False
+            rel.exclusive_agreed = False
+        else:
+            rel.state = "GIRLFRIEND"  # Keep as girlfriend
+    else:
+        # Normal state calculation for non-girlfriends
+        rel.state = stage_from_signals_and_points(rel.stage_points, sig)
 
     can_ask = (
         rel.state == "DATING"
@@ -174,9 +207,6 @@ async def process_relationship_turn(
     if sig.accepted_girlfriend and can_ask:
         rel.girlfriend_confirmed = True
         rel.exclusive_agreed = True
-        rel.state = "GIRLFRIEND"
-
-    if rel.girlfriend_confirmed:
         rel.state = "GIRLFRIEND"
 
     dtr_goal = plan_dtr_goal(rel, can_ask)
