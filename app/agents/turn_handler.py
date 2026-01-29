@@ -1,8 +1,6 @@
 import logging
 import asyncio
 from uuid import uuid4
-from datetime import datetime, timezone
-
 from fastapi import HTTPException
 
 from langchain_core.runnables.history import RunnableWithMessageHistory
@@ -14,7 +12,6 @@ from app.agents.prompts import MODEL, FACT_EXTRACTOR, CONVO_ANALYZER, get_fact_p
 from app.db.session import SessionLocal
 from app.agents.prompt_utils import (
     get_global_prompt,
-    get_today_script,
     build_relationship_prompt,
     pick_time_mood,
 )

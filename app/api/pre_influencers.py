@@ -44,8 +44,9 @@ from app.utils.email import (
     send_profile_survey_email,
     send_influencer_survey_completed_email_to_promoter,
 )
-
-from app.utils.s3 import s3,save_influencer_photo_to_s3, generate_presigned_url, delete_file_from_s3
+import mimetypes
+from app.api.elevenlabs import _elevenlabs_create_voice, _push_prompt_to_elevenlabs, _validate_voice_exists
+from app.utils.s3 import s3,save_influencer_photo_to_s3, generate_presigned_url, delete_file_from_s3, get_s3_object_bytes,list_influencer_audio_keys
 from app.services.firstpromoter import (
     fp_create_promoter,
     fp_find_promoter_id_by_ref_token,
@@ -334,8 +335,11 @@ async def register_pre_influencer(
                 parent_promoter_id=parent_promoter_id,
             )
 
-            pre.fp_promoter_id = str(promoter.get("id"))
-            pre.fp_ref_id = promoter.get("default_ref_id") or (promoter.get("promotions") or [{}])[0].get("ref_id")
+            if promoter:
+                pre.fp_promoter_id = str(promoter.get("id"))
+                pre.fp_ref_id = promoter.get("default_ref_id") or (promoter.get("promotions") or [{}])[0].get("ref_id")
+            else:
+                log.warning("fp_create_promoter returned None for email=%s", pre.email)
 
             answers = pre.survey_answers or {}
             if isinstance(answers, dict):
@@ -773,28 +777,89 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
     markdown = _format_survey_markdown(sections, pre.survey_answers or {}, pre.username)
     prompt = await _generate_prompt_from_markdown(markdown, additional_prompt=None, db=db)
     
-    DEFAULT_VOICE_ID = "YKG78i9n8ybMZ42crVbJ"
-    DEFAULT_PROMPT_TEMPLATE = prompt
+    voice_id = influencer.voice_id if influencer else None
+    agent_id = influencer.influencer_agent_id_third_part if influencer else None
+    samples_meta = influencer.samples if influencer and influencer.samples else []
+    display_name = influencer.display_name if influencer and influencer.display_name else (pre.full_name or pre.username)
+
+    if voice_id:
+        voice_exists = await _validate_voice_exists(voice_id)
+        if not voice_exists:
+            log.warning("Stale voice_id %s detected for %s, will recreate", voice_id, influencer_id)
+            voice_id = None
+            samples_meta = []  
+    if not voice_id:
+        keys = await list_influencer_audio_keys(str(pre_id))
+        if not keys:
+            keys = await list_influencer_audio_keys(influencer_id)
+        if not keys:
+            raise HTTPException(400, "No audio samples found. Please upload voice samples before approving.")
+        else:
+            multipart_files: list[tuple[str, tuple[str, bytes, str]]] = []
+            new_samples_meta:list[dict] = []
+            
+            for key in keys:
+                filename = key.split("/")[-1]
+                content_type = mimetypes.guess_type(filename)[0] or "audio/mpeg"
+                b = await get_s3_object_bytes(key)
+                if not b :
+                    continue
+                multipart_files.append(("files", (filename, b, content_type)))
+                new_samples_meta.append(
+                    {
+                    "s3_key": key,
+                    "original_filename": filename,
+                    "content_type": content_type,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+            
+            if multipart_files:
+                try:
+                    payload = await _elevenlabs_create_voice(
+                        name=display_name or influencer_id, 
+                        description=None, 
+                        labels_str=None, 
+                        remove_background_noise=True,
+                        multipart_files=multipart_files
+                    )
+                    voice_id = payload["voice_id"]
+                    samples_meta = new_samples_meta 
+                except Exception as e:
+                     raise HTTPException(400, f"Failed to create voice: {str(e)}")
+
+    reply_text = "/ reply: For every user message, call this tool with the full transcript in the text field before speaking. Do not answer without calling this tool first."
+    prompt_for_eleven = f"{prompt}{reply_text}"
     
+    agent_id = await _push_prompt_to_elevenlabs(
+        agent_id=agent_id,
+        prompt_text=prompt_for_eleven,
+        voice_id=voice_id,
+        agent_name=display_name or influencer_id,
+    )
+
     if not influencer:
         influencer = Influencer(
             id=influencer_id,
-            display_name=pre.full_name or pre.username,
-            prompt_template=DEFAULT_PROMPT_TEMPLATE,
+            display_name=display_name,
+            prompt_template=json.dumps(prompt) if isinstance(prompt, dict) else prompt,
             owner_id=None,
-            voice_id=DEFAULT_VOICE_ID,
+            voice_id=voice_id,
             fp_promoter_id=pre.fp_promoter_id,
             fp_ref_id=pre.fp_ref_id,
             email=pre.email,
+            influencer_agent_id_third_part=agent_id,
+            samples=samples_meta
         )
         db.add(influencer)
     else:
         if not influencer.display_name:
-            influencer.display_name = pre.full_name or pre.username
-        if not influencer.prompt_template:
-            influencer.prompt_template = DEFAULT_PROMPT_TEMPLATE
-        if not influencer.voice_id:
-            influencer.voice_id = DEFAULT_VOICE_ID
+            influencer.display_name = display_name
+        
+        influencer.prompt_template = json.dumps(prompt) if isinstance(prompt, dict) else prompt
+        influencer.voice_id = voice_id
+        influencer.influencer_agent_id_third_part = agent_id
+        influencer.samples = samples_meta
 
         influencer.fp_promoter_id = pre.fp_promoter_id
         influencer.fp_ref_id = pre.fp_ref_id

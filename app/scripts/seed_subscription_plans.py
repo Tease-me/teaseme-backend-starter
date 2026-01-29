@@ -23,12 +23,9 @@ async def main():
         print(f"📋 Found {len(existing)} existing plans: {', '.join(existing_names)}")
         
         plans = [
-            # ========================================
-            # RECURRING SUBSCRIPTION PLANS
-            # ========================================
             InfluencerSubscriptionPlan(
                 plan_name="Basic",
-                price_cents=9900,  # $99
+                price_cents=9900, 
                 currency="USD",
                 interval="monthly",
                 plan_type="recurring",
@@ -45,7 +42,7 @@ async def main():
             
             InfluencerSubscriptionPlan(
                 plan_name="Plus",
-                price_cents=14900,  # $149
+                price_cents=14900, 
                 currency="USD",
                 interval="monthly",
                 plan_type="recurring",
@@ -62,7 +59,7 @@ async def main():
             
             InfluencerSubscriptionPlan(
                 plan_name="Premium",
-                price_cents=19900,  # $199
+                price_cents=19900,
                 currency="USD",
                 interval="monthly",
                 plan_type="recurring",
@@ -85,11 +82,11 @@ async def main():
                 plan_name="$29 Add-on",
                 price_cents=2900,  # $29
                 currency="USD",
-                interval="addon",  # One-time
+                interval="addon", 
                 plan_type="addon",
                 description="$29 add-on pack. Requires active subscription.",
                 features={
-                    "credits_granted": 2900,  # Pay $29, get $29 credits
+                    "credits_granted": 2900,  
                     "requires_subscription": True,
                     "stackable": True,
                 },
@@ -166,7 +163,6 @@ async def main():
         
         print(f"✅ Successfully seeded {len(plans_to_add)} subscription plans:")
         
-        # Print recurring plans
         recurring = [p for p in plans_to_add if p.interval == "monthly"]
         if recurring:
             print("\n📋 Recurring Plans:")
@@ -174,7 +170,6 @@ async def main():
                 featured = "⭐" if plan.is_featured else ""
                 print(f"   {featured} {plan.plan_name}: ${plan.price_cents/100:.0f}/month")
         
-        # Print add-ons
         addons = [p for p in plans_to_add if p.interval == "addon"]
         if addons:
             print("\n🎁 Add-on Packs:")

@@ -11,20 +11,6 @@ async def find_similar_memories(
     top_k: int = 7,
     embedding: list[float] | None = None,
 ):
-    """
-    Find similar memories from both chat-specific and influencer knowledge base.
-    
-    Args:
-        db: Database session
-        chat_id: ID of the chat
-        message: User message to find similar memories for
-        influencer_id: ID of the influencer (optional, for knowledge base search)
-        top_k: Number of memories to return
-        embedding: Optional precomputed embedding for the message (reuse to avoid duplicate calls)
-    
-    Returns:
-        Tuple of (chat_memories, knowledge_base_content) - both are lists of strings
-    """
     emb = embedding or await get_embedding(message)
     
     chat_memories = await search_similar_memories(db, chat_id, emb, top_k=top_k)

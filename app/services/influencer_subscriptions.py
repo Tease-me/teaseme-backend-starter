@@ -14,9 +14,6 @@ async def require_active_subscription(
     user_id: int,
     influencer_id: str,
 ) -> InfluencerSubscription:
-    """
-    Raises 402 if user doesn't have an active subscription for influencer.
-    """
     res = await db.execute(
         select(InfluencerSubscription).where(
             InfluencerSubscription.user_id == user_id,

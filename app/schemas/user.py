@@ -1,6 +1,6 @@
 from pydantic import BaseModel, field_validator
-from typing import List, Optional
-from datetime import datetime, timezone
+from typing import Optional
+from datetime import datetime
 
 class UserBase(BaseModel):
     full_name: Optional[str] = None

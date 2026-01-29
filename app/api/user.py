@@ -1,8 +1,7 @@
 import io
 import logging
-from datetime import datetime, date
-from typing import List, Optional
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query
+from datetime import date
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func
@@ -13,7 +12,6 @@ from app.schemas.user import UserOut, UserUpdate
 from app.utils.deps import get_current_user
 from app.utils.s3 import (
     generate_user_presigned_url,
-    generate_presigned_url,
     delete_file_from_s3,
     save_user_photo_to_s3,
 )

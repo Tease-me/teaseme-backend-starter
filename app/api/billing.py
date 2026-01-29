@@ -13,7 +13,7 @@ from pydantic import BaseModel, PositiveInt
 from sqlalchemy import select
 from app.services.paypal import paypal_access_token
 from app.services.firstpromoter import fp_track_sale_v2
-from app.db.models import PayPalTopUp, Influencer, Pricing, DailyUsage, InfluencerCreditTransaction
+from app.db.models import PayPalTopUp, Influencer, InfluencerCreditTransaction
 from app.core.config import settings
 from datetime import date
 from sqlalchemy import and_
