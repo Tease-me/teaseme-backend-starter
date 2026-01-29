@@ -40,6 +40,19 @@ ELEVENLABS_API_KEY = settings.ELEVENLABS_API_KEY
 ELEVEN_BASE_URL = settings.ELEVEN_BASE_URL
 DEFAULT_ELEVENLABS_VOICE_ID = settings.ELEVENLABS_VOICE_ID or None
 
+def _get_env_suffix() -> str:
+    device = settings.DEVICE.upper() if settings.DEVICE else ""
+    if device == "SERVER":
+        return "-PROD"
+    elif device == "LIVE":
+        return "-LIVE"
+    else:
+        return "-DEV"
+
+def _apply_env_suffix(name: str) -> str:
+    suffix = _get_env_suffix()
+    return f"{name}{suffix}"
+
 _GREETINGS: Dict[str, List[str]] = {
     "playful": [
         "Well, look who finally decided to show up.",
@@ -682,7 +695,7 @@ async def _create_agent(
     webhook_id = await _get_or_create_post_call_webhook(client)
     
     payload = _build_agent_create_payload(
-        name=name,
+        name=_apply_env_suffix(name) if name else None,
         voice_id=voice_id,
         prompt_text=prompt_text,
         language=language,
@@ -1708,7 +1721,7 @@ async def _elevenlabs_create_voice(
     multipart_files: list[tuple[str, tuple[str, bytes, str]]],
 ) -> dict:
     data = {
-        "name": name,
+        "name": _apply_env_suffix(name),
         "remove_background_noise": "true" if remove_background_noise else "false",
     }
     if description is not None:
