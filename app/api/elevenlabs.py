@@ -2,6 +2,7 @@ import asyncio
 import logging
 import math
 import random
+import json
 from uuid import uuid4
 from app.agents.memory import find_similar_memories
 from app.agents.prompt_utils import build_relationship_prompt, get_global_prompt, get_mbti_rules_for_archetype
@@ -11,17 +12,17 @@ from app.relationship.repo import get_or_create_relationship
 import httpx
 from datetime import datetime, timedelta, timezone
 from app.moderation import moderate_message, handle_violation
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from itertools import chain
 from typing import Any, Dict, List, Optional
 from app.core.config import settings
-from app.db.models import Influencer, Chat, Message, CallRecord, User
+from app.db.models import Influencer, Chat, Message, CallRecord, User, PreInfluencer
 from app.db.session import get_db
 from app.utils.deps import get_current_user
 from app.schemas.elevenlabs import FinalizeConversationBody, RegisterConversationBody, UpdatePromptBody
 from app.services.billing import charge_feature,_get_influencer_id_from_chat
-from sqlalchemy import insert, select, text
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.services.billing import can_afford, get_remaining_units
 from app.services.chat_service import get_or_create_chat
@@ -40,6 +41,19 @@ log = logging.getLogger(__name__)
 ELEVENLABS_API_KEY = settings.ELEVENLABS_API_KEY
 ELEVEN_BASE_URL = settings.ELEVEN_BASE_URL
 DEFAULT_ELEVENLABS_VOICE_ID = settings.ELEVENLABS_VOICE_ID or None
+
+def _get_env_suffix() -> str:
+    device = settings.DEVICE.upper() if settings.DEVICE else ""
+    if device == "SERVER":
+        return "-PROD"
+    elif device == "LIVE":
+        return "-LIVE"
+    else:
+        return "-DEV"
+
+def _apply_env_suffix(name: str) -> str:
+    suffix = _get_env_suffix()
+    return f"{name}{suffix}"
 
 _GREETINGS: Dict[str, List[str]] = {
     "playful": [
@@ -88,6 +102,88 @@ def _headers() -> Dict[str, str]:
     if not ELEVENLABS_API_KEY:
         raise HTTPException(500, "ELEVENLABS_API_KEY is not configured.")
     return {"xi-api-key": ELEVENLABS_API_KEY}
+
+
+_POST_CALL_WEBHOOK_ID: Optional[str] = None
+_WEBHOOK_NAME = "teaseme-post-call"
+
+
+async def _get_or_create_post_call_webhook(client: httpx.AsyncClient) -> Optional[str]:
+    global _POST_CALL_WEBHOOK_ID
+    if _POST_CALL_WEBHOOK_ID:
+        return _POST_CALL_WEBHOOK_ID
+
+    webhook_url = f"{settings.PUBLIC_BASE_URL.rstrip('/')}/webhooks/elevenlabs"
+    
+    try:
+        list_resp = await client.get(
+            "/workspace/webhooks",
+            headers=_headers(),
+            timeout=15.0,
+        )
+        if list_resp.status_code == 200:
+            webhooks = list_resp.json()
+            webhook_list = webhooks if isinstance(webhooks, list) else webhooks.get("webhooks", [])
+            for wh in webhook_list:
+                if wh.get("name") == _WEBHOOK_NAME or wh.get("webhook_url") == webhook_url:
+                    _POST_CALL_WEBHOOK_ID = wh.get("webhook_id") or wh.get("id")
+                    log.info("Found existing post-call webhook: %s", _POST_CALL_WEBHOOK_ID)
+                    return _POST_CALL_WEBHOOK_ID
+    except Exception as e:
+        log.warning("Failed to list webhooks: %s", e)
+
+    try:
+        create_resp = await client.post(
+            "/workspace/webhooks",
+            headers=_headers(),
+            json={
+                "name": _WEBHOOK_NAME,
+                "webhook_url": webhook_url,
+                "auth_type": "hmac",
+                "events": ["post_call_transcription"],
+            },
+            timeout=15.0,
+        )
+        if create_resp.status_code in (200, 201):
+            data = create_resp.json()
+            _POST_CALL_WEBHOOK_ID = data.get("webhook_id") or data.get("id")
+            log.info("Created post-call webhook: %s", _POST_CALL_WEBHOOK_ID)
+            return _POST_CALL_WEBHOOK_ID
+        else:
+            log.warning("Failed to create webhook: %s %s", create_resp.status_code, create_resp.text[:300])
+    except Exception as e:
+        log.warning("Exception creating webhook: %s", e)
+
+    return None
+
+
+async def _validate_voice_exists(voice_id: str) -> bool:
+    """
+    Check if a voice_id still exists in ElevenLabs.
+    Returns True if voice exists, False if deleted/not found.
+    """
+    if not voice_id:
+        return False
+    
+    log.info("Validating voice_id: %s", voice_id)
+    async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL, timeout=15.0) as client:
+        try:
+            resp = await client.get(
+                f"/voices/{voice_id}",
+                headers=_headers(),
+            )
+            log.info("Voice validation response: %s", resp.status_code)
+            if resp.status_code == 200:
+                return True
+            elif resp.status_code == 404:
+                log.warning("Voice %s not found in ElevenLabs", voice_id)
+                return False
+            else:
+                log.warning("Voice validation returned %s: %s", resp.status_code, resp.text[:200])
+                return False
+        except Exception as e:
+            log.warning("Voice validation error for %s: %s", voice_id, e)
+            return False
 
 
 def _pick_greeting(influencer_id: str, mode: str) -> str:
@@ -415,11 +511,56 @@ def _build_agent_patch_payload(
             prompt_block["max_tokens"] = max_tokens
         agent_cfg["prompt"] = prompt_block
 
-    return {"conversation_config": {"agent": agent_cfg}}
+    agent_cfg["tools"] = [
+        {
+            "name": "updateRelationship",
+            "type": "webhook",
+            "description": "Production: Updates and Retrieves the relationship states",
+            "webhook": {
+                "url": f"{settings.PUBLIC_BASE_URL.rstrip('/')}/webhooks/update_relationship",
+                "method": "POST",
+                "request_headers": {
+                     "X-Webhook-Token": settings.ELEVENLABS_CONVAI_WEBHOOK_SECRET or ""
+                }
+            }
+        },
+        {
+            "name": "getMemories",
+            "type": "webhook",
+            "description": "Production: Retrieves long-term user-persona memories from the memory bank",
+            "webhook": {
+               "url": f"{settings.PUBLIC_BASE_URL.rstrip('/')}/webhooks/memories",
+               "method": "POST",
+               "request_headers": {
+                    "X-Webhook-Token": settings.ELEVENLABS_CONVAI_WEBHOOK_SECRET or ""
+               }
+            }
+        }
+    ]
+
+    return {
+        "conversation_config": {
+            "agent": agent_cfg,
+            "client": {
+                "overrides": {
+                    "agent": {
+                         "first_message": True,
+                         "language": True,
+                         "prompt": {
+                             "prompt": True,
+                         },
+                    },
+                    "tts": {
+                        "voice_id": True,
+                    }
+                }
+            }
+        }
+    }
 
 
 def _build_agent_create_payload(
-    *,
+    *, 
     name: Optional[str],
     voice_id: str,
     prompt_text: str,
@@ -436,6 +577,32 @@ def _build_agent_create_payload(
         "prompt": {
             "prompt": prompt_text or "",
         },
+        "tools": [
+            {
+                "name": "updateRelationship",
+                "type": "webhook",
+                "description": "Production: Updates and Retrieves the relationship states",
+                "webhook": {
+                    "url": f"{settings.PUBLIC_BASE_URL.rstrip('/')}/webhooks/update_relationship",
+                    "method": "POST",
+                    "request_headers": {
+                         "X-Webhook-Token": settings.ELEVENLABS_CONVAI_WEBHOOK_SECRET or ""
+                    }
+                }
+            },
+            {
+                "name": "getMemories",
+                "type": "webhook",
+                "description": "Production: Retrieves long-term user-persona memories from the memory bank",
+                "webhook": {
+                   "url": f"{settings.PUBLIC_BASE_URL.rstrip('/')}/webhooks/memories",
+                   "method": "POST",
+                   "request_headers": {
+                        "X-Webhook-Token": settings.ELEVENLABS_CONVAI_WEBHOOK_SECRET or ""
+                   }
+                }
+            }
+        ],
     }
     if llm is not None:
         agent_cfg["prompt"]["llm"] = llm
@@ -451,6 +618,20 @@ def _build_agent_create_payload(
             "tts": {
                 "voice_id": voice_id,
             },
+            "client": {
+                "overrides": {
+                    "agent": {
+                        "first_message": True,
+                        "language": True, 
+                        "prompt": {
+                            "prompt": True,
+                        },
+                    },
+                    "tts": {
+                        "voice_id": True,
+                    }
+                }
+            }
         },
     }
 
@@ -513,8 +694,10 @@ async def _create_agent(
     temperature: Optional[float] = None,
     max_tokens: Optional[int] = None,
 ) -> str:
+    webhook_id = await _get_or_create_post_call_webhook(client)
+    
     payload = _build_agent_create_payload(
-        name=name,
+        name=_apply_env_suffix(name) if name else None,
         voice_id=voice_id,
         prompt_text=prompt_text,
         language=language,
@@ -522,6 +705,11 @@ async def _create_agent(
         temperature=temperature,
         max_tokens=max_tokens,
     )
+    
+    if webhook_id:
+        payload["platform_settings"] = {
+            "post_call_webhook_ids": [webhook_id],
+        }
 
     try:
         resp = await client.post(
@@ -688,7 +876,8 @@ async def _push_prompt_to_elevenlabs(
     Update the agent's prompt (and optionally first_message) on ElevenLabs.
     When no agent_id exists (or PATCH returns 404), a new agent will be created and the agent_id returned.
     """
-    resolved_voice_id = voice_id or DEFAULT_ELEVENLABS_VOICE_ID
+    # No fallback - voice must be explicitly provided or created
+    resolved_voice_id = voice_id
 
     log.debug(
         "ElevenLabs sync start agent=%s influencer=%s voice=%s has_prompt=%s",
@@ -1513,6 +1702,104 @@ def _default_auto_commit() -> bool:
     """Dependency helper so internal callers can override commit behavior."""
     return True
 
+def _parse_labels(labels_json: str | None) -> str | None:
+
+    if not labels_json:
+        return None
+    try:
+        obj = json.loads(labels_json)
+        if not isinstance(obj, dict):
+            raise ValueError("labels_json must be a JSON object")
+        return json.dumps(obj)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid labels_json: {e}")
+
+
+async def _elevenlabs_create_voice(
+    *,
+    name: str,
+    description: str | None,
+    labels_str: str | None,
+    remove_background_noise: bool,
+    multipart_files: list[tuple[str, tuple[str, bytes, str]]],
+) -> dict:
+    data = {
+        "name": _apply_env_suffix(name),
+        "remove_background_noise": "true" if remove_background_noise else "false",
+    }
+    if description is not None:
+        data["description"] = description
+    if labels_str is not None:
+        data["labels"] = labels_str
+
+    async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL, timeout=60.0) as client:
+        r = await client.post(
+            "/voices/add",
+            headers=_headers(),
+            data=data,
+            files=multipart_files,
+        )
+
+    if r.status_code >= 400:
+        log.error("ElevenLabs /v1/voices/add failed: %s %s", r.status_code, r.text[:1500])
+        raise HTTPException(status_code=r.status_code, detail=r.text)
+
+    payload = r.json() or {}
+    if not payload.get("voice_id"):
+        raise HTTPException(status_code=502, detail="ElevenLabs returned no voice_id")
+
+    return payload
+
+
+@router.post("/voices/add")
+async def eleven_create_voice_clone(
+    pre_influencer_id: int = Form(...),
+    name: str = Form(...),
+    description: str | None = Form(None),
+    labels_json: str | None = Form(None),
+    remove_background_noise: bool = Form(False),
+    files: list[UploadFile] = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    pre = await db.get(PreInfluencer, pre_influencer_id)
+    if not pre:
+        raise HTTPException(status_code=404, detail="PreInfluencer not found")
+
+    if not files:
+        raise HTTPException(status_code=400, detail="At least 1 audio file is required")
+
+    labels_str = _parse_labels(labels_json)
+
+    multipart_files: list[tuple[str, tuple[str, bytes, str]]] = []
+    for f in files:
+        b = await f.read()
+        if not b:
+            raise HTTPException(status_code=400, detail=f"Empty file: {f.filename}")
+        ctype = f.content_type or "audio/mpeg"
+        multipart_files.append(
+            ("files", (f.filename or "sample.mp3", b, ctype))
+        )
+
+    payload = await _elevenlabs_create_voice(
+        name=name,
+        description=description,
+        labels_str=labels_str,
+        remove_background_noise=remove_background_noise,
+        multipart_files=multipart_files,
+    )
+
+    pre.voice_id = payload["voice_id"]
+    db.add(pre)
+    await db.commit()
+    await db.refresh(pre)
+
+    return {
+        "ok": True,
+        "source": "upload",
+        "pre_influencer_id": pre.id,
+        "voice_id": payload["voice_id"],
+        "requires_verification": payload.get("requires_verification", False),
+    }
 
 @router.post("/update-prompt")
 async def update_elevenlabs_prompt(
@@ -1521,16 +1808,6 @@ async def update_elevenlabs_prompt(
     db: AsyncSession = Depends(get_db),
     auto_commit: bool = Depends(_default_auto_commit),
 ):
-    """
-    Update the ElevenLabs agent prompt.
-    This endpoint updates the voice prompt (and optionally first_message) for an ElevenLabs agent.
-    
-    You can provide either:
-    - agent_id: The ElevenLabs agent ID directly
-    - influencer_id: The influencer ID (will look up the agent_id from the database)
-    
-    At least one of agent_id or influencer_id must be provided.
-    """
     agent_id = body.agent_id
     influencer = None
     agent_name: Optional[str] = None

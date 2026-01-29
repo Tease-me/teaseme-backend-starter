@@ -13,7 +13,7 @@ from app.utils.prompt_logging import log_prompt
 from app.services.system_prompt_service import get_system_prompt
 from app.constants import prompt_keys
 from langchain_core.prompts import ChatPromptTemplate
-
+from app.agents.prompt_utils import pick_time_mood
 log = logging.getLogger("teaseme-turn-18")
 
 

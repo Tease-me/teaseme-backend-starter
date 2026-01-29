@@ -13,14 +13,9 @@ UniqueConstraint, Index, JSON, Text
 )
 
 class Base(DeclarativeBase):
-    """Common base class – can host __repr__ or metadata config later."""
     pass
 
 class Influencer(Base):
-    """
-    One row per persona/influencer.  The `id` column will be the new
-    `influencer_id` referenced from Chat.
-    """
     __tablename__ = "influencers"
 
     id:             Mapped[str]          = mapped_column(String, primary_key=True)
@@ -265,7 +260,6 @@ class CallRecord(Base):
     
 
 class InfluencerFollower(Base):
-    """Join table capturing a follow between a user and an influencer."""
     __tablename__ = "influencer_followers"
 
     influencer_id: Mapped[str] = mapped_column(
@@ -304,13 +298,11 @@ class InfluencerSubscriptionPlan(Base):
     interval: Mapped[str] = mapped_column(String, nullable=False, default="monthly")  # "monthly", "yearly", "addon"
     plan_type: Mapped[str] = mapped_column(String, nullable=False, default="recurring")  # "recurring", "addon"
     
-    # Plan details (JSON for flexibility)
     features: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # Example: {"credits_per_month": 14900, "priority_support": true}
     
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     
-    # Ordering and availability
     display_order: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_featured: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -333,10 +325,6 @@ class InfluencerSubscriptionPlan(Base):
 
 
 class InfluencerSubscription(Base):
-    """
-    One paid subscription per (user_id, influencer_id).
-    Holds the current state of the subscription.
-    """
     __tablename__ = "influencer_subscriptions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -417,10 +405,6 @@ class InfluencerSubscription(Base):
 
 
 class InfluencerSubscriptionAddonPurchase(Base):
-    """
-    Tracks add-on pack purchases.
-    Records each time a user buys an add-on pack.
-    """
     __tablename__ = "influencer_subscription_addon_purchases"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -474,10 +458,7 @@ class InfluencerSubscriptionAddonPurchase(Base):
 
 
 class InfluencerSubscriptionPayment(Base):
-    """
-    Immutable ledger of payment attempts/events for a subscription.
-    Every capture / refund / failed payment becomes a row here.
-    """
+
     __tablename__ = "influencer_subscription_payments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -554,11 +535,7 @@ class SystemPrompt(Base):
     )
 
 class PreInfluencer(Base):
-    """
-    Pre-onboarding record for someone who wants to be an influencer.
-    This is created from the simple signup:
-      full_name, location, username, email
-    """
+
     __tablename__ = "pre_influencers"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
