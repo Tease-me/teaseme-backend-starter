@@ -68,6 +68,7 @@ class User(Base):
     password_reset_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     password_reset_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     profile_photo_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    custom_adult_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     
     moderation_status: Mapped[str] = mapped_column(String, default="CLEAN") 
@@ -748,4 +749,3 @@ class ReEngagementLog(Base):
         Index("ix_reeng_user_infl_triggered", "user_id", "influencer_id", "triggered_at"),
         Index("ix_reeng_triggered_at", "triggered_at"),
     )
-

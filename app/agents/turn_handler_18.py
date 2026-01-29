@@ -6,7 +6,7 @@ from sqlalchemy import select
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 
 from app.agents.prompt_utils import pick_time_mood
-from app.db.models import Influencer, Message18
+from app.db.models import Influencer, Message18, User
 from app.agents.prompts import XAI_MODEL
 from app.utils.tts_sanitizer import sanitize_tts_text
 from app.utils.prompt_logging import log_prompt
@@ -62,8 +62,9 @@ async def handle_turn_18(
     cid = uuid4().hex[:8]
     log.info("[%s] START(18) persona=%s chat=%s user=%s", cid, influencer_id, chat_id, user_id)
 
-    influencer, base_adult_prompt, base_audio_prompt, weekday_prompt, weekend_prompt, recent_ctx = await asyncio.gather(
+    influencer, user, base_adult_prompt, base_audio_prompt, weekday_prompt, weekend_prompt, recent_ctx = await asyncio.gather(
         db.get(Influencer, influencer_id),
+        db.get(User, user_id),
         get_system_prompt(db, prompt_keys.BASE_ADULT_PROMPT),
         get_system_prompt(db, prompt_keys.BASE_ADULT_AUDIO_PROMPT),
         get_system_prompt(db, prompt_keys.WEEKDAY_TIME_PROMPT_ADULT),
@@ -87,7 +88,8 @@ async def handle_turn_18(
     )
     mood = pick_time_mood(weekday_prompt, weekend_prompt, user_timezone)
 
-    prompt = prompt.partial(main_prompt=influencer.custom_adult_prompt, history=recent_ctx, mood=mood)
+    user_adult_prompt = user.custom_adult_prompt if user else None
+    prompt = prompt.partial(user_prompt=user_adult_prompt, history=recent_ctx, mood=mood)
     chain = prompt | XAI_MODEL
 
     try:
@@ -98,7 +100,7 @@ async def handle_turn_18(
             cid=cid,
             input=message,
             history=recent_ctx,
-            main_prompt=influencer.custom_adult_prompt,
+            user_prompt=user_adult_prompt,
         )
         reply = getattr(result, "content", None) or str(result)
 

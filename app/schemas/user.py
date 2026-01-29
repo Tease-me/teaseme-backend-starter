@@ -25,6 +25,14 @@ class UserUpdate(BaseModel):
             return dt.replace(tzinfo=None)
         return v
 
+
+class UserAdultPromptUpdate(BaseModel):
+    custom_adult_prompt: Optional[str] = None
+
+
+class UserAdultPromptOut(BaseModel):
+    custom_adult_prompt: Optional[str] = None
+
 class UserRead(UserBase):
     id: int
     email: str
