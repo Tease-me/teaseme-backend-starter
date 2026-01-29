@@ -9,7 +9,7 @@ from sqlalchemy import func
 from app.core.config import settings
 from app.db.models import User, InfluencerWallet, DailyUsage, Pricing
 from app.db.session import get_db
-from app.schemas.user import UserOut, UserUpdate
+from app.schemas.user import UserOut, UserUpdate, UserAdultPromptUpdate, UserAdultPromptOut
 from app.utils.deps import get_current_user
 from app.utils.s3 import (
     generate_user_presigned_url,
@@ -214,6 +214,20 @@ async def update_user(
         user_out.profile_photo_url = generate_user_presigned_url(current_user.profile_photo_key)
         
     return user_out
+
+
+@router.patch("/adult-prompt", response_model=UserAdultPromptOut)
+async def update_user_adult_prompt(
+    payload: UserAdultPromptUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    current_user.custom_adult_prompt = payload.custom_adult_prompt
+    db.add(current_user)
+    await db.commit()
+    await db.refresh(current_user)
+
+    return UserAdultPromptOut(custom_adult_prompt=current_user.custom_adult_prompt)
 
 
 @router.post("/{id}/photo", response_model=UserOut)
