@@ -30,6 +30,25 @@ async def search_similar_memories(db, chat_id, embedding, top_k=5):
     result = await db.execute(sql, params)
     return [row[0] for row in result.fetchall()]
 
+async def search_similar_messages(db, chat_id, embedding, top_k=5):
+    sql = text("""
+        SELECT content
+        FROM messages
+        WHERE chat_id = :chat_id
+          AND embedding IS NOT NULL
+        ORDER BY embedding <-> :embedding
+        LIMIT :top_k
+    """)
+    embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
+    params = {
+        "chat_id": chat_id,
+        "embedding": embedding_str,
+        "top_k": top_k
+    }
+    result = await db.execute(sql, params)
+    return [row[0] for row in result.fetchall()]
+
+
 
 from sqlalchemy import text, func
 from datetime import datetime, timezone
