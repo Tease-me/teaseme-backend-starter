@@ -127,9 +127,8 @@ async def handle_turn(
         influencer=influencer,
     )
 
+   
     rel = rel_pack["rel"]
-    persona_likes = rel_pack["persona_likes"]
-    persona_dislikes = rel_pack["persona_dislikes"]
     days_idle = rel_pack["days_idle"]
     dtr_goal = rel_pack["dtr_goal"]
 
@@ -139,6 +138,17 @@ async def handle_turn(
     mem_block = "\n".join(s for s in (_norm(m) for m in memories or []) if s)
 
     bio = influencer.bio_json or {}
+
+    persona_likes = bio.get("likes", [])
+    persona_dislikes = bio.get("dislikes", [])
+    if not isinstance(persona_likes, list):
+        persona_likes = []
+    if not isinstance(persona_dislikes, list):
+        persona_dislikes = []
+    stages = bio.get("stages", {})
+    if not isinstance(stages, dict):
+        stages = {}
+
     # mbti_archetype = bio.get("mbti_architype", "")  
     # mbti_addon = bio.get("mbti_rules", "")  
     # mbti_rules = await get_mbti_rules_for_archetype(db, mbti_archetype, mbti_addon)
@@ -155,7 +165,7 @@ async def handle_turn(
         days_idle=days_idle,
         dtr_goal=dtr_goal,
         # personality_rules=personality_rules,
-        # stages=stages,
+        stages=stages,
         persona_likes=persona_likes,
         persona_dislikes=persona_dislikes,
         # mbti_rules=mbti_rules,
@@ -164,6 +174,7 @@ async def handle_turn(
         last_user_message=message,
         mood=mood,
         # tone=tone,
+        influencer_name=influencer.display_name,
     )
 
     hist_msgs = history.messages

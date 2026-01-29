@@ -14,7 +14,7 @@ from app.api.elevenlabs import _extract_total_seconds
 from sqlalchemy import select
 from app.db.models import CallRecord, Chat, Influencer
 from app.agents.turn_handler import  handle_turn, redis_history
-from app.agents.memory import find_similar_memories
+from app.agents.memory import find_similar_memories, find_similar_messages
 
 from app.relationship.processor import process_relationship_turn
 
@@ -412,6 +412,27 @@ async def eleven_webhook_get_memories(
             "[EL TOOL] reply ms=%d conv=%s user=%s infl=%s chat=%s",
             ms, conversation_id, user_id, influencer_id, chat_id
         )
+    
+    def _memories_empty(value) -> bool:
+        if not value:
+            return True
+        if isinstance(value, (list, tuple)) and all(not v for v in value):
+            return True
+        return False
+
+    if _memories_empty(memories):
+        try:
+            memories = await asyncio.wait_for(
+                find_similar_messages(
+                    message=user_text,
+                    chat_id=chat_id,
+                    influencer_id=influencer_id,
+                    db=db,
+                ),
+                timeout=6.0,
+            )
+        except Exception:
+            memories = []
 
     return {"memories": memories}
 

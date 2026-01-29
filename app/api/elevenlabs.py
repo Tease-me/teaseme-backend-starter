@@ -3,6 +3,8 @@ import logging
 import math
 import random
 import json
+from uuid import uuid4
+from app.agents.memory import find_similar_memories
 from app.agents.prompt_utils import build_relationship_prompt, get_global_prompt, get_mbti_rules_for_archetype
 from app.relationship.dtr import plan_dtr_goal
 from app.relationship.inactivity import apply_inactivity_decay
@@ -24,7 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.services.billing import can_afford, get_remaining_units
 from app.services.chat_service import get_or_create_chat
-from app.agents.turn_handler import redis_history
+from app.agents.turn_handler import _norm, redis_history
 from langchain_core.prompts import ChatPromptTemplate
 from app.db.session import SessionLocal
 from app.api.utils import get_embedding
@@ -1321,10 +1323,10 @@ async def get_conversation_token(
     stages = bio.get("stages", {})
     if not isinstance(stages, dict):
         stages = {}
-    personality_rules = bio.get("personality_rules", "")
-    tone = bio.get("tone", "")
-    mbti_rules = bio.get("mbti_rules", "")
-    persona_rules = influencer.prompt_template or ""
+    # personality_rules = bio.get("personality_rules", "")
+    # tone = bio.get("tone", "")
+    # mbti_rules = bio.get("mbti_rules", "")
+    # persona_rules = influencer.prompt_template or ""
 
     history = redis_history(chat_id)
 
@@ -1353,7 +1355,7 @@ async def get_conversation_token(
         days_idle=days_idle,
         dtr_goal=dtr_goal,
         # personality_rules=personality_rules,
-        # stages=stages,
+        stages=stages,
         persona_likes=persona_likes,
         persona_dislikes=persona_dislikes,
         # mbti_rules=mbti_rules,
@@ -1362,10 +1364,10 @@ async def get_conversation_token(
         # tone=tone,
         analysis="",
         # persona_rules=persona_rules,
+        influencer_name=influencer.display_name,
     )
     
-    hist_msgs = history.messages
-    log_prompt(log, prompt, cid="", input="", history=hist_msgs)
+    log_prompt(log, prompt, cid="", input="")
 
     try:
         async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
@@ -1405,7 +1407,8 @@ async def get_conversation_token(
         "agent_id": agent_id, 
         "credits_remainder_secs": credits_remainder_secs, 
         "greeting_used": greeting,
-        "prompt": prompt.format(input="", history=history.messages),
+        "prompt": prompt.format(input=""),
+        "voice_id": influencer.voice_id or DEFAULT_ELEVENLABS_VOICE_ID,
         "native_language": influencer.native_language if influencer else "en",
     }
 

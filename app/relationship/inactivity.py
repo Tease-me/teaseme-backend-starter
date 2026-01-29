@@ -22,13 +22,17 @@ def apply_inactivity_decay(rel, now: datetime) -> float:
     if days_idle < 2:
         return days_idle
 
-    rel.closeness = max(0.0, rel.closeness - min(8.0, days_idle * 1.5))
+    # Girlfriends get reduced decay rates (50% slower)
+    is_girlfriend = getattr(rel, 'girlfriend_confirmed', False)
+    decay_multiplier = 0.5 if is_girlfriend else 1.0
+
+    rel.closeness = max(0.0, rel.closeness - min(8.0, days_idle * 1.5 * decay_multiplier))
 
     if days_idle >= 3:
-        rel.attraction = max(0.0, rel.attraction - min(10.0, days_idle * 1.8))
+        rel.attraction = max(0.0, rel.attraction - min(10.0, days_idle * 1.8 * decay_multiplier))
 
     if days_idle >= 7:
-        rel.trust = max(0.0, rel.trust - min(5.0, (days_idle - 6) * 0.8))
+        rel.trust = max(0.0, rel.trust - min(5.0, (days_idle - 6) * 0.8 * decay_multiplier))
 
     return days_idle
 
@@ -96,7 +100,7 @@ async def check_and_trigger_reengagement(
         f"balance=${total_balance/100:.2f} days_idle={days_idle:.1f}"
     )
 
-    asyncio.create_task(
+    task = asyncio.create_task(
         send_reengagement_notification(
             db=db,
             user_id=user_id,
@@ -106,5 +110,7 @@ async def check_and_trigger_reengagement(
             days_inactive=int(days_idle),
         )
     )
+    # Prevent garbage collection of background task
+    task.add_done_callback(lambda t: None)
 
     return True
