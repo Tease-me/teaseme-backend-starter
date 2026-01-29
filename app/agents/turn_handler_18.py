@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 
+from app.agents.prompt_utils import pick_time_mood
 from app.db.models import Influencer, Message18
 from app.agents.prompts import XAI_MODEL
 from app.utils.tts_sanitizer import sanitize_tts_text
