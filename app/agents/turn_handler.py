@@ -164,10 +164,10 @@ async def handle_turn(
     prompt = build_relationship_prompt(
         prompt_template,
         rel=rel,
-        # days_idle=days_idle,
-        # dtr_goal=dtr_goal,
+        days_idle=days_idle,
+        dtr_goal=dtr_goal,
         # personality_rules=personality_rules,
-        # stages=stages,
+        stages=stages,
         persona_likes=persona_likes,
         persona_dislikes=persona_dislikes,
         # mbti_rules=mbti_rules,
