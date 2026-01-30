@@ -83,6 +83,7 @@ class Settings(BaseSettings):
 
     # Didit Identity Verification (v3 API)
     DIDIT_API_KEY: str | None = None  # x-api-key for v3 API
+    DIDIT_WEBHOOK_SECRET: str | None = None  # Webhook secret key from Didit console
     DIDIT_WORKFLOW_ID_KYC: str | None = None  # KYC workflow ID from Didit console
     DIDIT_REDIRECT_URL: str | None = None  # Default redirect URL after verification
 
