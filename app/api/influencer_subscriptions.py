@@ -6,7 +6,7 @@ from pydantic import BaseModel
 import uuid
 
 from app.db.session import get_db
-from app.utils.deps import get_current_user
+from app.utils.deps import get_current_user, require_age_verification
 from app.db.models import (
     InfluencerSubscription,
     InfluencerSubscriptionPayment,
@@ -374,7 +374,7 @@ async def set_18_mode(
     influencer_id: str,
     req: Set18Req,
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(require_age_verification),
 ):
     sub = await require_active_subscription(
         db,
