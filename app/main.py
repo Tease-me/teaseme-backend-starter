@@ -23,6 +23,7 @@ from app.api.social import router as social_router
 from app.api.admin import router as admin_router
 from app.api.relationship import router as relationship_router
 from app.api.re_engagement import router as re_engagement_router
+from app.api.verification import router as verification_router
 
 from app.api import system_prompts as system_prompts_router
 
@@ -79,3 +80,4 @@ app.include_router(social_router)
 app.include_router(admin_router)
 app.include_router(relationship_router)
 app.include_router(re_engagement_router)
+app.include_router(verification_router)

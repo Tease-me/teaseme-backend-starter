@@ -1,4 +1,3 @@
-"""Simplified OpenAI chat helper (no Assistants API)."""
 from __future__ import annotations
 
 import logging

@@ -36,3 +36,38 @@ async def get_current_user(
         raise credentials_exception
 
     return user
+
+
+async def require_age_verification(
+    user: User = Depends(get_current_user),
+) -> User:
+    """
+    Dependency to ensure user has verified their age (18+) before accessing adult content.
+    
+    Age verification can be satisfied by:
+    - Explicit age verification (is_age_verified=True)
+    - Full identity verification with level "full" or "premium"
+    
+    Raises:
+        HTTPException: 403 if user is not age-verified
+    """
+    # Check if user has age verification
+    is_verified = user.is_age_verified or (
+        user.is_identity_verified and user.verification_level in ["full", "premium"]
+    )
+    
+    if not is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "AGE_VERIFICATION_REQUIRED",
+                "message": "You must verify your age (18+) to access this content. Please complete identity verification.",
+                "verification_status": {
+                    "is_age_verified": user.is_age_verified,
+                    "is_identity_verified": user.is_identity_verified,
+                    "verification_level": user.verification_level,
+                }
+            }
+        )
+    
+    return user

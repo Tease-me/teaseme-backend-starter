@@ -24,7 +24,6 @@ async def main():
         for entry in USERS:
             existing = await db.scalar(select(User).where(User.email == entry["email"]))
             if existing:
-                # ensure fields stay in sync; do not overwrite password unless provided
                 existing.username = entry.get("username") or existing.username
                 existing.is_verified = entry.get("is_verified", existing.is_verified)
                 if entry.get("password"):

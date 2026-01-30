@@ -49,6 +49,7 @@ async def search_similar_messages(db, chat_id, embedding, top_k=5):
     return [row[0] for row in result.fetchall()]
 
 
+
 from sqlalchemy import text, func
 from datetime import datetime, timezone
 

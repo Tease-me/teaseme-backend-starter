@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     S3_AWS_SECRET_ACCESS_KEY: str
 
     PUBLIC_BASE_URL: str
+    
+    DEVICE: str = ""
 
     model_config = SettingsConfigDict(
         env_file=Path(__file__).resolve().parents[1].parent / ".env",
@@ -78,5 +80,11 @@ class Settings(BaseSettings):
     FIRSTPROMOTER_ACCOUNT_ID: str | None = None
     FIRSTPROMOTER_API_KEY: str | None = None
     FIRSTPROMOTER_NOTIFY_EMAIL: str | None = None
+
+    # Didit Identity Verification (v3 API)
+    DIDIT_API_KEY: str | None = None  # x-api-key for v3 API
+    DIDIT_WEBHOOK_SECRET: str | None = None  # Webhook secret key from Didit console
+    DIDIT_WORKFLOW_ID_KYC: str | None = None  # KYC workflow ID from Didit console
+    DIDIT_REDIRECT_URL: str | None = None  # Default redirect URL after verification
 
 settings = Settings()

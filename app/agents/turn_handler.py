@@ -1,8 +1,6 @@
 import logging
 import asyncio
 from uuid import uuid4
-from datetime import datetime, timezone
-
 from fastapi import HTTPException
 
 from langchain_core.runnables.history import RunnableWithMessageHistory
