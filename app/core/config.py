@@ -81,4 +81,9 @@ class Settings(BaseSettings):
     FIRSTPROMOTER_API_KEY: str | None = None
     FIRSTPROMOTER_NOTIFY_EMAIL: str | None = None
 
+    # Didit Identity Verification (v3 API)
+    DIDIT_API_KEY: str | None = None  # x-api-key for v3 API
+    DIDIT_WORKFLOW_ID_KYC: str | None = None  # KYC workflow ID from Didit console
+    DIDIT_REDIRECT_URL: str | None = None  # Default redirect URL after verification
+
 settings = Settings()
