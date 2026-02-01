@@ -88,7 +88,10 @@ async def register(data: RegisterRequest, request: Request, db: AsyncSession = D
         password_hash=pwd_context.hash(data.password),
         email=data.email,
         is_verified=False,
-        email_token=verify_token
+        email_token=verify_token,
+        full_name=data.full_name,
+        gender=data.gender,
+        date_of_birth=data.date_of_birth,
     )
     db.add(user)
     await db.commit()
