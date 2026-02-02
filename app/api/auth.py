@@ -2,7 +2,7 @@ import secrets
 import logging
 
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile, status
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -19,7 +19,7 @@ from app.utils.auth import create_token
 from app.api.notify_ws import notify_email_verified
 from app.services.firstpromoter import fp_track_signup
 from app.schemas.user import UserOut
-from app.utils.s3 import generate_user_presigned_url
+from app.utils.s3 import generate_user_presigned_url, save_user_photo_to_s3, delete_file_from_s3
 from app.services.follow import create_follow_if_missing
 from app.services.influencer import ensure_influencer
 from app.utils.rate_limiter import rate_limit
@@ -72,7 +72,12 @@ def _clear_auth_cookies(response: Response) -> None:
 
 @router.post("/register")
 @rate_limit(max_requests=settings.RATE_LIMIT_AUTH_MAX, window_seconds=settings.RATE_LIMIT_AUTH_WINDOW, key_prefix="auth:register")
-async def register(data: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db)):
+async def register(
+    request: Request,
+    data: RegisterRequest,
+    db: AsyncSession = Depends(get_db),
+    file: UploadFile | None = File(default=None),
+):
     existing_user = await db.execute(
         select(User).where((User.email == data.email))
     )
@@ -96,6 +101,30 @@ async def register(data: RegisterRequest, request: Request, db: AsyncSession = D
     db.add(user)
     await db.commit()
     await db.refresh(user)
+
+    if file:
+        try:
+            key = await save_user_photo_to_s3(
+                file.file,
+                file.filename or "profile.jpg",
+                file.content_type or "image/jpeg",
+                user.id
+            )
+            user.profile_photo_key = key
+            db.add(user)
+            try:
+                await db.commit()
+                await db.refresh(user)
+            except Exception:
+                await db.rollback()
+                try:
+                    await delete_file_from_s3(key)
+                except Exception:
+                    log.warning("Failed to rollback uploaded S3 photo %s", key, exc_info=True)
+                raise
+        except Exception as e:
+            log.error(f"Failed to upload profile photo during registration: {e}", exc_info=True)
+            raise HTTPException(500, "Failed to upload profile photo")
 
     if data.influencer_id:
         await create_follow_if_missing(db, data.influencer_id, user.id)
