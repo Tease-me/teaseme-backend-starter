@@ -1,7 +1,7 @@
 import io
 import logging
 from datetime import date
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func
@@ -190,23 +190,53 @@ async def get_user_by_id(
 @router.patch("/{id}/profile", response_model=UserOut)
 async def update_user(
     id: int,
-    user_in: UserUpdate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    user_in: str | None = Form(default=None),
+    file: UploadFile | None = File(default=None),
 ):
-    """Update user profile fields"""
     if id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to update this profile")
 
-    update_data = user_in.model_dump(exclude_unset=True)
-    
-    for field, value in update_data.items():
-        setattr(current_user, field, value)
+    if user_in:
+        user_data = UserUpdate.model_validate_json(user_in)
+        update_data = user_data.model_dump(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(current_user, field, value)
+
+    if file:
+        previous_key = current_user.profile_photo_key
+        try:
+            key = await save_user_photo_to_s3(
+                file.file,
+                file.filename or "profile.jpg",
+                file.content_type or "image/jpeg",
+                current_user.id
+            )
+            current_user.profile_photo_key = key
+        except Exception as e:
+            log.error(f"Failed to upload user photo: {e}", exc_info=True)
+            raise HTTPException(500, "Failed to upload photo")
 
     db.add(current_user)
-    await db.commit()
-    await db.refresh(current_user)
-    
+    try:
+        await db.commit()
+        await db.refresh(current_user)
+    except Exception:
+        await db.rollback()
+        if file and current_user.profile_photo_key and current_user.profile_photo_key != previous_key:
+            try:
+                await delete_file_from_s3(current_user.profile_photo_key)
+            except Exception:
+                log.warning("Failed to rollback uploaded S3 photo", exc_info=True)
+        raise
+
+    if file and previous_key and previous_key != current_user.profile_photo_key:
+        try:
+            await delete_file_from_s3(previous_key)
+        except Exception:
+            log.warning("Failed to delete previous S3 photo %s", previous_key, exc_info=True)
+
     user_out = UserOut.model_validate(current_user)
     if current_user.profile_photo_key:
         user_out.profile_photo_url = generate_user_presigned_url(current_user.profile_photo_key)
