@@ -74,7 +74,7 @@ def _clear_auth_cookies(response: Response) -> None:
 @rate_limit(max_requests=settings.RATE_LIMIT_AUTH_MAX, window_seconds=settings.RATE_LIMIT_AUTH_WINDOW, key_prefix="auth:register")
 async def register(
     request: Request,
-    data: RegisterRequest,
+    data: RegisterRequest = Depends(RegisterRequest.as_form),
     db: AsyncSession = Depends(get_db),
     file: UploadFile | None = File(default=None),
 ):
@@ -95,7 +95,7 @@ async def register(
         is_verified=False,
         email_token=verify_token,
         full_name=data.full_name,
-        user_name=data.user_name,
+        username=data.user_name,
         gender=data.gender,
         date_of_birth=data.date_of_birth,
     )
