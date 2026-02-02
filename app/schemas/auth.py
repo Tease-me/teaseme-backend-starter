@@ -12,6 +12,7 @@ class RegisterRequest(BaseModel):
     influencer_id: str | None = None
     full_name: str | None = None
     gender: str | None = None
+    user_name: str | None = None
     date_of_birth: date | None = None
     
 class Token(BaseModel):

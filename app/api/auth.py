@@ -90,6 +90,7 @@ async def register(data: RegisterRequest, request: Request, db: AsyncSession = D
         is_verified=False,
         email_token=verify_token,
         full_name=data.full_name,
+        user_name=data.user_name,
         gender=data.gender,
         date_of_birth=data.date_of_birth,
     )
