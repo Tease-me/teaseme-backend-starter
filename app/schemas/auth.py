@@ -12,8 +12,8 @@ class RegisterRequest(BaseModel):
     email: str
     influencer_id: str | None = None
     full_name: str | None = None
-    gender: str | None = None
     user_name: str | None = None
+    gender: str | None = None
     date_of_birth: date | None = None
 
     @classmethod
@@ -23,8 +23,8 @@ class RegisterRequest(BaseModel):
         email: str = Form(...),
         influencer_id: str | None = Form(default=None),
         full_name: str | None = Form(default=None),
-        gender: str | None = Form(default=None),
         user_name: str | None = Form(default=None),
+        gender: str | None = Form(default=None),
         date_of_birth: date | None = Form(default=None),
     ) -> "RegisterRequest":
         return cls(
@@ -32,8 +32,8 @@ class RegisterRequest(BaseModel):
             email=email,
             influencer_id=influencer_id,
             full_name=full_name,
-            gender=gender,
             user_name=user_name,
+            gender=gender,
             date_of_birth=date_of_birth,
         )
     
