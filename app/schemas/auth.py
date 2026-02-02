@@ -1,3 +1,5 @@
+from datetime import date
+
 from pydantic import BaseModel
 
 class LoginRequest(BaseModel):
@@ -10,7 +12,7 @@ class RegisterRequest(BaseModel):
     influencer_id: str | None = None
     full_name: str | None = None
     gender: str | None = None
-    date_of_birth: str | None = None
+    date_of_birth: date | None = None
     
 class Token(BaseModel):
     access_token: str
