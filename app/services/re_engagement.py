@@ -1,9 +1,8 @@
 import logging
 import random
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
-from sqlalchemy import select, and_, not_, exists, func
+from sqlalchemy import select, and_, not_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (

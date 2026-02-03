@@ -13,14 +13,9 @@ UniqueConstraint, Index, JSON, Text
 )
 
 class Base(DeclarativeBase):
-    """Common base class – can host __repr__ or metadata config later."""
     pass
 
 class Influencer(Base):
-    """
-    One row per persona/influencer.  The `id` column will be the new
-    `influencer_id` referenced from Chat.
-    """
     __tablename__ = "influencers"
 
     id:             Mapped[str]          = mapped_column(String, primary_key=True)
@@ -68,12 +63,19 @@ class User(Base):
     password_reset_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     password_reset_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     profile_photo_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    custom_adult_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     
     moderation_status: Mapped[str] = mapped_column(String, default="CLEAN") 
     violation_count: Mapped[int] = mapped_column(Integer, default=0)
     first_violation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_violation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    
+    # Identity Verification (Didit)
+    is_identity_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_age_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    verification_level: Mapped[str | None] = mapped_column(String, nullable=True)  # basic, full, premium
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     
     chats = relationship("Chat", back_populates="user")
     following_influencers: Mapped[List["InfluencerFollower"]] = relationship(
@@ -264,7 +266,6 @@ class CallRecord(Base):
     
 
 class InfluencerFollower(Base):
-    """Join table capturing a follow between a user and an influencer."""
     __tablename__ = "influencer_followers"
 
     influencer_id: Mapped[str] = mapped_column(
@@ -303,13 +304,11 @@ class InfluencerSubscriptionPlan(Base):
     interval: Mapped[str] = mapped_column(String, nullable=False, default="monthly")  # "monthly", "yearly", "addon"
     plan_type: Mapped[str] = mapped_column(String, nullable=False, default="recurring")  # "recurring", "addon"
     
-    # Plan details (JSON for flexibility)
     features: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # Example: {"credits_per_month": 14900, "priority_support": true}
     
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     
-    # Ordering and availability
     display_order: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_featured: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -332,10 +331,6 @@ class InfluencerSubscriptionPlan(Base):
 
 
 class InfluencerSubscription(Base):
-    """
-    One paid subscription per (user_id, influencer_id).
-    Holds the current state of the subscription.
-    """
     __tablename__ = "influencer_subscriptions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -416,10 +411,6 @@ class InfluencerSubscription(Base):
 
 
 class InfluencerSubscriptionAddonPurchase(Base):
-    """
-    Tracks add-on pack purchases.
-    Records each time a user buys an add-on pack.
-    """
     __tablename__ = "influencer_subscription_addon_purchases"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -473,10 +464,7 @@ class InfluencerSubscriptionAddonPurchase(Base):
 
 
 class InfluencerSubscriptionPayment(Base):
-    """
-    Immutable ledger of payment attempts/events for a subscription.
-    Every capture / refund / failed payment becomes a row here.
-    """
+
     __tablename__ = "influencer_subscription_payments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -553,11 +541,7 @@ class SystemPrompt(Base):
     )
 
 class PreInfluencer(Base):
-    """
-    Pre-onboarding record for someone who wants to be an influencer.
-    This is created from the simple signup:
-      full_name, location, username, email
-    """
+
     __tablename__ = "pre_influencers"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -749,3 +733,80 @@ class ReEngagementLog(Base):
         Index("ix_reeng_triggered_at", "triggered_at"),
     )
 
+
+class IdentityVerification(Base):
+    """
+    Tracks identity verification sessions via Didit.
+    Each verification attempt creates a new record.
+    """
+    __tablename__ = "identity_verifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Didit session information
+    session_id: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
+    workflow_id: Mapped[str] = mapped_column(String, nullable=False)
+    workflow_type: Mapped[str] = mapped_column(String, nullable=False)  # "kyc", "age", "biometric"
+
+    # Verification status
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    # Status: "pending", "in_progress", "completed", "failed", "expired"
+
+    # Verification results
+    verification_result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    verified_age: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    verified_identity_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    
+    # Document information (if applicable)
+    document_type: Mapped[str | None] = mapped_column(String, nullable=True)  # "passport", "id_card", "driver_license"
+    document_country: Mapped[str | None] = mapped_column(String, nullable=True)
+    
+    # Risk & compliance
+    risk_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    aml_checked: Mapped[bool] = mapped_column(Boolean, default=False)
+    aml_result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    
+    # Session metadata
+    ip_address: Mapped[str | None] = mapped_column(String, nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String, nullable=True)
+    
+    # Webhook data from Didit
+    webhook_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    
+    # Failure information
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    
+    # Timestamps
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        Index("ix_identity_ver_user_status", "user_id", "status"),
+        Index("ix_identity_ver_session", "session_id"),
+        Index("ix_identity_ver_created", "created_at"),
+    )

@@ -67,7 +67,7 @@ def message18_to_schema_with_presigned(msg):
         content=msg.content,
         created_at=msg.created_at,
         audio_url=audio_url,
-        channel=getattr(msg, "channel", "text"),          # default
+        channel=getattr(msg, "channel", "text"),         
         conversation_id=getattr(msg, "conversation_id", None),  # Message18 doesn't have it
     )
 async def save_knowledge_file_to_s3(file_obj, filename: str, content_type: str, influencer_id: str) -> str:
@@ -122,7 +122,10 @@ async def save_influencer_ia_audio_to_s3(audio_bytes: bytes, influencer_id: str)
         ExtraArgs={"ContentType": "audio/mpeg"},
     )
     return key
-
+async def get_s3_object_bytes(key: str) -> bytes:
+    obj = s3.get_object(Bucket=settings.BUCKET_NAME, Key=key)
+    body = obj.get("Body")
+    return body.read() if body else b""
 
 async def save_sample_audio_to_s3(file_obj, filename: str | None, content_type: str, influencer_id: str) -> str:
     ext = (filename.split(".")[-1].lower() if filename and "." in filename else "mp3")

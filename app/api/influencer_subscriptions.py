@@ -6,7 +6,7 @@ from pydantic import BaseModel
 import uuid
 
 from app.db.session import get_db
-from app.utils.deps import get_current_user
+from app.utils.deps import get_current_user, require_age_verification
 from app.db.models import (
     InfluencerSubscription,
     InfluencerSubscriptionPayment,
@@ -38,14 +38,6 @@ async def start_subscription(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    """
-    Start a subscription for an influencer.
-    
-    Args:
-        influencer_id: Influencer ID to subscribe to
-        plan_id: Subscription plan ID (Basic=1, Plus=2, Premium=3)
-    """
-    # First, check if influencer exists
     from app.db.models import Influencer
     influencer = await db.get(Influencer, influencer_id)
     if not influencer:
@@ -58,7 +50,6 @@ async def start_subscription(
             }
         )
     
-    # Get plan details (required)
     plan = await db.get(InfluencerSubscriptionPlan, plan_id)
     if not plan:
         raise HTTPException(
@@ -69,7 +60,6 @@ async def start_subscription(
             }
         )
     
-    # Check if this is an add-on (one-time purchase)
     if plan.interval == "addon" or plan.plan_type == "addon":
         raise HTTPException(
             status_code=400,
@@ -95,10 +85,8 @@ async def start_subscription(
             }
         )
     
-    # Get price from plan
     price_cents = plan.price_cents
     
-    # All subscriptions are for 18+ content
     is_18 = True
     
     res = await db.execute(
@@ -111,7 +99,6 @@ async def start_subscription(
 
     now = datetime.now(timezone.utc)
 
-    # If subscription already exists and is active, return error
     if sub and sub.status == "active":
         raise HTTPException(
             status_code=400,
@@ -124,7 +111,6 @@ async def start_subscription(
             }
         )
     
-    # If subscription exists but is cancelled/expired, reactivate it
     if sub:
         sub.status = "pending"  # Waiting for payment
         sub.price_cents = price_cents
@@ -388,7 +374,7 @@ async def set_18_mode(
     influencer_id: str,
     req: Set18Req,
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(require_age_verification),
 ):
     sub = await require_active_subscription(
         db,

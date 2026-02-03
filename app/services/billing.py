@@ -4,12 +4,11 @@ import os
 import math
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import insert
 
 from fastapi import HTTPException
 from app.db.models import InfluencerWallet, InfluencerCreditTransaction, DailyUsage, Pricing, User, Chat, Influencer
-from datetime import datetime, timezone, date
+from datetime import datetime, date
 
 async def charge_feature(
     db: AsyncSession,

@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 ELEVENLABS_API_KEY = settings.ELEVENLABS_API_KEY
-ELEVENLABS_VOICE_ID = settings.ELEVENLABS_VOICE_ID
+ELEVENLABS_VOICE_ID = settings.ELEVENLABS_VOICE_ID or None
 
 async def transcribe_audio(file_or_bytesio, filename=None, content_type=None):
     if hasattr(file_or_bytesio, "read") and hasattr(file_or_bytesio, "filename"):

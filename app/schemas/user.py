@@ -1,6 +1,6 @@
 from pydantic import BaseModel, field_validator
-from typing import List, Optional
-from datetime import datetime, timezone
+from typing import Optional
+from datetime import datetime
 
 class UserBase(BaseModel):
     full_name: Optional[str] = None
@@ -24,6 +24,14 @@ class UserUpdate(BaseModel):
             dt = datetime.fromisoformat(v.replace('Z', '+00:00'))
             return dt.replace(tzinfo=None)
         return v
+
+
+class UserAdultPromptUpdate(BaseModel):
+    custom_adult_prompt: Optional[str] = None
+
+
+class UserAdultPromptOut(BaseModel):
+    custom_adult_prompt: Optional[str] = None
 
 class UserRead(UserBase):
     id: int
