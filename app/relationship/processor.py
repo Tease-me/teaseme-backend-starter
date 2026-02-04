@@ -124,7 +124,7 @@ async def process_relationship_turn(
         persona_dislikes = []
 
     sig_dict = await classify_signals(
-        message, recent_ctx, persona_likes, persona_dislikes, convo_analyzer
+        db, message, recent_ctx, persona_likes, persona_dislikes, convo_analyzer
     )
     log.info("[%s] SIG_DICT=%s", cid, sig_dict)
     sig = Signals(**sig_dict)
@@ -151,9 +151,9 @@ async def process_relationship_turn(
             accepted_exclusive=sig.accepted_exclusive,
             accepted_girlfriend=sig.accepted_girlfriend,
         )
-        out = update_relationship(rel.trust, rel.closeness, rel.attraction, rel.safety, dampened_sig)
+        out = update_relationship(rel.trust, rel.closeness, rel.attraction, rel.safety, rel.state, dampened_sig)
     else:
-        out = update_relationship(rel.trust, rel.closeness, rel.attraction, rel.safety, sig)
+        out = update_relationship(rel.trust, rel.closeness, rel.attraction, rel.safety, rel.state, sig)
 
     log.info(
         "[%s] DIM before->after | t %.4f->%.4f c %.4f->%.4f a %.4f->%.4f s %.4f->%.4f",

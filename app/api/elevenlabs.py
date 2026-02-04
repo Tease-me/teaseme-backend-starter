@@ -4,8 +4,7 @@ import math
 import random
 import json
 from uuid import uuid4
-from app.agents.memory import find_similar_memories
-from app.agents.prompt_utils import build_relationship_prompt, get_global_prompt, get_mbti_rules_for_archetype
+from app.agents.prompt_utils import build_relationship_prompt, get_global_prompt
 from app.relationship.dtr import plan_dtr_goal
 from app.relationship.inactivity import apply_inactivity_decay
 from app.relationship.repo import get_or_create_relationship

@@ -1,8 +1,7 @@
 import json
 from app.services.system_prompt_service import get_system_prompt
 from app.constants import prompt_keys
-from app.db.session import get_db
-db = get_db()
+
 DEFAULT = {
     "support": 0.0, "affection": 0.0, "flirt": 0.0, "respect": 0.0,
     "apology": 0.0, "commitment_talk": 0.0,
@@ -26,13 +25,20 @@ def _clampf(x):
         return 0.0
 
 async def classify_signals(
+    db,
     message: str,
     recent_ctx: str,
     persona_likes: list[str],
     persona_dislikes: list[str],
     llm
 ) -> dict:
-    prompt = get_system_prompt(db, prompt_keys.RELATIONSHIP_SIGNAL_PROMPT)
+    prompt_template = await get_system_prompt(db, prompt_keys.RELATIONSHIP_SIGNAL_PROMPT)
+    prompt = prompt_template.format(
+        persona_likes=persona_likes,
+        persona_dislikes=persona_dislikes,
+        recent_ctx=recent_ctx,
+        message=message
+    )
     try:
         r = await llm.ainvoke(prompt)
         data = json.loads((r.content or "").strip())
