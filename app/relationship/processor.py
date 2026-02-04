@@ -16,19 +16,34 @@ STAGES = ["HATE", "DISLIKE", "STRANGERS", "FRIENDLY", "FLIRTING", "DATING"]
 
 
 def stage_from_signals_and_points(stage_points: float, sig) -> str:
+  """
+  Determine relationship stage from stage_points.
+  
+  Clean thresholds:
+  - STRANGERS: 0-24 points (0-24%)
+  - TALKING: 25-49 points (25-49%)
+  - FLIRTING: 50-74 points (50-74%)
+  - DATING: 75-89 points (75-89%)
+  - GIRLFRIEND: 90-100 points (90-100%)
+  
+  Note: GIRLFRIEND is the ultimate relationship achievement.
+  Represents both high points (90+) and deep commitment.
+  """
   if getattr(sig, "threat", 0.0) > 0.20 or getattr(sig, "hate", 0.0) > 0.60:
       return "HATE"
   if getattr(sig, "dislike", 0.0) > 0.40 or getattr(sig, "rejecting", 0.0) > 0.40:
       return "DISLIKE"
 
   p = float(stage_points or 0.0)
-  if p < 20.0:
+  if p < 25.0:
       return "STRANGERS"
-  if p < 45.0:
+  if p < 50.0:
       return "FRIENDLY"
-  if p < 65.0:
+  if p < 75.0:
       return "FLIRTING"
-  return "DATING"
+  if p < 90.0:
+      return "DATING"
+  return "GIRLFRIEND"
 
 
 def compute_stage_delta(sig) -> float:
