@@ -997,7 +997,7 @@ BASE_SYSTEM = """
 ## HATE: {hate_stage}
 ## DISLIKE: {dislike_stage}
 ## STRANGERS: {strangers_stage}
-## TALKING: {talking_stage}
+## FRIENDLY: {friendly_stage}
 ## FLIRTING: {flirting_stage}
 ## DATING: {dating_stage}
 ## IN LOVE: {in_love_stage}""".strip()
@@ -1057,7 +1057,7 @@ SYSTEM_PROMPTS = [
         "prompt":         
         "You are a prompt engineer. Read the survey markdown and output only JSON matching this schema exactly: "
         "{ likes: string[], dislikes: string[], mbti_architype: string, mbti_rules: string, personality_rules: string, tone: string, "
-        "stages: { hate: string, dislike: string, strangers: string, talking: string, flirting: string, dating: string, in_love: string } }."
+        "stages: { hate: string, dislike: string, strangers: string, friendly: string, flirting: string, dating: string, in_love: string } }."
         "Fill likes/dislikes from foods, hobbies, entertainment, routines, and anything the user enjoys or hates. "
         "mbti_architype should select one of: ISTJ, ISFJ, INFJ, INTJ, ISTP, ISFP, INFP, INTP, ESTP, ESFP, ENFP, ENTP, ESTJ, ESFJ, ENFJ, ENTJ. "
         "mbti_rules should use mbti_architype to summarize decision style, social energy, planning habits. "

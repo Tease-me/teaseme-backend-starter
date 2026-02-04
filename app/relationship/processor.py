@@ -12,7 +12,7 @@ from app.relationship.dtr import plan_dtr_goal
 log = logging.getLogger("teachme-relationship")
 
 
-STAGES = ["HATE", "DISLIKE", "STRANGERS", "TALKING", "FLIRTING", "DATING"]
+STAGES = ["HATE", "DISLIKE", "STRANGERS", "FRIENDLY", "FLIRTING", "DATING"]
 
 
 def stage_from_signals_and_points(stage_points: float, sig) -> str:
@@ -25,7 +25,7 @@ def stage_from_signals_and_points(stage_points: float, sig) -> str:
   if p < 20.0:
       return "STRANGERS"
   if p < 45.0:
-      return "TALKING"
+      return "FRIENDLY"
   if p < 65.0:
       return "FLIRTING"
   return "DATING"

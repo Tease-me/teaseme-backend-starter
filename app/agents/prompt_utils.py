@@ -206,7 +206,7 @@ def build_relationship_prompt(
         # "personality_rules": personality_rules,
         # "dating_stage": stages.get("dating", ""),
         # "dislike_stage": stages.get("dislike", ""),
-        # "talking_stage": stages.get("talking", ""),
+        # "friendly_stage": stages.get("friendly", ""),
         # "flirting_stage": stages.get("flirting", ""),
         # "hate_stage": stages.get("hate", ""),
         # "strangers_stage": stages.get("strangers", ""),
