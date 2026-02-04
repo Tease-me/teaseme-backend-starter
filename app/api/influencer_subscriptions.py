@@ -15,7 +15,7 @@ from app.db.models import (
     InfluencerWallet,
     User
 )
-from app.services.influencer_subscriptions import require_active_subscription
+from app.services.influencer_subscriptions import can_toggle_18_plus, require_active_subscription
 from app.utils.rate_limiter import rate_limit
 from app.utils.idempotency import idempotent
 from app.utils.concurrency import advisory_lock
@@ -375,12 +375,21 @@ async def set_18_mode(
     req: Set18Req,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_age_verification),
-):
-    sub = await require_active_subscription(
-        db,
-        user_id=user.id,
-        influencer_id=influencer_id,
+):  
+    if not await can_toggle_18_plus(db, user_id=user.id, influencer_id=influencer_id):
+         return {
+            "ok": False,
+            "influencer_id": influencer_id,
+            "is_18_selected": sub.is_18_selected,
+        }
+    
+    res = await db.execute(
+        select(InfluencerSubscription).where(
+            InfluencerSubscription.user_id == user.id,
+            InfluencerSubscription.influencer_id == influencer_id,
+        )
     )
+    sub = res.scalar_one_or_none()
 
     sub.is_18_selected = bool(req.is_18_selected)
     db.add(sub)

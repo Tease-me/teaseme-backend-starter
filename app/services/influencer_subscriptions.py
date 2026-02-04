@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from re import sub
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException
@@ -20,18 +21,19 @@ async def require_active_subscription(
             InfluencerSubscription.influencer_id == influencer_id,
         )
     )
-    sub = res.scalar_one_or_none()
 
-    if not sub or sub.status != "active":
+    sub = res.scalar_one_or_none()
+    if not sub:
         raise HTTPException(
             status_code=402,
             detail={
                 "error": "SUBSCRIPTION_REQUIRED",
-                "message": "You need an active subscription to chat with this influencer.",
+                "message": "You need subscription to chat with this influencer.",
                 "influencer_id": influencer_id,
             },
         )
-
+    
+ 
     if sub.current_period_end and sub.current_period_end < _now():
         raise HTTPException(
             status_code=402,
@@ -41,5 +43,35 @@ async def require_active_subscription(
                 "influencer_id": influencer_id,
             },
         )
-
+    
+    if sub.status != "active":
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "error": "SUBSCRIPTION_REQUIRED",
+                "message": "You need an active subscription to chat with this influencer.",
+                "influencer_id": influencer_id,
+            },
+        )
     return sub
+
+async def can_toggle_18_plus(
+    db: AsyncSession,
+    user_id: int,
+    influencer_id: str,
+) -> bool:
+    res = await db.execute(
+        select(InfluencerSubscription).where(
+            InfluencerSubscription.user_id == user_id,
+            InfluencerSubscription.influencer_id == influencer_id,
+        )
+    )
+    sub = res.scalar_one_or_none()
+    if not sub:
+        return False
+
+    now = _now()
+    if sub.current_period_end and sub.current_period_end < now:
+        return False
+
+    return True
