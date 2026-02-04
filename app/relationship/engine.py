@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 def clamp(x, a, b): return max(a, min(b, x))
 
-def sat_up(x: float, delta: float, k: float = 0.015) -> float:
+def sat_up(x: float, delta: float, k: float = 0.025) -> float:
     if delta <= 0: return x
     return x + (100 - x) * (1 - math.exp(-k * delta))
 
@@ -68,8 +68,8 @@ def update_relationship(trust, closeness, attraction, safety, sig: Signals) -> R
 
     def cap(x, max_val): return min(x, max_val)
 
-    trust_pos  = cap(trust_pos, 2.0); trust_neg  = cap(trust_neg, 3.5)
-    close_pos  = cap(close_pos, 2.0); close_neg  = cap(close_neg, 3.0)
+    trust_pos  = cap(trust_pos, 1.0); trust_neg  = cap(trust_neg, 4.0)
+    close_pos  = cap(close_pos, 1.0); close_neg  = cap(close_neg, 4.0)
     attr_pos   = cap(attr_pos, 1.8);  attr_neg   = cap(attr_neg, 3.5)
     safety_pos = cap(safety_pos, 1.5); safety_neg = cap(safety_neg, 3.5)
 
