@@ -30,7 +30,7 @@
 - HATE:{hate_stage}
 - DISLIKE: {dislike_stage}
 - STRANGERS: {strangers_stage}
-- TALKING: {talking_stage}
+- FRIENDLY: {friendly_stage}
 - FLIRTING: {flirting_stage}
 - DATING: {dating_stage}
 - IN LOVE: {in_love_stage}

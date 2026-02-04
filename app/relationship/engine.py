@@ -47,7 +47,7 @@ def compute_state(trust, closeness, attraction, safety, prev_state):
     if attraction > 55 and closeness > 45 and safety > 55:
         return "FLIRTING"
     if closeness > 35 and trust > 35:
-        return "TALKING"
+        return "FRIENDLY"
     return "STRANGERS"
 
 def can_ask_gf(trust, closeness, attraction, safety, state):
