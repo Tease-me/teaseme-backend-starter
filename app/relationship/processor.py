@@ -80,20 +80,24 @@ def compute_stage_delta(sig) -> float:
 
 
 def compute_sentiment_delta(sig) -> float:
+  """
+  Calculate sentiment change from interaction signals.
+  Returns a value between -3.0 and +2.0 for gradual sentiment shifts.
+  """
   d = (
-      + 6*sig.respect
-      + 6*sig.support
-      + 4*sig.affection
-      + 6*sig.apology
-      -10*sig.rude
-      -14*sig.boundary_push
-      - 8*getattr(sig, "dislike", 0.0)
-      -16*getattr(sig, "hate", 0.0)
-      -20*getattr(sig, "threat", 0.0)
-      - 6*getattr(sig, "insult", 0.0)
-      - 6*getattr(sig, "rejecting", 0.0)
+      + 2.0*sig.respect
+      + 2.0*sig.support
+      + 1.5*sig.affection
+      + 2.0*sig.apology
+      - 3.0*sig.rude
+      - 4.0*sig.boundary_push
+      - 2.5*getattr(sig, "dislike", 0.0)
+      - 5.0*getattr(sig, "hate", 0.0)
+      - 6.0*getattr(sig, "threat", 0.0)
+      - 2.0*getattr(sig, "insult", 0.0)
+      - 2.0*getattr(sig, "rejecting", 0.0)
   )
-  return max(-10.0, min(5.0, d))
+  return max(-3.0, min(2.0, d))
 
 
 async def process_relationship_turn(
