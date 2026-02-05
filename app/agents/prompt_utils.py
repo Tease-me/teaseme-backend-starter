@@ -191,10 +191,31 @@ def build_relationship_prompt(
     influencer_name: str = "",
 ):
     stages = stages or {}
+    rel_state = (getattr(rel, "state", "") or "").strip().upper()
+    stage_prompt = ""
+
+    if stages:
+        if rel_state == "HATE":
+            stage_prompt = stages.get("strangers", "")
+        elif rel_state == "DISLIKE":
+            stage_prompt = stages.get("dislike", "")
+        elif rel_state == "STRANGERS":
+            stage_prompt = stages.get("strangers", "")
+        elif rel_state == "FRIENDS":
+            stage_prompt = stages.get("friends", "")
+        elif rel_state == "FLIRTING":
+            stage_prompt = stages.get("flirting", "")
+        elif rel_state == "DATING":
+            stage_prompt = stages.get("dating", "")
+        elif rel_state == "GIRLFRIEND":
+            stage_prompt = stages.get("girlfriend", "")
+        else:
+            stage_prompt = stages.get(rel_state.lower(), "")
 
     partial_vars = {
         "relationship_state": rel.state,
         "influencer_name": influencer_name,
+        "stage_prompt": stage_prompt,
         "trust": int(rel.trust or 0),
         "closeness": int(rel.closeness or 0),
         "attraction": int(rel.attraction or 0),
@@ -204,13 +225,6 @@ def build_relationship_prompt(
         "days_idle_before_message": round(float(days_idle or 0.0), 1),
         "dtr_goal": dtr_goal,
         "personality_rules": personality_rules,
-        "dating_stage": stages.get("dating", ""),
-        "dislike_stage": stages.get("dislike", ""),
-        "friends_stage": stages.get("friends", ""),
-        "flirting_stage": stages.get("flirting", ""),
-        "hate_stage": stages.get("hate", ""),
-        "strangers_stage": stages.get("strangers", ""),
-        "in_love_stage": stages.get("in_love", ""),
         "likes": ", ".join(map(str, persona_likes or [])),
         "dislikes": ", ".join(map(str, persona_dislikes or [])),
         "mbti_rules": mbti_rules,
@@ -220,9 +234,7 @@ def build_relationship_prompt(
         "tone": tone,
         "mood": mood,
     }
-
-    # if persona_rules is not None:
-    #     partial_vars["persona_rules"] = persona_rules
+    
     if analysis is not None:
         partial_vars["analysis"] = analysis
 
