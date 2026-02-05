@@ -12,6 +12,48 @@ from app.services.relationship_dimension_service import (
 
 router = APIRouter(prefix="/relationship", tags=["relationship"])
 
+
+def calculate_stage_progress(stage_points: float, state: str) -> float:
+    """
+    Calculate percentage progress within the current relationship stage.
+    
+    Stage ranges:
+    - HATE: -∞ to -11
+    - DISLIKE: -10 to -1 (10 point range)
+    - STRANGERS: 0 to 24 (24 point range)
+    - FRIENDS: 25 to 49 (24 point range)
+    - FLIRTING: 50 to 74 (24 point range)
+    - DATING: 75 to 89 (14 point range)
+    - GIRLFRIEND: 90 to 100 (10 point range)
+    
+    Returns percentage (0-100) of progress through current stage.
+    """
+    stage_ranges = {
+        "HATE": (-20.0, -11.0),  # Using -20 as lower bound (from code min)
+        "DISLIKE": (-10.0, -1.0),
+        "STRANGERS": (0.0, 24.0),
+        "FRIENDS": (25.0, 49.0),
+        "FLIRTING": (50.0, 74.0),
+        "DATING": (75.0, 89.0),
+        "GIRLFRIEND": (90.0, 100.0),
+    }
+    
+    if state not in stage_ranges:
+        return 0.0
+    
+    min_points, max_points = stage_ranges[state]
+    range_size = max_points - min_points
+    
+    if range_size <= 0:
+        return 100.0
+    
+    # Calculate progress within the range
+    progress_in_range = stage_points - min_points
+    percentage = (progress_in_range / range_size) * 100.0
+    
+    # Clamp between 0 and 100
+    return max(0.0, min(100.0, percentage))
+
 @router.get("/{influencer_id}")
 async def get_relationship(
     influencer_id: str,
@@ -31,6 +73,8 @@ async def get_relationship(
     )
 
     if not rel:
+        state = "STRANGERS"
+        stage_points = 0.0
         return {
             "user_id": user.id,
             "influencer_id": influencer_id,
@@ -38,8 +82,9 @@ async def get_relationship(
             "closeness": 10.0,
             "attraction": 5.0,
             "safety": 95.0,
-            "state": "STRANGERS",
-            "stage_points": 0.0,
+            "state": state,
+            "stage_points": stage_points,
+            "stage_progress": calculate_stage_progress(stage_points, state),
             "sentiment_score": 0.0,
             "exclusive_agreed": False,
             "girlfriend_confirmed": False,
@@ -56,6 +101,7 @@ async def get_relationship(
         "safety": rel.safety,
         "state": rel.state,
         "stage_points": rel.stage_points,
+        "stage_progress": calculate_stage_progress(rel.stage_points, rel.state),
         "sentiment_score": rel.sentiment_score,
         "exclusive_agreed": rel.exclusive_agreed,
         "girlfriend_confirmed": rel.girlfriend_confirmed,
