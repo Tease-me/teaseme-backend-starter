@@ -41,6 +41,26 @@ ELEVENLABS_API_KEY = settings.ELEVENLABS_API_KEY
 ELEVEN_BASE_URL = settings.ELEVEN_BASE_URL
 DEFAULT_ELEVENLABS_VOICE_ID = settings.ELEVENLABS_VOICE_ID or None
 
+# Shared HTTP client for connection pooling
+_elevenlabs_client: Optional[httpx.AsyncClient] = None
+
+async def get_elevenlabs_client() -> httpx.AsyncClient:
+    """Get or create a shared HTTP client with connection pooling for ElevenLabs API."""
+    global _elevenlabs_client
+    if _elevenlabs_client is None:
+        _elevenlabs_client = httpx.AsyncClient(
+            http2=True,
+            base_url=ELEVEN_BASE_URL,
+            timeout=httpx.Timeout(30.0, connect=10.0),
+            limits=httpx.Limits(
+                max_keepalive_connections=20,
+                max_connections=50,
+                keepalive_expiry=30.0
+            ),
+        )
+        log.info("Created shared ElevenLabs HTTP client with connection pooling")
+    return _elevenlabs_client
+
 def _get_env_suffix() -> str:
     device = settings.DEVICE.upper() if settings.DEVICE else ""
     if device == "SERVER":
@@ -165,24 +185,25 @@ async def _validate_voice_exists(voice_id: str) -> bool:
         return False
     
     log.info("Validating voice_id: %s", voice_id)
-    async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL, timeout=15.0) as client:
-        try:
-            resp = await client.get(
-                f"/voices/{voice_id}",
-                headers=_headers(),
-            )
-            log.info("Voice validation response: %s", resp.status_code)
-            if resp.status_code == 200:
-                return True
-            elif resp.status_code == 404:
-                log.warning("Voice %s not found in ElevenLabs", voice_id)
-                return False
-            else:
-                log.warning("Voice validation returned %s: %s", resp.status_code, resp.text[:200])
-                return False
-        except Exception as e:
-            log.warning("Voice validation error for %s: %s", voice_id, e)
+    client = await get_elevenlabs_client()
+    try:
+        resp = await client.get(
+            f"/voices/{voice_id}",
+            headers=_headers(),
+            timeout=15.0,
+        )
+        log.info("Voice validation response: %s", resp.status_code)
+        if resp.status_code == 200:
+            return True
+        elif resp.status_code == 404:
+            log.warning("Voice %s not found in ElevenLabs", voice_id)
             return False
+        else:
+            log.warning("Voice validation returned %s: %s", resp.status_code, resp.text[:200])
+            return False
+    except Exception as e:
+        log.warning("Voice validation error for %s: %s", voice_id, e)
+        return False
 
 
 def _pick_greeting(influencer_id: str, mode: str) -> str:
@@ -756,11 +777,11 @@ async def _poll_and_persist_conversation(
 
     async with SessionLocal() as db:
         try:
-            async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
-                snapshot = await _wait_until_terminal_status(
-                    client, conversation_id, max_wait_secs=180
-                )
-                snapshot = await _ensure_transcript_snapshot(client, conversation_id, snapshot)
+            client = await get_elevenlabs_client()
+            snapshot = await _wait_until_terminal_status(
+                client, conversation_id, max_wait_secs=180
+            )
+            snapshot = await _ensure_transcript_snapshot(client, conversation_id, snapshot)
         except Exception as exc:
             log.warning(
                 "background.wait_failed conv=%s err=%s",
@@ -886,52 +907,52 @@ async def _push_prompt_to_elevenlabs(
         bool(prompt_text),
     )
 
-    async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
-        if agent_id:
-            try:
-                log.info("Patching existing ElevenLabs agent %s", agent_id)
-                await _patch_agent_config(
-                    client,
-                    agent_id=agent_id,
-                    prompt_text=prompt_text,
-                    llm=llm,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                )
-                return agent_id
-            except HTTPException as exc:
-                if exc.status_code != 404:
-                    raise
-                log.warning(
-                    "ElevenLabs agent %s not found; creating a new one (influencer=%s).",
-                    agent_id,
-                    agent_name or "unknown",
-                )
-
-        if not resolved_voice_id:
-            log.error("Cannot create ElevenLabs agent; missing voice_id (influencer=%s).", agent_name)
-            raise HTTPException(
-                status_code=400,
-                detail="voice_id is required to create a new ElevenLabs agent.",
+    client = await get_elevenlabs_client()
+    if agent_id:
+        try:
+            log.info("Patching existing ElevenLabs agent %s", agent_id)
+            await _patch_agent_config(
+                client,
+                agent_id=agent_id,
+                prompt_text=prompt_text,
+                llm=llm,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            return agent_id
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            log.warning(
+                "ElevenLabs agent %s not found; creating a new one (influencer=%s).",
+                agent_id,
+                agent_name or "unknown",
             )
 
-        new_agent_id = await _create_agent(
-            client,
-            name=agent_name,
-            voice_id=resolved_voice_id,
-            prompt_text=prompt_text,
-            language=language,
-            llm=llm,
-            temperature=temperature,
-            max_tokens=max_tokens,
+    if not resolved_voice_id:
+        log.error("Cannot create ElevenLabs agent; missing voice_id (influencer=%s).", agent_name)
+        raise HTTPException(
+            status_code=400,
+            detail="voice_id is required to create a new ElevenLabs agent.",
         )
-        log.info(
-            "Created new ElevenLabs agent %s for influencer=%s voice=%s",
-            new_agent_id,
-            agent_name or "unknown",
-            resolved_voice_id,
-        )
-        return new_agent_id
+
+    new_agent_id = await _create_agent(
+        client,
+        name=agent_name,
+        voice_id=resolved_voice_id,
+        prompt_text=prompt_text,
+        language=language,
+        llm=llm,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    log.info(
+        "Created new ElevenLabs agent %s for influencer=%s voice=%s",
+        new_agent_id,
+        agent_name or "unknown",
+        resolved_voice_id,
+    )
+    return new_agent_id
 
 
 async def _get_conversation_signed_url(client: httpx.AsyncClient, agent_id: str) -> str:
@@ -1268,8 +1289,8 @@ async def get_signed_url(
     if not greeting:
         greeting = _pick_greeting(influencer_id, greeting_mode)
 
-    async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
-        signed_url = await _get_conversation_signed_url(client, agent_id)
+    client = await get_elevenlabs_client()
+    signed_url = await _get_conversation_signed_url(client, agent_id)
 
     return {
         "signed_url": signed_url,
@@ -1371,13 +1392,13 @@ async def get_conversation_token(
     log_prompt(log, prompt, cid="", input="")
 
     try:
-        async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
-            resp = await client.get(
-                "/convai/conversation/token",
-                params={"agent_id": agent_id},
-                headers=_headers(),
-                timeout=15.0,
-            )
+        client = await get_elevenlabs_client()
+        resp = await client.get(
+            "/convai/conversation/token",
+            params={"agent_id": agent_id},
+            headers=_headers(),
+            timeout=15.0,
+        )
     except httpx.RequestError as exc:
         log.exception("conversation_token.network_error agent=%s err=%s", agent_id, exc)
         raise HTTPException(status_code=502, detail="Upstream unavailable")
@@ -1421,8 +1442,8 @@ async def get_signed_url_free(
     agent_id = await get_agent_id_from_influencer(db, influencer_id)
     greeting = None
 
-    async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
-        signed_url = await _get_conversation_signed_url(client, agent_id)
+    client = await get_elevenlabs_client()
+    signed_url = await _get_conversation_signed_url(client, agent_id)
 
     return {
         "signed_url": signed_url,
@@ -1436,8 +1457,8 @@ async def get_signed_url_free(
 async def get_signed_url_free_landing(db: AsyncSession = Depends(get_db)):
     agent_id = settings.LANDING_PAGE_AGENT_ID
 
-    async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
-        signed_url = await _get_conversation_signed_url(client, agent_id)
+    client = await get_elevenlabs_client()
+    signed_url = await _get_conversation_signed_url(client, agent_id)
 
     return {
         "signed_url": signed_url,
@@ -1543,14 +1564,66 @@ async def finalize_conversation(
 ):
     if body.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
-    async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
+    
+    # OPTIMIZATION: Quick status check (max 5 seconds) instead of blocking for minutes
+    client = await get_elevenlabs_client()
+    try:
         snapshot = await _wait_until_terminal_status(
             client,
             conversation_id,
-            max_wait_secs=max(10, int(body.timeout_secs or 180)),
+            max_wait_secs=5,  # Quick check only
         )
         snapshot = await _ensure_transcript_snapshot(client, conversation_id, snapshot)
-
+        status = (snapshot.get("status") or "").lower()
+    except Exception as exc:
+        log.warning("finalize.quick_check_failed conv=%s err=%s", conversation_id, exc)
+        status = "processing"
+        snapshot = {}
+    
+    # If not done yet, schedule background processing and return immediately
+    if status not in {"done", "failed"}:
+        log.info("finalize.scheduling_background_poll conv=%s status=%s", conversation_id, status)
+        
+        # Look up chat_id for background task
+        chat_id = None
+        try:
+            res = await db.execute(
+                select(CallRecord.chat_id, CallRecord.influencer_id).where(
+                    CallRecord.conversation_id == conversation_id
+                )
+            )
+            row = res.first()
+            if row:
+                chat_id = row[0]
+                influencer_id_from_db = row[1]
+                if not body.influencer_id and influencer_id_from_db:
+                    body.influencer_id = influencer_id_from_db
+        except Exception:
+            pass
+        
+        # Schedule background processing
+        try:
+            asyncio.create_task(
+                _poll_and_persist_conversation(
+                    conversation_id,
+                    user_id=body.user_id,
+                    influencer_id=body.influencer_id,
+                    chat_id=chat_id,
+                )
+            )
+        except Exception as exc:
+            log.warning("finalize.background_schedule_failed conv=%s err=%s", conversation_id, exc)
+        
+        return {
+            "ok": True,
+            "conversation_id": conversation_id,
+            "status": "processing",
+            "charged": False,
+            "message": "Conversation still processing. Polling in background. Check status via GET /elevenlabs/calls/{conversation_id}",
+            "refresh_required": False,
+        }
+    
+    # Conversation is done or failed - process immediately
     status = (snapshot.get("status") or "").lower()
     total_seconds = _extract_total_seconds(snapshot)
     resolved_influencer_id = body.influencer_id
@@ -1733,13 +1806,14 @@ async def _elevenlabs_create_voice(
     if labels_str is not None:
         data["labels"] = labels_str
 
-    async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL, timeout=60.0) as client:
-        r = await client.post(
-            "/voices/add",
-            headers=_headers(),
-            data=data,
-            files=multipart_files,
-        )
+    client = await get_elevenlabs_client()
+    r = await client.post(
+        "/voices/add",
+        headers=_headers(),
+        data=data,
+        files=multipart_files,
+        timeout=60.0,
+    )
 
     if r.status_code >= 400:
         log.error("ElevenLabs /v1/voices/add failed: %s %s", r.status_code, r.text[:1500])
@@ -1896,8 +1970,8 @@ async def get_call_details(
     agent_id = None
 
     if not transcript or duration is None:
-        async with httpx.AsyncClient(http2=True, base_url=ELEVEN_BASE_URL) as client:
-            snapshot = await _get_conversation_snapshot(client, conversation_id)
+        client = await get_elevenlabs_client()
+        snapshot = await _get_conversation_snapshot(client, conversation_id)
         agent_id = snapshot.get("agent_id")
         if not transcript:
             transcript = _normalize_transcript(snapshot)
