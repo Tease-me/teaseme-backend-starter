@@ -12,23 +12,41 @@ from app.relationship.dtr import plan_dtr_goal
 log = logging.getLogger("teachme-relationship")
 
 
-STAGES = ["HATE", "DISLIKE", "STRANGERS", "FRIENDLY", "FLIRTING", "DATING"]
+STAGES = ["HATE", "DISLIKE", "STRANGERS", "FRIENDS", "FLIRTING", "DATING", "GIRLFRIEND"]
 
 
 def stage_from_signals_and_points(stage_points: float, sig) -> str:
-  if getattr(sig, "threat", 0.0) > 0.20 or getattr(sig, "hate", 0.0) > 0.60:
-      return "HATE"
-  if getattr(sig, "dislike", 0.0) > 0.40 or getattr(sig, "rejecting", 0.0) > 0.40:
-      return "DISLIKE"
-
+  """
+  Determine relationship stage PURELY from accumulated stage_points.
+  
+  Thresholds:
+  - HATE: -11 or less (accumulated negative interactions)
+  - DISLIKE: -10 to -1 (negative relationship)
+  - STRANGERS: 0-24 (neutral, building connection)
+  - FRIENDS: 25-49 (friendly relationship)
+  - FLIRTING: 50-74 (romantic interest)
+  - DATING: 75-89 (committed relationship)
+  - GIRLFRIEND: 90-100 (ultimate level)
+  
+  Note: Signals affect the DELTA (how points change), not the stage directly.
+  Stage is determined by the cumulative points total.
+  """
   p = float(stage_points or 0.0)
-  if p < 20.0:
+  
+  # Pure points-based progression
+  if p <= -11.0:
+      return "HATE"
+  if p < 0.0:
+      return "DISLIKE"
+  if p < 25.0:
       return "STRANGERS"
-  if p < 45.0:
-      return "FRIENDLY"
-  if p < 65.0:
+  if p < 50.0:
+      return "FRIENDS"
+  if p < 75.0:
       return "FLIRTING"
-  return "DATING"
+  if p < 90.0:
+      return "DATING"
+  return "GIRLFRIEND"
 
 
 def compute_stage_delta(sig) -> float:
@@ -130,10 +148,11 @@ async def process_relationship_turn(
     sig = Signals(**sig_dict)
 
     d_sent = compute_sentiment_delta(sig)
-    rel.sentiment_score = max(
-        -100.0,
-        min(100.0, float(rel.sentiment_score or 0.0) + d_sent)
-    )
+    prev_sentiment = float(rel.sentiment_score or 0.0)
+    new_sentiment = max(-100.0, min(100.0, prev_sentiment + d_sent))
+    
+    rel.sentiment_score = new_sentiment
+    rel.sentiment_delta = d_sent
 
     # For girlfriends, reduce negative signal impact by 60% (they're more forgiving)
     if rel.girlfriend_confirmed:
@@ -171,7 +190,7 @@ async def process_relationship_turn(
 
     prev_sp = float(rel.stage_points or 0.0)
     delta = compute_stage_delta(sig)
-    rel.stage_points = max(0.0, min(100.0, prev_sp + delta))
+    rel.stage_points = max(-20.0, min(100.0, prev_sp + delta))  # Allow negative points down to -20
 
     # CHECK girlfriend_confirmed FIRST to preserve relationship status
     if rel.girlfriend_confirmed:

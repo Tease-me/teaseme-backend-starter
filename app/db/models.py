@@ -600,6 +600,7 @@ class RelationshipState(Base):
     
     stage_points: Mapped[float] = mapped_column(Float, default=0.0)
     sentiment_score: Mapped[float] = mapped_column(Float, default=0.0)
+    sentiment_delta: Mapped[float] = mapped_column(Float, default=0.0)
 
     last_interaction_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

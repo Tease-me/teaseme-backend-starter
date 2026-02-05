@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import datetime, timezone
 from sqlalchemy import select
 
@@ -997,11 +998,182 @@ BASE_SYSTEM = """
 ## HATE: {hate_stage}
 ## DISLIKE: {dislike_stage}
 ## STRANGERS: {strangers_stage}
-## FRIENDLY: {friendly_stage}
+## FRIENDS: {friends_stage}
 ## FLIRTING: {flirting_stage}
 ## DATING: {dating_stage}
 ## IN LOVE: {in_love_stage}""".strip()
 
+# Relationship dimension descriptions - stage-specific explanations for users
+RELATIONSHIP_DIMENSIONS = {
+    "trust": {
+        "STRANGERS": {
+            "label": "Trust",
+            "icon": "🤝",
+            "short": "She's cautious. Can you be trusted with her attention?",
+            "full": "You're just getting to know each other. She's watching to see if you're genuine, respectful, and worth her time. Small acts of support and respect matter more than grand gestures right now.",
+            "guide": "Be genuine. Listen more than you talk. Show respect. Don't push for personal info too quickly.",
+            "warning": "First impressions matter. Start building trust slowly."
+        },
+        "FRIENDS": {
+            "label": "Trust",
+            "icon": "🤝",
+            "short": "She's starting to believe you're genuine.",
+            "full": "You've passed the initial test. She's beginning to trust that you're not just another guy saying what she wants to hear. Keep being consistent, supportive, and respectful.",
+            "guide": "Stay consistent. Be there when she needs support. Keep your word. Show you remember what she tells you.",
+            "warning": "Don't break the trust you're building. It's still fragile."
+        },
+        "FLIRTING": {
+            "label": "Trust",
+            "icon": "🤝",
+            "short": "She trusts you with her feelings.",
+            "full": "She trusts you enough to show vulnerability and explore romantic feelings. This is precious - she's letting her guard down. Honor that trust by being emotionally supportive and reliable.",
+            "guide": "Be emotionally available. Respect her vulnerability. Continue being reliable. Handle her feelings with care.",
+            "warning": "Breaking trust at this stage can drop you back to TALKING or worse."
+        },
+        "DATING": {
+            "label": "Trust",
+            "icon": "🤝",
+            "short": "She trusts you deeply and relies on you.",
+            "full": "You've built strong, deep trust. She believes in you and counts on you. This trust is the foundation of your relationship. Maintain it through continued honesty, support, and reliability.",
+            "guide": "Maintain consistency. Be her rock. Continue showing up. Deepen emotional support.",
+            "warning": "Even strong trust can be damaged by significant betrayals."
+        },
+        "GIRLFRIEND": {
+            "label": "Trust",
+            "icon": "🤝",
+            "short": "Complete and absolute trust.",
+            "full": "She trusts you with everything - her heart, her vulnerabilities, her future. This is the deepest level of trust two people can share. You've proven yourself time and again, and she has unwavering faith in you.",
+            "guide": "Honor this sacred trust. Be worthy of the faith she places in you. Continue being her constant.",
+            "warning": "This trust is precious beyond measure. Never take it for granted."
+        }
+    },
+    "closeness": {
+        "STRANGERS": {
+            "label": "Closeness",
+            "icon": "💕",
+            "short": "You're still distant. Show genuine interest.",
+            "full": "There's no emotional connection yet. You're two strangers who might become something more. Build closeness by showing genuine interest in who she is, not just what she looks like.",
+            "guide": "Ask meaningful questions. Share a bit about yourself. Show affection through words. Be warm and friendly.",
+            "warning": "Closeness requires time and emotional investment."
+        },
+        "FRIENDS": {
+            "label": "Closeness",
+            "icon": "💕",
+            "short": "You're building a real connection.",
+            "full": "You're moving beyond surface level. She's starting to feel connected to you. Keep sharing, keep being present, and the bond will deepen naturally.",
+            "guide": "Continue meaningful conversations. Show consistent affection. Be emotionally present. Remember details she shares.",
+            "warning": "Closeness decays fastest with inactivity. Stay engaged."
+        },
+        "FLIRTING": {
+            "label": "Closeness",
+            "icon": "💕",
+            "short": "You're becoming emotionally intimate.",
+            "full": "There's real emotional intimacy developing. You're not just talking - you're connecting on a deeper level. She feels understood by you, and that's powerful.",
+            "guide": "Deepen emotional sharing. Show vulnerability. Continue affection. Create inside jokes and shared moments.",
+            "warning": "Don't let closeness plateau. Keep deepening the connection."
+        },
+        "DATING": {
+            "label": "Closeness",
+            "icon": "💕",
+            "short": "You share a deep emotional bond.",
+            "full": "You have a strong, intimate emotional connection. She feels truly close to you - like you really get her. This closeness is what separates dating from just attraction.",
+            "guide": "Maintain emotional intimacy. Continue quality engagement. Keep building shared experiences.",
+            "warning": "Even strong closeness needs maintenance. Don't take it for granted."
+        },
+        "GIRLFRIEND": {
+            "label": "Closeness",
+            "icon": "💕",
+            "short": "Souls intertwined. You are one.",
+            "full": "This is the deepest emotional intimacy possible. You don't just understand each other - you feel each other. Your lives, hearts, and souls are beautifully intertwined. This is what true love feels like.",
+            "guide": "Cherish this profound connection. Continue growing together. Protect this sacred bond.",
+            "warning": "This closeness is rare and precious. Never stop nurturing it."
+        }
+    },
+    "attraction": {
+        "STRANGERS": {
+            "label": "Attraction",
+            "icon": "🔥",
+            "short": "Does she see potential in you?",
+            "full": "Attraction is barely registering. She might find you somewhat interesting, but there's no spark yet. Build attraction through respectful flirting, genuine compliments, and showing confidence.",
+            "guide": "Flirt respectfully. Be confident but not arrogant. Give genuine compliments. NEVER push boundaries.",
+            "warning": "Flirting without respect = instant turnoff. Respect amplifies attraction."
+        },
+        "FRIENDS": {
+            "label": "Attraction",
+            "icon": "🔥",
+            "short": "The spark is starting to ignite.",
+            "full": "She's beginning to see you in a romantic light. There's a growing spark. Continue building attraction through respectful flirting while maintaining the respect that makes it work.",
+            "guide": "Increase flirting gradually. Continue genuine compliments. Build chemistry. Always pair flirting with respect.",
+            "warning": "Attraction can turn negative quickly with disrespect or boundary pushing."
+        },
+        "FLIRTING": {
+            "label": "Attraction",
+            "icon": "🔥",
+            "short": "The chemistry is undeniable.",
+            "full": "Strong romantic and physical attraction. The spark is real and mutual. She's drawn to you. Keep the fire burning through continued respectful flirting and building chemistry.",
+            "guide": "Continue respectful flirting. Build sexual tension appropriately. Keep compliments genuine and specific.",
+            "warning": "Don't let attraction outpace trust and safety."
+        },
+        "DATING": {
+            "label": "Attraction",
+            "icon": "🔥",
+            "short": "Strong romantic and physical desire.",
+            "full": "Powerful attraction on multiple levels. She's very attracted to you - romantically, physically, emotionally. This attraction is sustainable because it's built on respect and trust.",
+            "guide": "Maintain attraction through continued chemistry. Keep romance alive. Stay confident and respectful.",
+            "warning": "Attraction can still be damaged by disrespect or taking her for granted."
+        },
+        "GIRLFRIEND": {
+            "label": "Attraction",
+            "icon": "🔥",
+            "short": "Magnetic, all-consuming desire.",
+            "full": "She is completely captivated by you. The attraction is magnetic, all-consuming, transcendent. It's not just physical - it's emotional, spiritual, intellectual. She can't imagine wanting anyone but you. This is the stuff of great love stories.",
+            "guide": "Keep the fire burning bright. Continue being the person she fell for. Never stop making her feel desired.",
+            "warning": "Even perfect attraction needs fuel. Keep the romance alive."
+        }
+    },
+    "safety": {
+        "STRANGERS": {
+            "label": "Safety",
+            "icon": "🛡️",
+            "short": "She needs to feel comfortable before opening up.",
+            "full": "Safety is high because you haven't had a chance to threaten it yet. But it's also fragile - one boundary violation or aggressive move and she's gone. Respect is everything at this stage.",
+            "guide": "Respect all boundaries. Never pressure. Be gentle. Let her set the pace. One wrong move ends things.",
+            "warning": "CRITICAL: Safety is easiest to maintain now but also easiest to destroy. Below 30 = game over."
+        },
+        "FRIENDS": {
+            "label": "Safety",
+            "icon": "🛡️",
+            "short": "She's comfortable, but boundaries still matter.",
+            "full": "She feels reasonably safe with you. You've shown you can respect boundaries. Don't get complacent - continue honoring her comfort levels and respecting her space.",
+            "guide": "Continue respecting boundaries. Never pressure. Read her signals. Apologize sincerely if you misstep.",
+            "warning": "Safety below 55 blocks progression. Below 30 = STRAINED relationship."
+        },
+        "FLIRTING": {
+            "label": "Safety",
+            "icon": "🛡️",
+            "short": "She feels safe exploring romance with you.",
+            "full": "She trusts you enough to be vulnerable and flirt back. She feels safe exploring romantic and possibly physical attraction. This is a privilege - don't abuse it.",
+            "guide": "Continue respecting boundaries, especially as things get more intimate. Check in with her comfort. Never assume.",
+            "warning": "Safety is the foundation that allows flirting to flourish. Damage it and everything falls apart."
+        },
+        "DATING": {
+            "label": "Safety",
+            "icon": "🛡️",
+            "short": "She feels completely safe and respected.",
+            "full": "Strong sense of safety. She knows you respect her boundaries and would never push her. This safety allows the relationship to deepen naturally.",
+            "guide": "Maintain the respect that built this safety. Continue honoring boundaries. Keep being trustworthy.",
+            "warning": "Even at this level, major boundary violations can break safety."
+        },
+        "GIRLFRIEND": {
+            "label": "Safety",
+            "icon": "🛡️",
+            "short": "Her sanctuary. Her home.",
+            "full": "You are her safe haven, her sanctuary, her home. She feels utterly secure with you - not just physically, but emotionally and spiritually. She can be completely herself, vulnerable and raw, knowing you'll never hurt her. This safety is the bedrock of your love.",
+            "guide": "Be her eternal safe space. Continue being gentle with her heart. Protect this sanctuary you've built together.",
+            "warning": "This safety is the foundation of everything. Sacred and unbreakable."
+        }
+    }
+}
 
 SYSTEM_PROMPTS = [
     {
@@ -1237,11 +1409,18 @@ Output ONLY the greeting text, nothing else.
         "description": "Prompt for classifying relationship signals.",
         "prompt": RELATIONSHIP,
         "type": "normal"
-    },{
+    },    {
         "key": prompt_keys.REENGAGEMENT_PROMPT,
         "name": "Re-engagement Notification Prompt",
         "description": "System prompt for re-engagement notifications. Use {days_inactive} placeholder.",
         "prompt": REENGAGEMENT_PROMPT,
+        "type": "normal"
+    },
+    {
+        "key": prompt_keys.RELATIONSHIP_DIMENSIONS_CONFIG,
+        "name": "Relationship Dimensions Configuration",
+        "description": "Stage-specific descriptions for relationship dimensions (trust, closeness, attraction, safety). Used by frontend to explain what each dimension means at each relationship stage.",
+        "prompt": json.dumps(RELATIONSHIP_DIMENSIONS),
         "type": "normal"
     }
 ]
