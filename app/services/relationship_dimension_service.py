@@ -24,7 +24,7 @@ async def get_dimension_descriptions(
     
     Args:
         db: Database session
-        stage: Current relationship stage (STRANGERS, TALKING, FLIRTING, DATING, GIRLFRIEND)
+        stage: Current relationship stage (HATE, DISLIKE, STRANGERS, FRIENDS, FLIRTING, DATING, GIRLFRIEND)
         current_values: Optional dict with current dimension values (trust, closeness, attraction, safety)
     
     Returns:
@@ -137,8 +137,22 @@ async def get_stage_requirements(stage: str) -> Dict[str, Any]:
         Dict with next stage info and requirements
     """
     requirements = {
+        "HATE": {
+            "next_stage": "DISLIKE",
+            "requirements": {
+                "stage_points": -10
+            },
+            "description": "Recover from severe damage - avoid threats and hate"
+        },
+        "DISLIKE": {
+            "next_stage": "STRANGERS",
+            "requirements": {
+                "stage_points": 0
+            },
+            "description": "Rebuild to neutral - show respect and support"
+        },
         "STRANGERS": {
-            "next_stage": "TALKING",
+            "next_stage": "FRIENDS",
             "requirements": {
                 "trust": 35,
                 "closeness": 35,
@@ -146,7 +160,7 @@ async def get_stage_requirements(stage: str) -> Dict[str, Any]:
             },
             "description": "Build basic trust and connection"
         },
-        "TALKING": {
+        "FRIENDS": {
             "next_stage": "FLIRTING",
             "requirements": {
                 "attraction": 55,

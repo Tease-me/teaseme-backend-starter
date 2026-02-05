@@ -998,7 +998,7 @@ BASE_SYSTEM = """
 ## HATE: {hate_stage}
 ## DISLIKE: {dislike_stage}
 ## STRANGERS: {strangers_stage}
-## FRIENDLY: {friendly_stage}
+## FRIENDS: {friends_stage}
 ## FLIRTING: {flirting_stage}
 ## DATING: {dating_stage}
 ## IN LOVE: {in_love_stage}""".strip()
@@ -1014,7 +1014,7 @@ RELATIONSHIP_DIMENSIONS = {
             "guide": "Be genuine. Listen more than you talk. Show respect. Don't push for personal info too quickly.",
             "warning": "First impressions matter. Start building trust slowly."
         },
-        "TALKING": {
+        "FRIENDS": {
             "label": "Trust",
             "icon": "🤝",
             "short": "She's starting to believe you're genuine.",
@@ -1056,7 +1056,7 @@ RELATIONSHIP_DIMENSIONS = {
             "guide": "Ask meaningful questions. Share a bit about yourself. Show affection through words. Be warm and friendly.",
             "warning": "Closeness requires time and emotional investment."
         },
-        "TALKING": {
+        "FRIENDS": {
             "label": "Closeness",
             "icon": "💕",
             "short": "You're building a real connection.",
@@ -1098,7 +1098,7 @@ RELATIONSHIP_DIMENSIONS = {
             "guide": "Flirt respectfully. Be confident but not arrogant. Give genuine compliments. NEVER push boundaries.",
             "warning": "Flirting without respect = instant turnoff. Respect amplifies attraction."
         },
-        "TALKING": {
+        "FRIENDS": {
             "label": "Attraction",
             "icon": "🔥",
             "short": "The spark is starting to ignite.",
@@ -1140,7 +1140,7 @@ RELATIONSHIP_DIMENSIONS = {
             "guide": "Respect all boundaries. Never pressure. Be gentle. Let her set the pace. One wrong move ends things.",
             "warning": "CRITICAL: Safety is easiest to maintain now but also easiest to destroy. Below 30 = game over."
         },
-        "TALKING": {
+        "FRIENDS": {
             "label": "Safety",
             "icon": "🛡️",
             "short": "She's comfortable, but boundaries still matter.",

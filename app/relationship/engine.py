@@ -11,8 +11,10 @@ def sat_down(x: float, delta: float, k: float = 0.03) -> float:
     if delta <= 0: return x
     return x - x * (1 - math.exp(-k * delta))
 K_UP_BY_STAGE = {
-    "STRANGERS": 0.080,
-    "TALKING": 0.055,
+    "HATE": 0.010,
+    "DISLIKE": 0.015,
+    "STRANGERS": 0.150,
+    "FRIENDS": 0.055,
     "FLIRTING": 0.030,
     "DATING": 0.020,
     "GIRLFRIEND": 0.015,
@@ -21,8 +23,10 @@ K_UP_BY_STAGE = {
 }
 
 K_DOWN_BY_STAGE = {
+    "HATE": 0.050,
+    "DISLIKE": 0.045,
     "STRANGERS": 0.015,
-    "TALKING": 0.020,
+    "FRIENDS": 0.020,
     "FLIRTING": 0.030,
     "DATING": 0.040,
     "GIRLFRIEND": 0.025,
@@ -74,7 +78,7 @@ def compute_state(trust, closeness, attraction, safety, prev_state):
     if attraction > 55 and closeness > 45 and safety > 55:
         return "FLIRTING"
     if closeness > 35 and trust > 35:
-        return "FRIENDLY"
+        return "FRIENDS"
     return "STRANGERS"
 
 def can_ask_gf(trust, closeness, attraction, safety, state):
