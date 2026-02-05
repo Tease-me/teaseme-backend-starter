@@ -196,7 +196,7 @@ def build_relationship_prompt(
 
     if stages:
         if rel_state == "HATE":
-            stage_prompt = stages.get("strangers", "")
+            stage_prompt = stages.get("hate", "")
         elif rel_state == "DISLIKE":
             stage_prompt = stages.get("dislike", "")
         elif rel_state == "STRANGERS":
