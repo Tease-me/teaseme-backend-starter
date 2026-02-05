@@ -24,7 +24,7 @@ from app.core.config import settings
 from app.utils.chat import transcribe_audio, synthesize_audio_with_elevenlabs_V3
 from app.utils.s3 import save_audio_to_s3, save_ia_audio_to_s3, generate_presigned_url, message18_to_schema_with_presigned
 from app.services.billing import charge_feature, get_duration_seconds, can_afford
-from app.services.influencer_subscriptions import require_active_subscription
+from app.services.influencer_subscriptions import get_valid_subscription
 from app.moderation import moderate_message, handle_violation
 from app.services.user import _get_usage_snapshot_simple
 
@@ -258,12 +258,12 @@ async def websocket_chat(
         return
 
     try:
-        await require_active_subscription(db, user_id=user_id, influencer_id=influencer_id)
+        await get_valid_subscription(db, user_id=user_id, influencer_id=influencer_id)
     except Exception as e:
         await ws.send_json({
             "ok": False,
             "type": "subscription_error",
-            "error": "SUBSCRIPTION_REQUIRED",
+            "error": "VALID_SUBSCRIPTION_REQUIRED",
             "message": "You need an active subscription for this influencer.",
         })
         SUBSCRIPTION_REQUIRED_CLOSE_CODE = 4403

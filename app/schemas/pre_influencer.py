@@ -46,7 +46,7 @@ class SurveyStages(BaseModel):
     hate: str
     dislike: str
     strangers: str
-    talking: str
+    friendly: str
     flirting: str
     dating: str
     in_love: str
