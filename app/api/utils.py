@@ -120,33 +120,3 @@ async def upsert_memory(
         return None
 
 
-async def search_influencer_knowledge(db, influencer_id: str, embedding: list[float], top_k: int = 5):
-    """
-    Search influencer's knowledge base chunks by semantic similarity.
-    
-    Args:
-        db: Database session
-        influencer_id: ID of the influencer
-        embedding: Query embedding vector
-        top_k: Number of results to return
-    
-    Returns:
-        List of dicts with 'content' and 'metadata' keys
-    """
-    sql = text("""
-        SELECT content, chunk_metadata
-        FROM influencer_knowledge_chunks
-        WHERE influencer_id = :influencer_id
-          AND embedding IS NOT NULL
-        ORDER BY embedding <-> :embedding
-        LIMIT :top_k
-    """)
-    embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
-    params = {
-        "influencer_id": influencer_id,
-        "embedding": embedding_str,
-        "top_k": top_k
-    }
-    result = await db.execute(sql, params)
-    return [{"content": row[0], "metadata": row[1]} for row in result.fetchall()]
-

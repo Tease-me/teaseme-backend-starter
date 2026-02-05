@@ -29,20 +29,7 @@ async def find_similar_messages(
     
     chat_memories = await search_similar_messages(db, chat_id, emb, top_k=top_k)
     
-    knowledge_chunks = []
-    if influencer_id:
-        try:
-            knowledge_results = await search_influencer_knowledge(db, influencer_id, emb, top_k=5)
-            knowledge_chunks = [r["content"] for r in knowledge_results if r.get("content")]
-            import logging
-            log = logging.getLogger("memory")
-            log.info(f"Knowledge search for {influencer_id}: found {len(knowledge_chunks)} chunks")
-        except Exception as e:
-            import logging
-            log = logging.getLogger("memory")
-            log.error(f"Failed to search influencer knowledge for {influencer_id}: {e}", exc_info=True)
-    
-    return chat_memories, knowledge_chunks
+    return chat_memories
 
 async def find_similar_memories(
     db,
@@ -55,21 +42,8 @@ async def find_similar_memories(
     emb = embedding or await get_embedding(message)
     
     chat_memories = await search_similar_memories(db, chat_id, emb, top_k=top_k)
-    
-    knowledge_chunks = []
-    if influencer_id:
-        try:
-            knowledge_results = await search_influencer_knowledge(db, influencer_id, emb, top_k=5)
-            knowledge_chunks = [r["content"] for r in knowledge_results if r.get("content")]
-            import logging
-            log = logging.getLogger("memory")
-            log.info(f"Knowledge search for {influencer_id}: found {len(knowledge_chunks)} chunks")
-        except Exception as e:
-            import logging
-            log = logging.getLogger("memory")
-            log.error(f"Failed to search influencer knowledge for {influencer_id}: {e}", exc_info=True)
-    
-    return chat_memories, knowledge_chunks
+
+    return chat_memories
 
 def _norm(s: str) -> str:
     return " ".join(s.lower().split())
