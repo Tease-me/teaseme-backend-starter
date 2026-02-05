@@ -13,11 +13,11 @@ def sat_down(x: float, delta: float, k: float = 0.03) -> float:
 K_UP_BY_STAGE = {
     "HATE": 0.010,
     "DISLIKE": 0.015,
-    "STRANGERS": 0.150,
-    "FRIENDS": 0.055,
-    "FLIRTING": 0.030,
-    "DATING": 0.020,
-    "GIRLFRIEND": 0.015,
+    "STRANGERS": 0.120,
+    "FRIENDS": 0.035,
+    "FLIRTING": 0.015,
+    "DATING": 0.015,
+    "GIRLFRIEND": 0.001,
     "STRAINED": 0.015,
     "BROKEN": 0.010
 }
