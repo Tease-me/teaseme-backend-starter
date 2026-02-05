@@ -121,6 +121,7 @@ async def list_relationships(
             "exclusive_agreed": r.exclusive_agreed,
             "girlfriend_confirmed": r.girlfriend_confirmed,
             "sentiment_score": r.sentiment_score,
+            "sentiment_delta": r.sentiment_delta,
             "updated_at": r.updated_at.isoformat() if r.updated_at else None,
         }
         for r in rows
@@ -172,6 +173,7 @@ class RelationshipPatch(BaseModel):
 
     stage_points: Optional[float] = Field(default=None, ge=0, le=100)
     sentiment_score: Optional[float] = Field(default=None, ge=-100, le=100)
+    sentiment_delta: Optional[float] = Field(default=None, ge=-10, le=5)
 
     exclusive_agreed: Optional[bool] = None
     girlfriend_confirmed: Optional[bool] = None
@@ -217,6 +219,9 @@ async def patch_relationship(
 
     if payload.sentiment_score is not None:
         rel.sentiment_score = payload.sentiment_score
+    
+    if payload.sentiment_delta is not None:
+        rel.sentiment_delta = payload.sentiment_delta
 
     if payload.exclusive_agreed is not None:
         rel.exclusive_agreed = payload.exclusive_agreed
@@ -254,6 +259,7 @@ async def patch_relationship(
             "state": rel.state,
             "stage_points": rel.stage_points,
             "sentiment_score": rel.sentiment_score,
+            "sentiment_delta": rel.sentiment_delta,
             "exclusive_agreed": rel.exclusive_agreed,
             "girlfriend_confirmed": rel.girlfriend_confirmed,
             "updated_at": rel.updated_at.isoformat() if rel.updated_at else None,
@@ -294,6 +300,8 @@ async def update_relationship(
         rel.stage_points = payload.stage_points
     if payload.sentiment_score is not None:
         rel.sentiment_score = payload.sentiment_score
+    if payload.sentiment_delta is not None:
+        rel.sentiment_delta = payload.sentiment_delta
 
     if payload.exclusive_agreed is not None:
         rel.exclusive_agreed = payload.exclusive_agreed

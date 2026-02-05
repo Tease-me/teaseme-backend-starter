@@ -148,10 +148,11 @@ async def process_relationship_turn(
     sig = Signals(**sig_dict)
 
     d_sent = compute_sentiment_delta(sig)
-    rel.sentiment_score = max(
-        -100.0,
-        min(100.0, float(rel.sentiment_score or 0.0) + d_sent)
-    )
+    prev_sentiment = float(rel.sentiment_score or 0.0)
+    new_sentiment = max(-100.0, min(100.0, prev_sentiment + d_sent))
+    
+    rel.sentiment_score = new_sentiment
+    rel.sentiment_delta = d_sent
 
     # For girlfriends, reduce negative signal impact by 60% (they're more forgiving)
     if rel.girlfriend_confirmed:
