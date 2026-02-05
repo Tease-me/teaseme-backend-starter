@@ -4,7 +4,6 @@ import math
 import random
 import json
 from uuid import uuid4
-from app.agents.memory import find_similar_memories
 from app.agents.prompt_utils import build_relationship_prompt, get_global_prompt, get_mbti_rules_for_archetype
 from app.relationship.dtr import plan_dtr_goal
 from app.relationship.inactivity import apply_inactivity_decay
@@ -1323,10 +1322,12 @@ async def get_conversation_token(
     stages = bio.get("stages", {})
     if not isinstance(stages, dict):
         stages = {}
-    # personality_rules = bio.get("personality_rules", "")
-    # tone = bio.get("tone", "")
-    # mbti_rules = bio.get("mbti_rules", "")
-    # persona_rules = influencer.prompt_template or ""
+    personality_rules = bio.get("personality_rules", "")
+    tone = bio.get("tone", "")
+    mbti_archetype = bio.get("mbti_architype", "")
+    mbti_addon = bio.get("mbti_rules", "")
+    mbti_rules = await get_mbti_rules_for_archetype(db, mbti_archetype, mbti_addon)
+    daily_context = ""
 
     history = redis_history(chat_id)
 
@@ -1354,16 +1355,16 @@ async def get_conversation_token(
         rel=rel,
         days_idle=days_idle,
         dtr_goal=dtr_goal,
-        # personality_rules=personality_rules,
+        personality_rules=personality_rules,
         stages=stages,
         persona_likes=persona_likes,
         persona_dislikes=persona_dislikes,
-        # mbti_rules=mbti_rules,
+        mbti_rules=mbti_rules,
         memories="",
+        daily_context=daily_context,
         last_user_message="",
-        # tone=tone,
+        tone=tone,
         analysis="",
-        # persona_rules=persona_rules,
         influencer_name=influencer.display_name,
     )
     

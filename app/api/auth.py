@@ -70,6 +70,16 @@ def _clear_auth_cookies(response: Response) -> None:
             path="/",
         )
 
+@router.get("/check_email")
+async def check_email(email: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.email == email))
+    user = result.scalar_one_or_none()
+
+    return {
+        "exists": user is not None,
+        "email": email,
+    }
+
 @router.post("/register")
 @rate_limit(max_requests=settings.RATE_LIMIT_AUTH_MAX, window_seconds=settings.RATE_LIMIT_AUTH_WINDOW, key_prefix="auth:register")
 async def register(

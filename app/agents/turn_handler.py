@@ -14,6 +14,7 @@ from app.agents.prompt_utils import (
     get_global_prompt,
     build_relationship_prompt,
     pick_time_mood,
+    get_mbti_rules_for_archetype,
 )
 from app.db.models import Influencer
 from app.utils.tts_sanitizer import sanitize_tts_text
@@ -149,31 +150,28 @@ async def handle_turn(
     if not isinstance(stages, dict):
         stages = {}
 
-    # mbti_archetype = bio.get("mbti_architype", "")  
-    # mbti_addon = bio.get("mbti_rules", "")  
-    # mbti_rules = await get_mbti_rules_for_archetype(db, mbti_archetype, mbti_addon)
-    # personality_rules = bio.get("personality_rules", "")
-    # tone = bio.get("tone", "")
-
-    # stages = bio.get("stages", {})
-    # if not isinstance(stages, dict):
-    #     stages = {}
+    mbti_archetype = bio.get("mbti_architype", "")  
+    mbti_addon = bio.get("mbti_rules", "")  
+    mbti_rules = await get_mbti_rules_for_archetype(db, mbti_archetype, mbti_addon)
+    personality_rules = bio.get("personality_rules", "")
+    tone = bio.get("tone", "")
+    daily_context = ""  # Can be populated from influencer data if needed
 
     prompt = build_relationship_prompt(
         prompt_template,
         rel=rel,
         days_idle=days_idle,
         dtr_goal=dtr_goal,
-        # personality_rules=personality_rules,
+        personality_rules=personality_rules,
         stages=stages,
         persona_likes=persona_likes,
         persona_dislikes=persona_dislikes,
-        # mbti_rules=mbti_rules,
+        mbti_rules=mbti_rules,
         memories=mem_block,
-        # daily_context=daily_context,
+        daily_context=daily_context,
         last_user_message=message,
         mood=mood,
-        # tone=tone,
+        tone=tone,
         influencer_name=influencer.display_name,
     )
 

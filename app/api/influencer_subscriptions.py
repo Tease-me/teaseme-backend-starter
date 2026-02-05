@@ -15,7 +15,7 @@ from app.db.models import (
     InfluencerWallet,
     User
 )
-from app.services.influencer_subscriptions import require_active_subscription
+from app.services.influencer_subscriptions import get_valid_subscription
 from app.utils.rate_limiter import rate_limit
 from app.utils.idempotency import idempotent
 from app.utils.concurrency import advisory_lock
@@ -375,8 +375,8 @@ async def set_18_mode(
     req: Set18Req,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_age_verification),
-):
-    sub = await require_active_subscription(
+):  
+    sub = await get_valid_subscription(
         db,
         user_id=user.id,
         influencer_id=influencer_id,
