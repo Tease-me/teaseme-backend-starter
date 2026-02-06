@@ -7,7 +7,7 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import RedisChatMessageHistory
 
 from app.core.config import settings
-from app.agents.memory import find_similar_memories, store_fact
+from app.agents.memory import find_similar_memories, store_facts_batch
 from app.agents.prompts import MODEL, FACT_EXTRACTOR, CONVO_ANALYZER, get_fact_prompt
 from app.db.session import SessionLocal
 from app.agents.prompt_utils import (
@@ -72,13 +72,17 @@ async def extract_and_store_facts_for_turn(
 
             facts_txt = facts_resp.content or ""
             lines = [ln.strip("- ").strip() for ln in facts_txt.split("\n") if ln.strip()]
-
-            for line in lines[:5]:
-                if line.lower() == "no new memories.":
-                    continue
-                await store_fact(db, chat_id, line)
+            
+            # Filter out empty/skip lines
+            valid_facts = [line for line in lines[:5] if line.lower() != "no new memories."]
+            
+            if valid_facts:
+                # Use batch storage - single API call for all facts
+                await store_facts_batch(db, chat_id, valid_facts)
+                
         except Exception as ex:
             log.error("[%s] Fact extraction failed: %s", cid, ex, exc_info=True)
+
 
 
 async def handle_turn(
@@ -102,12 +106,15 @@ async def handle_turn(
 
     recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
 
-    influencer, prompt_template, weekday_prompt, weekend_prompt = await asyncio.gather(
-        db.get(Influencer, influencer_id),
+    # Phase 1: Fetch cached prompts in parallel (Redis cache, no DB contention)
+    prompt_template, weekday_prompt, weekend_prompt = await asyncio.gather(
         get_global_prompt(db, is_audio),
         get_system_prompt(db, prompt_keys.WEEKDAY_TIME_PROMPT),
         get_system_prompt(db, prompt_keys.WEEKEND_TIME_PROMPT),
     )
+    
+    # Phase 2: DB operation sequentially (AsyncSession doesn't allow concurrent access)
+    influencer = await db.get(Influencer, influencer_id)
     
     mood = pick_time_mood(weekday_prompt, weekend_prompt, user_timezone)
 

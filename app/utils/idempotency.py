@@ -10,21 +10,9 @@ from fastapi.responses import JSONResponse
 from starlette.status import HTTP_422_UNPROCESSABLE_ENTITY
 
 from app.core.config import settings
+from app.utils.redis_pool import get_redis
 
 log = logging.getLogger(__name__)
-
-_redis_pool: Optional[redis.Redis] = None
-
-
-async def get_redis() -> redis.Redis:
-    global _redis_pool
-    if _redis_pool is None:
-        _redis_pool = redis.from_url(
-            settings.REDIS_URL,
-            encoding="utf-8",
-            decode_responses=True,
-        )
-    return _redis_pool
 
 
 IDEMPOTENCY_HEADER = "X-Idempotency-Key"

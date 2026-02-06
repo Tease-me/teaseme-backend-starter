@@ -40,6 +40,10 @@ origins_str = os.getenv("CORS_ORIGINS", "")
 origins = [origin.strip() for origin in origins_str.split(",") if origin.strip()]
 
 
+from app.utils.redis_pool import close_redis
+from app.api.elevenlabs import close_elevenlabs_client
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("Starting re-engagement scheduler...")
@@ -49,6 +53,13 @@ async def lifespan(app: FastAPI):
     
     log.info("Stopping re-engagement scheduler...")
     stop_scheduler()
+    
+    log.info("Closing Redis connection pool...")
+    await close_redis()
+    
+    log.info("Closing ElevenLabs HTTP client...")
+    await close_elevenlabs_client()
+
 
 
 app = FastAPI(lifespan=lifespan)
