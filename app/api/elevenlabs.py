@@ -61,6 +61,15 @@ async def get_elevenlabs_client() -> httpx.AsyncClient:
         log.info("Created shared ElevenLabs HTTP client with connection pooling")
     return _elevenlabs_client
 
+
+async def close_elevenlabs_client() -> None:
+    """Close the shared ElevenLabs HTTP client gracefully."""
+    global _elevenlabs_client
+    if _elevenlabs_client is not None:
+        await _elevenlabs_client.aclose()
+        _elevenlabs_client = None
+        log.info("Closed ElevenLabs HTTP client")
+
 def _get_env_suffix() -> str:
     device = settings.DEVICE.upper() if settings.DEVICE else ""
     if device == "SERVER":
