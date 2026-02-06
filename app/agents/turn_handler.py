@@ -15,6 +15,7 @@ from app.agents.prompt_utils import (
     build_relationship_prompt,
     pick_time_mood,
     get_mbti_rules_for_archetype,
+    get_relationship_stage_prompts,
 )
 from app.db.models import Influencer
 from app.utils.tts_sanitizer import sanitize_tts_text
@@ -153,16 +154,20 @@ async def handle_turn(
         persona_likes = []
     if not isinstance(persona_dislikes, list):
         persona_dislikes = []
-    stages = bio.get("stages", {})
-    if not isinstance(stages, dict):
-        stages = {}
+    
+    stages = await get_relationship_stage_prompts(db)
+    bio_stages = bio.get("stages", {})
+    if isinstance(bio_stages, dict) and bio_stages:
+        for key, val in bio_stages.items():
+            if val: 
+                stages[key.upper()] = val
 
     mbti_archetype = bio.get("mbti_architype", "")  
     mbti_addon = bio.get("mbti_rules", "")  
     mbti_rules = await get_mbti_rules_for_archetype(db, mbti_archetype, mbti_addon)
     personality_rules = bio.get("personality_rules", "")
     tone = bio.get("tone", "")
-    daily_context = ""  # Can be populated from influencer data if needed
+    daily_context = ""  
 
     prompt = build_relationship_prompt(
         prompt_template,

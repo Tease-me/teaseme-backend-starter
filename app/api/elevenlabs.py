@@ -4,7 +4,7 @@ import math
 import random
 import json
 from uuid import uuid4
-from app.agents.prompt_utils import build_relationship_prompt, get_global_prompt, get_mbti_rules_for_archetype
+from app.agents.prompt_utils import build_relationship_prompt, get_global_prompt, get_mbti_rules_for_archetype, get_relationship_stage_prompts
 from app.relationship.dtr import plan_dtr_goal
 from app.relationship.inactivity import apply_inactivity_decay
 from app.relationship.repo import get_or_create_relationship
@@ -1397,9 +1397,14 @@ async def get_conversation_token(
         persona_likes = []
     if not isinstance(persona_dislikes, list):
         persona_dislikes = []
-    stages = bio.get("stages", {})
-    if not isinstance(stages, dict):
-        stages = {}
+    
+    # Get stage prompts from DB, with potential bio_json override
+    stages = await get_relationship_stage_prompts(db)
+    bio_stages = bio.get("stages", {})
+    if isinstance(bio_stages, dict) and bio_stages:
+        for key, val in bio_stages.items():
+            if val:  # Only override if value is non-empty
+                stages[key.upper()] = val
     personality_rules = bio.get("personality_rules", "")
     tone = bio.get("tone", "")
     mbti_archetype = bio.get("mbti_architype", "")
