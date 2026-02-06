@@ -1,5 +1,5 @@
 #TODO: add file into UTILS folder
-from openai import OpenAI
+from openai import AsyncOpenAI
 from sqlalchemy import text
 from dotenv import load_dotenv
 from datetime import datetime
@@ -8,12 +8,15 @@ import logging
 log = logging.getLogger(__name__)
 
 load_dotenv()
-client = OpenAI()
+
+# Use AsyncOpenAI for non-blocking API calls
+# This prevents blocking the event loop during embedding requests
+client = AsyncOpenAI()
 
 
 async def get_embedding(text: str) -> list[float]:
-    """Get embedding for a single text."""
-    response = client.embeddings.create(
+    """Get embedding for a single text (non-blocking)."""
+    response = await client.embeddings.create(
         input=text,
         model="text-embedding-3-small"
     )
@@ -27,6 +30,7 @@ async def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
     This is much more efficient than calling get_embedding() in a loop:
     - 1 API call instead of N
     - ~70-80% latency reduction for multiple texts
+    - Non-blocking: doesn't block event loop during API call
     
     Args:
         texts: List of texts to embed (max ~2000 recommended per batch)
@@ -42,7 +46,7 @@ async def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
         return [await get_embedding(texts[0])]
     
     try:
-        response = client.embeddings.create(
+        response = await client.embeddings.create(
             input=texts,
             model="text-embedding-3-small"
         )
