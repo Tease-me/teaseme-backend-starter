@@ -247,10 +247,10 @@ async def _generate_prompt_from_markdown(markdown: str, additional_prompt: str |
         "hate": stages.get("hate", ""),
         "dislike": stages.get("dislike", ""),
         "strangers": stages.get("strangers", ""),
-        "friendly": stages.get("friendly", ""),
+        "friends": stages.get("friends", ""),
         "flirting": stages.get("flirting", ""),
         "dating": stages.get("dating", ""),
-        "in_love": stages.get("in_love", ""),
+        "girlfriend": stages.get("girlfriend", ""),
     }
 
     def _as_str_list(val):
