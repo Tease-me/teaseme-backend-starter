@@ -391,69 +391,54 @@ async def eleven_webhook_get_memories(
         }
 
     started = time.perf_counter()
+    memories = []
+    
     try:
-        memories = await asyncio.wait_for(
-            find_similar_memories(
-                message=user_text,
-                chat_id=chat_id,
-                influencer_id=influencer_id,
-                db=db,
-            ),
-            timeout=8.5,
+        # Compute embedding ONCE, then query memories and messages in PARALLEL
+        from app.api.utils import get_embedding
+        embedding = await asyncio.wait_for(
+            get_embedding(user_text),
+            timeout=3.0,
         )
+        
+        # Run both queries in parallel with shared embedding
+        memories_result, messages_result = await asyncio.wait_for(
+            asyncio.gather(
+                find_similar_memories(
+                    message=user_text,
+                    chat_id=chat_id,
+                    influencer_id=influencer_id,
+                    db=db,
+                    embedding=embedding,
+                ),
+                find_similar_messages(
+                    message=user_text,
+                    chat_id=chat_id,
+                    influencer_id=influencer_id,
+                    db=db,
+                    embedding=embedding,
+                ),
+                return_exceptions=True,
+            ),
+            timeout=6.0,
+        )
+        
+        # Combine results, filtering out exceptions
+        if isinstance(memories_result, list) and memories_result:
+            memories = memories_result
+        elif isinstance(messages_result, list) and messages_result:
+            memories = messages_result
+            
     except asyncio.TimeoutError:
-        memories = []
+        log.warning("[EL TOOL] memory query timeout conv=%s", conversation_id)
     except Exception as e:
-        log.exception("[EL TOOL] handle_turn failed: %s", e)
-        memories = []
+        log.exception("[EL TOOL] memory query failed: %s", e)
     finally:
         ms = int((time.perf_counter() - started) * 1000)
         log.info(
-            "[EL TOOL] reply ms=%d conv=%s user=%s infl=%s chat=%s",
-            ms, conversation_id, user_id, influencer_id, chat_id
+            "[EL TOOL] memories ms=%d count=%d conv=%s user=%s infl=%s chat=%s",
+            ms, len(memories) if memories else 0, conversation_id, user_id, influencer_id, chat_id
         )
-    
-    def _memories_empty(value) -> bool:
-        if not value:
-            return True
-        if isinstance(value, (list, tuple)) and all(not v for v in value):
-            return True
-        return False
-
-    if _memories_empty(memories):
-        try:
-            memories = await asyncio.wait_for(
-                find_similar_messages(
-                    message=user_text,
-                    chat_id=chat_id,
-                    influencer_id=influencer_id,
-                    db=db,
-                ),
-                timeout=6.0,
-            )
-        except Exception:
-            memories = []
-
-    def _memories_empty(value) -> bool:
-        if not value:
-            return True
-        if isinstance(value, (list, tuple)) and all(not v for v in value):
-            return True
-        return False
-
-    if _memories_empty(memories):
-        try:
-            memories = await asyncio.wait_for(
-                find_similar_messages(
-                    message=user_text,
-                    chat_id=chat_id,
-                    influencer_id=influencer_id,
-                    db=db,
-                ),
-                timeout=6.0,
-            )
-        except Exception:
-            memories = []
 
     return {"memories": memories}
 
