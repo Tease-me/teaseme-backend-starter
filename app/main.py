@@ -42,7 +42,6 @@ origins = [origin.strip() for origin in origins_str.split(",") if origin.strip()
 
 from app.utils.redis_pool import close_redis
 from app.api.elevenlabs import close_elevenlabs_client
-from app.utils.http_clients import close_all_http_clients
 
 
 @asynccontextmanager
@@ -58,9 +57,8 @@ async def lifespan(app: FastAPI):
     log.info("Closing Redis connection pool...")
     await close_redis()
     
-    log.info("Closing HTTP clients...")
+    log.info("Closing ElevenLabs HTTP client...")
     await close_elevenlabs_client()
-    await close_all_http_clients()
 
 
 
