@@ -1333,10 +1333,9 @@ async def get_conversation_token(
         )
     
     agent_id = await get_agent_id_from_influencer(db, influencer_id)
-    influencer, prompt_template = await asyncio.gather(
-        db.get(Influencer, influencer_id),
-        get_global_prompt(db, True),
-    )
+    # Sequential to avoid SQLAlchemy AsyncSession concurrent access issue
+    prompt_template = await get_global_prompt(db, True)
+    influencer = await db.get(Influencer, influencer_id)
     chat_id = await get_or_create_chat(db, user_id, influencer_id)
 
     if not influencer:
