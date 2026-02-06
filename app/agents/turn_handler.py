@@ -106,12 +106,15 @@ async def handle_turn(
 
     recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
 
-    influencer, prompt_template, weekday_prompt, weekend_prompt = await asyncio.gather(
-        db.get(Influencer, influencer_id),
+    # Phase 1: Fetch cached prompts in parallel (Redis cache, no DB contention)
+    prompt_template, weekday_prompt, weekend_prompt = await asyncio.gather(
         get_global_prompt(db, is_audio),
         get_system_prompt(db, prompt_keys.WEEKDAY_TIME_PROMPT),
         get_system_prompt(db, prompt_keys.WEEKEND_TIME_PROMPT),
     )
+    
+    # Phase 2: DB operation sequentially (AsyncSession doesn't allow concurrent access)
+    influencer = await db.get(Influencer, influencer_id)
     
     mood = pick_time_mood(weekday_prompt, weekend_prompt, user_timezone)
 

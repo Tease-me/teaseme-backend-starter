@@ -21,6 +21,9 @@ async def get_system_prompt(db: AsyncSession, key: str) -> str:
     """
     Returns the prompt string for the given key.
     Uses Redis cache with 10-minute TTL to avoid repeated DB queries.
+    
+    Note: On cache miss, creates its own session to avoid concurrent access
+    issues when this function is called in parallel via asyncio.gather.
     """
     cache_key = f"{PROMPT_CACHE_PREFIX}:{key}"
     
@@ -33,11 +36,14 @@ async def get_system_prompt(db: AsyncSession, key: str) -> str:
     except Exception as e:
         log.warning("Redis cache read failed for key=%s: %s", key, e)
     
-    # Cache miss - query database
-    result = await db.execute(
-        select(SystemPrompt).where(SystemPrompt.key == key)
-    )
-    row: Optional[SystemPrompt] = result.scalar_one_or_none()
+    # Cache miss - query database with a FRESH session to avoid concurrency issues
+    # This is necessary because asyncio.gather may call this function in parallel,
+    # and SQLAlchemy AsyncSession doesn't allow concurrent operations on same session
+    async with SessionLocal() as fresh_db:
+        result = await fresh_db.execute(
+            select(SystemPrompt).where(SystemPrompt.key == key)
+        )
+        row: Optional[SystemPrompt] = result.scalar_one_or_none()
 
     if not row:
         log.warning("SystemPrompt not found for key=%s", key)
