@@ -29,6 +29,7 @@ from app.api import system_prompts as system_prompts_router
 
 from .api import health_router
 from app.scheduler import start_scheduler, stop_scheduler
+from app.utils.redis_pool import close_redis
 
 log = logging.getLogger("teaseme")
 logging.basicConfig(
@@ -49,6 +50,9 @@ async def lifespan(app: FastAPI):
     
     log.info("Stopping re-engagement scheduler...")
     stop_scheduler()
+    
+    log.info("Closing Redis connection pool...")
+    await close_redis()
 
 
 app = FastAPI(lifespan=lifespan)
