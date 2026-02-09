@@ -30,6 +30,7 @@ from app.api import system_prompts as system_prompts_router
 from .api import health_router
 from app.scheduler import start_scheduler, stop_scheduler
 from app.utils.redis_pool import close_redis
+from app.api.elevenlabs import close_elevenlabs_client
 
 log = logging.getLogger("teaseme")
 logging.basicConfig(
@@ -53,6 +54,9 @@ async def lifespan(app: FastAPI):
     
     log.info("Closing Redis connection pool...")
     await close_redis()
+    
+    log.info("Closing ElevenLabs HTTP client...")
+    await close_elevenlabs_client()
 
 
 app = FastAPI(lifespan=lifespan)
