@@ -60,15 +60,20 @@ async def handle_turn_18(
     cid = uuid4().hex[:8]
     log.info("[%s] START(18) persona=%s chat=%s user=%s", cid, influencer_id, chat_id, user_id)
 
-    influencer, user, base_adult_prompt, base_audio_prompt, weekday_prompt, weekend_prompt, recent_ctx = await asyncio.gather(
-        db.get(Influencer, influencer_id),
-        db.get(User, user_id),
+    # Phase 1: Fetch system prompts in parallel
+    # Uses Redis-backed caching; cache misses use separate DB sessions,
+    # avoiding concurrent access to the shared AsyncSession.
+    base_adult_prompt, base_audio_prompt, weekday_prompt, weekend_prompt = await asyncio.gather(
         get_system_prompt(db, prompt_keys.BASE_ADULT_PROMPT),
         get_system_prompt(db, prompt_keys.BASE_ADULT_AUDIO_PROMPT),
         get_system_prompt(db, prompt_keys.WEEKDAY_TIME_PROMPT_ADULT),
         get_system_prompt(db, prompt_keys.WEEKEND_TIME_PROMPT_ADULT),
-        _load_recent_ctx_18(db, chat_id, limit=12),
     )
+    
+    # Phase 2: DB operations sequentially (AsyncSession doesn't allow concurrent access)
+    influencer = await db.get(Influencer, influencer_id)
+    user = await db.get(User, user_id)
+    recent_ctx = await _load_recent_ctx_18(db, chat_id, limit=12)
 
     if not influencer:
         raise HTTPException(404, "Influencer not found")
