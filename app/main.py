@@ -31,6 +31,7 @@ from .api import health_router
 from app.scheduler import start_scheduler, stop_scheduler
 from app.utils.redis_pool import close_redis
 from app.api.elevenlabs import close_elevenlabs_client
+from app.api.preferences import router as preferences_router
 
 log = logging.getLogger("teaseme")
 logging.basicConfig(
@@ -89,3 +90,4 @@ app.include_router(admin_router)
 app.include_router(relationship_router)
 app.include_router(re_engagement_router)
 app.include_router(verification_router)
+app.include_router(preferences_router)
