@@ -890,10 +890,10 @@ async def _poll_and_persist_conversation(
         if chat_id and normalized_transcript:
             try:
                 from app.agents.turn_handler import extract_and_store_facts_for_turn
-                user_messages = [t.get("message") or t.get("text") or "" for t in normalized_transcript 
-                                 if (t.get("role") or "").lower() in ("user", "human")]
+                user_messages = [t.get("text") or "" for t in normalized_transcript 
+                                 if (t.get("sender") or "").lower() in ("user", "human")]
                 all_user_text = "\n".join(m for m in user_messages if m.strip())
-                ctx_lines = [f"{t.get('role', 'unknown')}: {t.get('message') or t.get('text') or ''}" 
+                ctx_lines = [f"{t.get('sender', 'unknown')}: {t.get('text', '')}" 
                              for t in normalized_transcript]
                 recent_ctx = "\n".join(ctx_lines)
                 
@@ -1153,13 +1153,11 @@ async def _persist_transcript_to_chat(
     chat = await db.get(Chat, chat_id)
     user_id = chat.user_id if chat else None
     resolved_influencer_id = influencer_id or (chat.influencer_id if chat else None)
-    if not chat: 
+    if not chat:
         log.warning(
-            log.warning(
-                "_persist_transcript.chat_not_found conv=%s chat=%s",
-                conversation_id,
-                chat_id,
-            )
+            "_persist_transcript.chat_not_found conv=%s chat=%s",
+            conversation_id,
+            chat_id,
         )
     moderation_enabled =  bool(user_id and resolved_influencer_id)
     start_ts = (conversation_json.get("metadata") or {}).get("start_time_unix_secs")
@@ -1225,7 +1223,7 @@ async def _persist_transcript_to_chat(
                         context=context,
                         result=mod_result,
                     )
-                    log.logging.warning(
+                    log.warning(
                         "persist_transcript.violation chat=%s conv=%s msg=%s",
                         chat_id,
                         conversation_id,
@@ -1454,6 +1452,15 @@ async def get_conversation_token(
 
     dtr_goal = plan_dtr_goal(rel, can_ask)
 
+    # Load stored facts/memories so the AI knows what was discussed before
+    from app.agents.memory import get_recent_facts
+    try:
+        recent_facts = await get_recent_facts(db, chat_id, limit=15)
+        mem_block = "\n".join(recent_facts) if recent_facts else ""
+    except Exception as exc:
+        log.warning("conversation_token.facts_load_failed chat=%s err=%s", chat_id, exc)
+        mem_block = ""
+
     prompt = build_relationship_prompt(
         prompt_template,
         rel=rel,
@@ -1464,7 +1471,7 @@ async def get_conversation_token(
         persona_likes=persona_likes,
         persona_dislikes=persona_dislikes,
         mbti_rules=mbti_rules,
-        memories="",
+        memories=mem_block,
         daily_context=daily_context,
         last_user_message="",
         tone=tone,
