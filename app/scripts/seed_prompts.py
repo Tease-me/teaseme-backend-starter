@@ -1,11 +1,17 @@
 import asyncio
 import json
+from pathlib import Path
 from datetime import datetime, timezone
 from sqlalchemy import select
 
 from app.db.models import SystemPrompt
 from app.db.session import SessionLocal
 from app.constants import prompt_keys
+
+RAW_DIR = Path(__file__).resolve().parent.parent / "raw"
+RELATIONSHIP_STAGE_PROMPTS = json.loads(
+    (RAW_DIR / "relationship_stage_prompts.json").read_text()
+)
 
 WEEKDAY_TIMEVARIABLE = """{
     "12AM-3AM": [
@@ -1228,6 +1234,8 @@ SYSTEM_PROMPTS = [
         "description": "Prompt to generate JSON survey responses.",
         "prompt":         
         """You are a prompt engineer. Read the survey markdown and output only JSON matching this schema exactly: { likes: string[], dislikes: string[], mbti_architype: string, mbti_rules: string, personality_rules: string, tone: string, stages: { hate: string, dislike: string, strangers: string, friends: string, flirting: string, dating: string, girlfriend: string } }.Fill likes/dislikes from foods, hobbies, entertainment, routines, and anything the user enjoys or hates. mbti_architype should select one of: ISTJ, ISFJ, INFJ, INTJ, ISTP, ISFP, INFP, INTP, ESTP, ESFP, ENFP, ENTP, ESTJ, ESFJ, ENFJ, ENTJ. mbti_rules should use mbti_architype to summarize decision style, social energy, planning habits. personality_rules should use mbti_architype to summarize overall personality, humor, boundaries, relationship vibe. tone should use mbti_architype to describe speaking style in a short sentence. Each stage string should describe how the persona behaves toward the user at that relationship stage. These should be influenced by mbti_architype.Keep strings concise (1-2 sentences). If unclear, use an empty string. No extra keys, no prose."""
+        ,
+        "type": "normal"
     },
     {
         "key": prompt_keys.FACT_PROMPT,
@@ -1411,6 +1419,13 @@ Output ONLY the greeting text, nothing else.
         "name": "Relationship Dimensions Configuration",
         "description": "Stage-specific descriptions for relationship dimensions (trust, closeness, attraction, safety). Used by frontend to explain what each dimension means at each relationship stage.",
         "prompt": json.dumps(RELATIONSHIP_DIMENSIONS),
+        "type": "normal"
+    },
+    {
+        "key": prompt_keys.RELATIONSHIP_STAGE_PROMPTS,
+        "name": "Relationship Stage Prompts",
+        "description": "Stage-specific behavior guidance for relationship states.",
+        "prompt": json.dumps(RELATIONSHIP_STAGE_PROMPTS),
         "type": "normal"
     }
 ]
