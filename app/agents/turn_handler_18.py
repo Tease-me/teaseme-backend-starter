@@ -13,7 +13,6 @@ from app.utils.prompt_logging import log_prompt
 from app.services.system_prompt_service import get_system_prompt
 from app.constants import prompt_keys
 from langchain_core.prompts import ChatPromptTemplate
-from app.agents.prompt_utils import pick_time_mood
 log = logging.getLogger("teaseme-turn-18")
 
 
@@ -82,6 +81,13 @@ async def handle_turn_18(
     if is_audio and base_audio_prompt:
         system_prompt = f"{base_adult_prompt}\n{base_audio_prompt}"
 
+    # Load persona preferences and generate 18+ time-of-day activity
+    from app.services.preference_service import (
+        get_persona_preference_labels,
+        build_preference_time_activity,
+    )
+    _, _, pref_keys = await get_persona_preference_labels(db, influencer_id)
+    pref_activity = build_preference_time_activity(pref_keys, user_timezone, is_adult=True)
 
     prompt = ChatPromptTemplate.from_messages(
         [
@@ -90,6 +96,8 @@ async def handle_turn_18(
         ]
     )
     mood = pick_time_mood(weekday_prompt, weekend_prompt, user_timezone)
+    if pref_activity:
+        mood = f"{mood}. Right now you're {pref_activity}" if mood else f"Right now you're {pref_activity}"
 
     user_adult_prompt = user.custom_adult_prompt if user else None
     prompt = prompt.partial(user_prompt=user_adult_prompt, history=recent_ctx, mood=mood)

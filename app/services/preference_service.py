@@ -270,72 +270,110 @@ def _resolve_tz(tz_name: str | None):
 
 _PREF_TIME_ACTIVITIES: dict[str, dict[str, list[str]]] = {
     # food_and_drink
-    "food_sushi":        {"evening": ["craving sushi and thinking about your favorite roll"]},
-    "food_coffee":       {"morning": ["sipping coffee and slowly waking up", "nursing your favorite coffee, soaking in the morning vibes"]},
-    "food_wine":         {"evening": ["unwinding with a glass of wine, feeling relaxed"]},
-    "food_cooking":      {"evening": ["prepping something delicious in the kitchen, humming along to music"], "afternoon": ["browsing recipes for tonight's dinner"]},
-    "food_vegan":        {"morning": ["blending a green smoothie to start the day right"], "afternoon": ["grabbing a fresh acai bowl"]},
-    "food_fastfood":     {"night":   ["craving late-night fast food, feeling unapologetic about it"]},
-    "food_brunch":       {"morning": ["daydreaming about bottomless mimosas and avocado toast"]},
+    "food_sushi":        {"evening": ["craving sushi tonight"], "late_evening": ["thinking about ordering sushi"]},
+    "food_coffee":       {"early_morning": ["making your first coffee, barely awake", "waiting for that first sip of coffee to hit"], "late_morning": ["on your second coffee, finally feeling alive"], "afternoon": ["grabbing an iced coffee to power through"], "midday": ["coffee run — you earned it"]},
+    "food_wine":         {"evening": ["pouring a glass of wine, unwinding"], "late_evening": ["sipping wine, feeling relaxed and warm"]},
+    "food_cooking":      {"evening": ["in the kitchen, cooking something that smells incredible"], "afternoon": ["browsing recipes, planning something special for tonight"], "golden_hour": ["prepping ingredients for dinner"]},
+    "food_vegan":        {"early_morning": ["blending a green smoothie"], "late_morning": ["having an acai bowl, feeling healthy"], "midday": ["grabbing a fresh salad"]},
+    "food_fastfood":     {"late_night": ["craving late-night fast food, no shame"], "late_evening": ["debating a midnight snack run"]},
+    "food_brunch":       {"late_morning": ["living for brunch right now — mimosas and all"], "early_morning": ["dreaming about avocado toast and eggs benedict"]},
     # music_and_entertainment
-    "ent_pop":           {"morning": ["vibing to pop music while getting ready"], "afternoon": ["listening to the latest pop hits"]},
-    "ent_hiphop":        {"afternoon": ["bumping hip-hop while doing your thing"], "evening": ["setting the mood with R&B"]},
-    "ent_horror":        {"night":   ["watching a horror movie in the dark, low-key scared"]},
-    "ent_reality_tv":    {"evening": ["binge-watching reality TV drama, fully invested"]},
-    "ent_gaming":        {"afternoon": ["gaming session underway, in the zone"], "night": ["deep in a late-night gaming session"]},
-    "ent_anime":         {"evening": ["watching anime, totally hooked on the latest episode"], "night": ["one more episode of anime... just one more"]},
-    "ent_concerts":      {"evening": ["imagining the energy of a live concert right now"]},
+    "ent_pop":           {"early_morning": ["vibing to pop while getting ready"], "late_morning": ["dancing around to your playlist"], "afternoon": ["listening to the latest pop hits"], "evening": ["putting on your feel-good playlist, singing along"]},
+    "ent_hiphop":        {"afternoon": ["bumping hip-hop while doing your thing"], "evening": ["setting the mood with R&B"], "late_evening": ["vibing to slow jams"]},
+    "ent_horror":        {"late_night": ["watching a horror movie in the dark, low-key scared"], "late_evening": ["picking a scary movie for tonight"]},
+    "ent_reality_tv":    {"evening": ["binge-watching reality TV, fully invested"], "late_evening": ["one more episode, can't stop now"], "afternoon": ["catching up on reality TV drama"]},
+    "ent_gaming":        {"afternoon": ["gaming session, in the zone"], "late_night": ["deep in a late-night gaming session"], "evening": ["playing games, getting competitive"]},
+    "ent_anime":         {"evening": ["watching anime, totally hooked"], "late_night": ["one more episode of anime... just one more"], "afternoon": ["rewatching your favorite anime scene"]},
+    "ent_concerts":      {"evening": ["imagining the energy of a live concert"], "golden_hour": ["listening to live versions of your favorite songs"]},
     # fashion_and_style
-    "style_streetwear":  {"morning": ["picking out a killer streetwear fit for today"]},
-    "style_designer":    {"afternoon": ["browsing designer pieces online, adding to your wish list"]},
-    "style_minimalist":  {"morning": ["feeling clean and minimal today, less is more"]},
-    "style_jewelry":     {"morning": ["choosing jewelry to match today's mood"]},
-    "style_sneakers":    {"afternoon": ["checking out new sneaker drops"]},
-    "style_thrifting":   {"afternoon": ["daydreaming about your next thrift haul"]},
-    "style_matching":    {"morning": ["thinking about how cute matching outfits would be"]},
+    "style_streetwear":  {"early_morning": ["picking out a killer streetwear fit"], "late_morning": ["feeling good about today's outfit choice"]},
+    "style_designer":    {"afternoon": ["browsing designer pieces, wish list growing"], "golden_hour": ["scrolling through new designer drops"]},
+    "style_minimalist":  {"early_morning": ["feeling clean and minimal today, less is more"], "late_morning": ["loving how simple today's outfit turned out"]},
+    "style_jewelry":     {"early_morning": ["choosing jewelry to match today's mood"], "golden_hour": ["swapping accessories for the evening vibe"]},
+    "style_sneakers":    {"afternoon": ["checking out new sneaker drops"], "late_morning": ["admiring your sneaker collection"]},
+    "style_thrifting":   {"afternoon": ["daydreaming about your next thrift haul"], "midday": ["scrolling vintage shops online"]},
+    "style_matching":    {"early_morning": ["thinking about cute matching outfits"], "evening": ["planning a couples outfit for date night"]},
     # hobbies_and_interests
-    "hobby_gym":         {"morning": ["just crushed a morning workout, feeling pumped", "getting ready for a gym session, energy is high"], "afternoon": ["heading to the gym for a midday sweat session"]},
-    "hobby_reading":     {"morning": ["curled up with a good book and coffee"], "night": ["reading in bed, lost in another world"]},
-    "hobby_traveling":   {"afternoon": ["planning your next trip, scrolling through travel inspo"], "morning": ["daydreaming about faraway places"]},
-    "hobby_skincare":    {"morning": ["going through your skincare routine, feeling glowy"], "night": ["doing your nighttime skincare ritual, treating yourself"]},
-    "hobby_photography": {"afternoon": ["out capturing golden-hour shots"], "morning": ["shooting the morning light, it's perfect right now"]},
-    "hobby_art":         {"afternoon": ["in the creative zone, painting or sketching something"], "evening": ["feeling artsy, working on a new piece"]},
-    "hobby_yoga":        {"morning": ["just finished a peaceful yoga flow, feeling centered"], "evening": ["doing evening stretches, unwinding from the day"]},
+    "hobby_gym":         {"early_morning": ["about to hit the gym, energy is building"], "late_morning": ["just crushed a workout, feeling pumped", "fresh out the gym, endorphins on another level"], "afternoon": ["heading to the gym for a midday sweat"], "golden_hour": ["flexing in the mirror after an insane workout"]},
+    "hobby_reading":     {"early_morning": ["curled up with a good book and coffee"], "late_night": ["reading in bed, lost in another world"], "afternoon": ["a few chapters deep, can't put this book down"]},
+    "hobby_traveling":   {"afternoon": ["scrolling travel inspo, getting wanderlust"], "late_morning": ["daydreaming about faraway places"], "midday": ["planning your next getaway"]},
+    "hobby_skincare":    {"early_morning": ["going through your skincare routine, feeling glowy"], "late_morning": ["skin is looking amazing today, thanks to that routine"], "evening": ["doing a face mask, full self-care mode"], "late_evening": ["doing your nighttime skincare ritual, treating yourself"]},
+    "hobby_photography": {"golden_hour": ["out capturing golden-hour shots, the light is perfect"], "late_morning": ["shooting in beautiful morning light"], "afternoon": ["editing some photos, getting creative"]},
+    "hobby_art":         {"afternoon": ["in the creative zone, painting something new"], "evening": ["feeling artsy, working on a new piece"], "midday": ["doodling, letting ideas flow"]},
+    "hobby_yoga":        {"early_morning": ["just finished a peaceful yoga flow, feeling centered"], "evening": ["doing evening stretches, unwinding"], "golden_hour": ["yoga on the balcony, sunset vibes"]},
     # social_and_lifestyle
-    "social_partying":   {"night":   ["out on the town, the energy is electric"], "evening": ["getting ready for a night out, feeling excited"]},
-    "social_cozy_nights":{"evening": ["curled up on the couch, candles lit, pure cozy vibes"], "night": ["nestled in blankets, the ultimate cozy night in"]},
-    "social_early_mornings":{"morning": ["up early, loving the quiet before the world wakes up"]},
-    "social_pets":       {"morning": ["cuddling with your pet, they're being extra sweet today"], "afternoon": ["taking your dog for a walk, sunshine feels nice"]},
-    "social_cooking_together": {"evening": ["wishing someone was here to cook with tonight"]},
-    "social_roadtrips":  {"morning": ["daydreaming about a spontaneous road trip"], "afternoon": ["putting together a road trip playlist"]},
-    "social_beach":      {"afternoon": ["imagining toes in the sand and ocean sounds"], "morning": ["thinking about a beach day, the waves are calling"]},
+    "social_partying":   {"late_night": ["out on the town, energy is electric"], "late_evening": ["getting ready for a night out, feeling excited"], "evening": ["pregaming, the vibe is immaculate"]},
+    "social_cozy_nights":{"evening": ["curled up on the couch, candles lit, pure cozy vibes", "snuggled up with a blanket watching something"], "late_evening": ["nestled in blankets, the ultimate cozy night in"], "afternoon": ["already planning tonight's cozy setup"], "late_night": ["wrapped in blankets, so warm and comfortable"]},
+    "social_early_mornings":{"early_morning": ["up early, loving the quiet before the world wakes up", "watching the sunrise with coffee, peaceful"]},
+    "social_pets":       {"early_morning": ["cuddling with your pet, they're being extra sweet"], "afternoon": ["taking your dog for a walk, sunshine feels nice"], "late_morning": ["your pet is being ridiculous and adorable right now"]},
+    "social_cooking_together": {"evening": ["wishing someone was here to cook with tonight"], "golden_hour": ["setting up the kitchen for a two-person cooking night"]},
+    "social_roadtrips":  {"late_morning": ["daydreaming about a spontaneous road trip"], "afternoon": ["putting together a road trip playlist"]},
+    "social_beach":      {"afternoon": ["imagining toes in the sand and ocean sounds"], "late_morning": ["thinking about a beach day, the waves are calling"], "golden_hour": ["picturing a sunset on the beach right now"]},
     # romance_and_dating
-    "romance_surprises": {"afternoon": ["planning a little surprise for someone special"]},
-    "romance_long_walks":{"evening": ["thinking about a long sunset walk together"]},
-    "romance_love_notes":{"morning": ["feeling inspired to write something sweet"]},
+    "romance_surprises": {"afternoon": ["planning a little surprise for someone special"], "midday": ["scheming something sweet"]},
+    "romance_long_walks":{"evening": ["thinking about a long sunset walk together"], "golden_hour": ["the perfect weather for a walk with someone"]},
+    "romance_love_notes":{"early_morning": ["feeling inspired to write something sweet"], "late_evening": ["writing down thoughts before bed, feeling sentimental"]},
     # aesthetics_and_vibes
-    "vibe_beach":        {"afternoon": ["dreaming about the ocean, salt air and warm sand"]},
-    "vibe_mountains":    {"morning": ["wishing you were waking up in the mountains right now"]},
-    "vibe_city":         {"evening": ["loving the city lights, the energy is everything"]},
-    "vibe_cottagecore":  {"morning": ["feeling cottagecore today, cozy and wholesome"]},
-    "vibe_luxury":       {"afternoon": ["living your best luxury life, even if just in your head"], "evening": ["feeling fancy and luxurious tonight"]},
-    "vibe_sunsets":      {"evening": ["watching the sunset, colors are unreal right now"]},
-    "vibe_rainy_days":   {"morning": ["loving this rainy day, perfect excuse to stay in"], "afternoon": ["listening to the rain, feeling peaceful"]},
+    "vibe_beach":        {"afternoon": ["dreaming about the ocean, salt air and warm sand"], "golden_hour": ["imagining waves and a sunset cocktail"]},
+    "vibe_mountains":    {"early_morning": ["wishing you were waking up in the mountains"], "late_morning": ["craving fresh mountain air"]},
+    "vibe_city":         {"evening": ["loving the city lights, the energy is everything"], "late_evening": ["the city at night hits different"], "late_night": ["rooftop views, city never sleeps"]},
+    "vibe_cottagecore":  {"early_morning": ["feeling cottagecore today, cozy and wholesome"], "late_morning": ["baking something, whole house smells amazing"]},
+    "vibe_luxury":       {"afternoon": ["living your best luxury life, even just in your head"], "evening": ["feeling fancy and luxurious tonight"], "golden_hour": ["golden hour in a silk robe, main character energy"]},
+    "vibe_sunsets":      {"golden_hour": ["watching the sunset, colors are unreal right now", "soaking in golden hour, everything looks beautiful"], "evening": ["the sky is putting on a show tonight"], "afternoon": ["counting down to sunset, can't wait"]},
+    "vibe_rainy_days":   {"early_morning": ["loving this rainy day, perfect excuse to stay in"], "afternoon": ["listening to the rain, feeling peaceful"], "late_morning": ["rain on the window, tea in hand"]},
     # tech_and_culture
-    "culture_tiktok":    {"afternoon": ["scrolling TikTok, the algorithm is too good today"], "night": ["in a TikTok rabbit hole, can't stop watching"]},
-    "culture_memes":     {"afternoon": ["sending memes to friends, communication through humor"]},
-    "culture_podcasts":  {"morning": ["listening to a podcast while getting ready"], "afternoon": ["deep into a podcast episode, mind blown"]},
-    "culture_social_media":{"afternoon": ["curating your feed, social media game strong"]},
-    "culture_true_crime":{"night":   ["listening to a true crime podcast in the dark... maybe bad idea"]},
-    "culture_astrology": {"morning": ["checking your horoscope, let's see what the stars say"]},
-    "culture_self_improvement":{"morning": ["journaling and setting intentions for the day"]},
+    "culture_tiktok":    {"afternoon": ["scrolling TikTok, the algorithm is unreal today"], "late_night": ["in a TikTok rabbit hole, can't stop"], "midday": ["just saw the funniest TikTok"]},
+    "culture_memes":     {"afternoon": ["sending memes to everyone, communication through humor"], "midday": ["found the perfect meme, had to share"]},
+    "culture_podcasts":  {"early_morning": ["listening to a podcast while getting ready"], "afternoon": ["deep into a podcast, mind blown"], "late_morning": ["hooked on this new podcast series"]},
+    "culture_social_media":{"afternoon": ["curating your feed, social media game strong"], "midday": ["checking notifications, staying connected"], "late_morning": ["catching up on everyone's stories"]},
+    "culture_true_crime":{"late_night": ["listening to true crime in the dark... maybe bad idea"], "late_evening": ["watching a true crime doc, fully hooked"]},
+    "culture_astrology": {"early_morning": ["checking your horoscope, let's see what the stars say"], "late_morning": ["your horoscope said today would be interesting..."]},
+    "culture_self_improvement":{"early_morning": ["journaling and setting intentions for today"], "late_morning": ["reading something inspiring, feeling motivated"]},
+}
+
+# ── 18+ flirty/teasing activities (used in adult mode) ──────────────
+_PREF_TIME_ACTIVITIES_18: dict[str, dict[str, list[str]]] = {
+    # food_and_drink
+    "food_coffee":       {"early_morning": ["barely dressed, making coffee in just a shirt, hair all messy", "sipping coffee in bed, sheets barely covering you"], "late_morning": ["still in your robe, sipping coffee, taking your sweet time getting dressed"]},
+    "food_wine":         {"evening": ["sipping wine in something silky, feeling flirty"], "late_evening": ["wine-tipsy, feeling warm and touchy", "glass of wine in hand, wearing that outfit you know drives people crazy"]},
+    "food_cooking":      {"evening": ["cooking in just an apron, music playing, feeling playful"], "golden_hour": ["in the kitchen wearing almost nothing, dancing while you prep dinner"]},
+    # hobbies_and_interests
+    "hobby_gym":         {"late_morning": ["fresh out the gym, sports bra and leggings, still catching your breath", "covered in sweat from that workout, about to shower... or maybe not yet"], "early_morning": ["throwing on a tight workout outfit, checking yourself out in the mirror"], "afternoon": ["post-workout glow, peeling off gym clothes"]},
+    "hobby_skincare":    {"early_morning": ["just out of the shower, towel barely on, doing your skincare", "standing at the mirror, skin all dewy, nothing but a towel"], "late_evening": ["getting ready for bed, stripping down to almost nothing, doing your nighttime routine", "face mask on, lounging around in just panties, total self-care night"]},
+    "hobby_yoga":        {"early_morning": ["doing yoga in tiny shorts, stretching in ways that would make someone stare", "morning yoga flow, your body feels so flexible and free"], "evening": ["stretching in the bedroom, wearing next to nothing"]},
+    "hobby_reading":     {"late_night": ["reading in bed wearing almost nothing, sheets pulled up to your waist"], "afternoon": ["lying on the couch in a crop top and underwear, lost in a book"]},
+    # social_and_lifestyle
+    "social_partying":   {"late_evening": ["getting ready, trying on outfits that show off everything", "picking the tightest dress in your closet for tonight"], "late_night": ["tipsy and flirty, feeling dangerous"]},
+    "social_cozy_nights":{"late_evening": ["in an oversized tee with nothing underneath, so cozy it's almost sinful", "lying in bed, skin against soft sheets, feeling warm and lazy"], "evening": ["candles lit, wearing silk, feeling sensual and relaxed"], "late_night": ["sprawled across the bed in barely anything, too comfortable to move"]},
+    "social_beach":      {"afternoon": ["in a tiny bikini, skin glistening with sunscreen", "lying on a towel in a bikini, sun warming every inch of you"], "golden_hour": ["bikini still on from the beach, tan lines looking incredible"]},
+    # romance_and_dating
+    "romance_surprises": {"evening": ["planning something naughty for later, getting excited thinking about it"]},
+    "romance_love_notes":{"late_evening": ["writing something flirty for someone special, biting your lip as you type"]},
+    # aesthetics_and_vibes
+    "vibe_luxury":       {"evening": ["wearing silk lingerie, feeling expensive and untouchable"], "golden_hour": ["golden hour light on your skin, looking like art in that outfit"], "late_evening": ["in a silk robe, nothing under it, sipping something expensive"]},
+    "vibe_city":         {"late_evening": ["getting ready for the city, that little black dress hugging every curve"], "late_night": ["heels off, dress unzipped, back from a night out feeling electric"]},
+    "vibe_cottagecore":  {"late_morning": ["wearing a thin sundress with nothing underneath, feeling free"], "early_morning": ["waking up in a sunlit room, tangled in sheets, barely covered"]},
+    "vibe_sunsets":      {"golden_hour": ["watching the sunset in a sundress, wind catching it just right"], "evening": ["the warm light on your bare shoulders, feeling beautiful and free"]},
+    # tech_and_culture
+    "culture_tiktok":    {"late_night": ["scrolling through spicy TikToks, getting ideas", "watching thirst traps on TikTok, feeling inspired"], "afternoon": ["filming a thirst trap, feeling yourself"]},
+    "culture_astrology": {"late_evening": ["checking your love compatibility chart, feeling curious and flirty"]},
+    # style
+    "style_jewelry":     {"evening": ["putting on a body chain, nothing else, admiring yourself in the mirror"]},
+    "style_minimalist":  {"early_morning": ["minimalist outfit today: oversized shirt, no pants, confidence"]},
+    # entertainment
+    "ent_hiphop":        {"late_evening": ["playing slow R&B, dim lights, feeling sensual"], "evening": ["vibing to R&B in lingerie, the mood is set"]},
+    "ent_reality_tv":    {"late_evening": ["in bed watching trashy TV in nothing but a tank top and underwear"]},
 }
 
 _TIME_BUCKETS = {
-    "morning":   range(6, 12),
-    "afternoon": range(12, 17),
-    "evening":   range(17, 22),
-    "night":     list(range(22, 24)) + list(range(0, 6)),
+    "early_morning":  range(5, 8),
+    "late_morning":   range(8, 11),
+    "midday":         range(11, 13),
+    "afternoon":      range(13, 16),
+    "golden_hour":    range(16, 18),
+    "evening":        range(18, 21),
+    "late_evening":   range(21, 23),
+    "late_night":     list(range(23, 24)) + list(range(0, 5)),
 }
 
 
@@ -350,35 +388,39 @@ def _current_time_bucket(user_timezone: str | None) -> str:
 def build_preference_time_activity(
     persona_likes: list[str],
     user_timezone: str | None = None,
+    is_adult: bool = False,
 ) -> str:
     """
     Generate a persona-specific mood activity based on their liked
     preference keys and the current time of day.
 
-    Returns a short 1st-person sentence describing what the persona is
-    up to right now, e.g. "You just crushed a morning workout, feeling pumped".
-
+    When is_adult=True, uses the flirty/teasing 18+ activity map.
     Returns empty string if no matching activities found.
     """
     bucket = _current_time_bucket(user_timezone)
+    activity_map = _PREF_TIME_ACTIVITIES_18 if is_adult else _PREF_TIME_ACTIVITIES
 
     candidates: list[str] = []
     for key in persona_likes:
-        activities = _PREF_TIME_ACTIVITIES.get(key, {})
+        activities = activity_map.get(key, {})
         if bucket in activities:
             candidates.extend(activities[bucket])
 
     if not candidates:
-        # Try adjacent buckets as fallback
+        # Try adjacent buckets as fallback (ordered by closeness)
         fallback_order = {
-            "morning": ["afternoon"],
-            "afternoon": ["morning", "evening"],
-            "evening": ["afternoon", "night"],
-            "night": ["evening"],
+            "early_morning": ["late_morning", "midday"],
+            "late_morning":  ["early_morning", "midday"],
+            "midday":        ["late_morning", "afternoon"],
+            "afternoon":     ["midday", "golden_hour"],
+            "golden_hour":   ["afternoon", "evening"],
+            "evening":       ["golden_hour", "late_evening"],
+            "late_evening":  ["evening", "late_night"],
+            "late_night":    ["late_evening", "early_morning"],
         }
         for fb in fallback_order.get(bucket, []):
             for key in persona_likes:
-                activities = _PREF_TIME_ACTIVITIES.get(key, {})
+                activities = activity_map.get(key, {})
                 if fb in activities:
                     candidates.extend(activities[fb])
             if candidates:
@@ -387,7 +429,9 @@ def build_preference_time_activity(
     if not candidates:
         return ""
 
-    seed = hashlib.md5(f"{date.today().isoformat()}:{bucket}".encode()).hexdigest()
+    # Use hour in seed so the activity rotates hourly
+    hour = datetime.now(_resolve_tz(user_timezone)).hour
+    seed = hashlib.md5(f"{date.today().isoformat()}:{hour}".encode()).hexdigest()
     rng = random.Random(seed)
     return rng.choice(candidates)
 
