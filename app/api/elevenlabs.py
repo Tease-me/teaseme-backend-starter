@@ -1473,7 +1473,7 @@ async def get_conversation_token(
         influencer_name=influencer.display_name,
     )
     
-    log_prompt(log, prompt, cid="", input="")
+    log_prompt(log, prompt, cid="", input="", history=[])
 
     try:
         client = await get_elevenlabs_client()
