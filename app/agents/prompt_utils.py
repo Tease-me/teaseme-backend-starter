@@ -103,9 +103,41 @@ def pick_time_mood(
 
     flat = [m for opts in mood_map.values() if isinstance(opts, list) for m in opts]
     return random.choice(flat) if flat else ""
-
+ 
 
 _mbti_cache: Optional[dict] = None
+_stage_prompts_cache: Optional[dict] = None
+
+
+async def get_relationship_stage_prompts(db: AsyncSession) -> dict:
+    """
+    Fetches relationship stage prompts from the database and returns them as a dict.
+    The prompts are cached after the first fetch.
+    Returns a dict mapping relationship state (uppercase) to prompt string.
+    """
+    global _stage_prompts_cache
+    
+    if _stage_prompts_cache is not None:
+        return _stage_prompts_cache
+    
+    stage_json_str = await get_system_prompt(db, prompt_keys.RELATIONSHIP_STAGE_PROMPTS)
+    if stage_json_str:
+        try:
+            raw = json.loads(stage_json_str)
+            _stage_prompts_cache = {}
+            for key, value in raw.items():
+                if isinstance(value, list):
+                    _stage_prompts_cache[key.upper()] = "\n".join(str(v) for v in value)
+                else:
+                    _stage_prompts_cache[key.upper()] = str(value)
+        except json.JSONDecodeError as exc:
+            log.warning("Failed to parse RELATIONSHIP_STAGE_PROMPTS: %s", exc)
+            _stage_prompts_cache = {}
+    else:
+        log.warning("RELATIONSHIP_STAGE_PROMPTS system prompt not found")
+        _stage_prompts_cache = {}
+    
+    return _stage_prompts_cache
 
 
 async def get_mbti_rules_for_archetype(
@@ -167,6 +199,7 @@ async def get_global_prompt(
     return ChatPromptTemplate.from_messages(
         [
             ("system", system_prompt),
+            MessagesPlaceholder("history"),
             ("user", "{input}"),
         ]
     )
@@ -195,22 +228,8 @@ def build_relationship_prompt(
     stage_prompt = ""
 
     if stages:
-        if rel_state == "HATE":
-            stage_prompt = stages.get("hate", "")
-        elif rel_state == "DISLIKE":
-            stage_prompt = stages.get("dislike", "")
-        elif rel_state == "STRANGERS":
-            stage_prompt = stages.get("strangers", "")
-        elif rel_state == "FRIENDS":
-            stage_prompt = stages.get("friends", "")
-        elif rel_state == "FLIRTING":
-            stage_prompt = stages.get("flirting", "")
-        elif rel_state == "DATING":
-            stage_prompt = stages.get("dating", "")
-        elif rel_state == "GIRLFRIEND":
-            stage_prompt = stages.get("girlfriend", "")
-        else:
-            stage_prompt = stages.get(rel_state.lower(), "")
+        # Try uppercase key first (DB format), then lowercase (bio_json format)
+        stage_prompt = stages.get(rel_state, "") or stages.get(rel_state.lower(), "")
 
     partial_vars = {
         "relationship_state": rel.state,
