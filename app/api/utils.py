@@ -1,16 +1,58 @@
 #TODO: add file into UTILS folder
-from openai import OpenAI
+from openai import AsyncOpenAI
 from sqlalchemy import text
 from dotenv import load_dotenv
 from datetime import datetime
+import logging
+
+log = logging.getLogger(__name__)
 
 load_dotenv()
-client = OpenAI()
+
+# Use AsyncOpenAI for non-blocking API calls
+client = AsyncOpenAI()
+
 
 async def get_embedding(text: str) -> list[float]:
-    response = client.embeddings.create(input=text,
-    model="text-embedding-3-small")
+    """Get embedding for a single text (non-blocking)."""
+    response = await client.embeddings.create(
+        input=text,
+        model="text-embedding-3-small"
+    )
     return response.data[0].embedding
+
+
+async def get_embeddings_batch(texts: list[str]) -> list[list[float] | None]:
+    """
+    Get embeddings for multiple texts in a single API call.
+    
+    Returns list of embeddings (or None for failures) in the same order as input.
+    """
+    if not texts:
+        return []
+    
+    if len(texts) == 1:
+        return [await get_embedding(texts[0])]
+    
+    try:
+        response = await client.embeddings.create(
+            input=texts,
+            model="text-embedding-3-small"
+        )
+        sorted_data = sorted(response.data, key=lambda x: x.index)
+        return [item.embedding for item in sorted_data]
+    except Exception as e:
+        log.error("Batch embedding failed: %s", e, exc_info=True)
+        # Fallback: try one at a time
+        embeddings = []
+        for t in texts:
+            try:
+                emb = await get_embedding(t)
+                embeddings.append(emb)
+            except Exception as inner_e:
+                log.error("Single embedding fallback failed: %s", inner_e)
+                embeddings.append(None)  # None (not []) so callers know it failed
+        return embeddings
 
 async def search_similar_memories(db, chat_id, embedding, top_k=5):
     sql = text("""
