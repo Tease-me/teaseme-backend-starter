@@ -1,7 +1,11 @@
-from app.api.utils import get_embedding, search_similar_memories, search_similar_messages, upsert_memory
+from app.api.utils import get_embedding, get_embeddings_batch, search_similar_memories, search_similar_messages, upsert_memory
 from sqlalchemy import select
 from sqlalchemy.sql import func
 from app.db.models import Memory
+import logging
+
+log = logging.getLogger("memory")
+
 
 async def find_similar_messages(
     db,
@@ -70,8 +74,7 @@ async def store_fact(db, chat_id: str, fact: str, sender: str = "user"):
     try:
         emb = await get_embedding(norm_fact)
     except Exception as exc:
-        import logging
-        logging.getLogger("memory").error("get_embedding failed for fact=%r chat=%s err=%s", norm_fact, chat_id, exc, exc_info=True)
+        log.error("get_embedding failed for fact=%r chat=%s err=%s", norm_fact, chat_id, exc, exc_info=True)
         return
 
     await upsert_memory(
@@ -81,3 +84,63 @@ async def store_fact(db, chat_id: str, fact: str, sender: str = "user"):
         embedding=emb,
         sender=sender
     )
+
+
+async def get_recent_facts(db, chat_id: str, limit: int = 15) -> list[str]:
+    """Return the most recent facts for a chat, newest first."""
+    result = await db.execute(
+        select(Memory.content)
+        .where(Memory.chat_id == chat_id)
+        .order_by(Memory.created_at.desc())
+        .limit(limit)
+    )
+    return [row[0] for row in result.fetchall()]
+
+
+async def store_facts_batch(
+    db, chat_id: str, facts: list[str], sender: str = "user"
+) -> int:
+    """
+    Store multiple facts in batch using a single embedding API call.
+    Returns the number of facts actually stored.
+    """
+    if not facts:
+        return 0
+
+    normalized = [_norm(f) for f in facts if _norm(f) and _norm(f) != "no new memories."]
+    if not normalized:
+        return 0
+
+    new_facts = []
+    for norm in normalized:
+        if not await _already_have(db, chat_id, norm):
+            new_facts.append(norm)
+    
+    if not new_facts:
+        log.debug("All %d facts already exist for chat=%s", len(normalized), chat_id)
+        return 0
+
+    try:
+        embeddings = await get_embeddings_batch(new_facts)
+    except Exception as exc:
+        log.error("Batch embedding failed for chat=%s: %s", chat_id, exc, exc_info=True)
+        return 0
+
+    stored = 0
+    for fact, emb in zip(new_facts, embeddings):
+        if not emb:
+            continue
+        try:
+            await upsert_memory(
+                db=db,
+                chat_id=chat_id,
+                content=fact,
+                embedding=emb,
+                sender=sender
+            )
+            stored += 1
+        except Exception as exc:
+            log.error("Failed to store fact=%r chat=%s: %s", fact, chat_id, exc)
+    
+    log.info("Stored %d/%d facts for chat=%s", stored, len(new_facts), chat_id)
+    return stored
