@@ -33,6 +33,7 @@ from app.services.system_prompt_service import get_system_prompt
 from app.constants import prompt_keys
 from app.agents.prompts import GREETING_GENERATOR
 from app.utils.prompt_logging import log_prompt
+from app.services.relationship import _get_relationship_payload
 
 router = APIRouter(prefix="/elevenlabs", tags=["elevenlabs"])
 log = logging.getLogger(__name__)
@@ -1798,6 +1799,14 @@ async def finalize_conversation(
             "finalize.update_call_record_failed conv=%s err=%s", conversation_id, exc
         )
 
+    # ── fetch latest relationship stats to send to frontend ──
+    rel_payload = None
+    if resolved_influencer_id:
+        try:
+            rel_payload = await _get_relationship_payload(db, body.user_id, resolved_influencer_id)
+        except Exception as exc:
+            log.warning("finalize.relationship_fetch_failed conv=%s err=%s", conversation_id, exc)
+
     if status == "failed":
         log.warning("Conversation %s ended as FAILED; skipping charge.", conversation_id)
         return {
@@ -1809,6 +1818,7 @@ async def finalize_conversation(
             "meta": meta,
             "transcript_synced": transcript_synced,
             "refresh_required": transcript_synced,
+            "relationship": rel_payload,
         }
 
     if status != "done":
@@ -1822,6 +1832,7 @@ async def finalize_conversation(
             "note": "Conversation not done yet; waiting for webhook or try again later.",
             "transcript_synced": transcript_synced,
             "refresh_required": transcript_synced,
+            "relationship": rel_payload,
         }
 
     if body.charge_if_not_billed and not await was_already_billed(db, conversation_id):
@@ -1849,6 +1860,7 @@ async def finalize_conversation(
             "meta": meta,
             "transcript_synced": transcript_synced,
             "refresh_required": transcript_synced,
+            "relationship": rel_payload,
         }
 
     return {
@@ -1860,6 +1872,7 @@ async def finalize_conversation(
         "meta": meta,
         "transcript_synced": transcript_synced,
         "refresh_required": transcript_synced,
+        "relationship": rel_payload,
     }
 
 
