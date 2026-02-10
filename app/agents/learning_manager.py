@@ -52,13 +52,15 @@ async def get_learning_summary_for_prompt(
         summary_parts = []
         
         if avoid:
-            summary_parts.append("❌ AVOID:\n" + "\n".join(avoid[:5]))
+            avoid_text = "\n".join(f"  • {pattern}" for pattern in avoid[:5])
+            summary_parts.append(f"Past interactions showed these patterns led to disengagement:\n{avoid_text}")
         
         if repeat:
-            summary_parts.append("✅ DO MORE:\n" + "\n".join(repeat[:5]))
+            repeat_text = "\n".join(f"  • {pattern}" for pattern in repeat[:5])
+            summary_parts.append(f"Past interactions showed these patterns kept conversations flowing:\n{repeat_text}")
         
         if summary_parts:
-            return "\n\n🧠 LEARNINGS FOR THIS STAGE:\n" + "\n\n".join(summary_parts)
+            return "📊 Context from past conversations at this stage:\n" + "\n\n".join(summary_parts)
         
         return ""
         

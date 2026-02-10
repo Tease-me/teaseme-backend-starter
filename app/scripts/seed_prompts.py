@@ -983,6 +983,9 @@ BASE_SYSTEM = """
 # Dislikes
 {dislikes}
 
+# Learnings
+{learnings}
+
 # Relationship Metrics:
 - phase: {relationship_state}
 - trust: {trust}/100

@@ -204,10 +204,8 @@ async def handle_turn(
     ctx_parts = [p for p in [today_script, daily_topic, pref_ctx, live_ctx] if p]
     daily_context = " ".join(ctx_parts)
 
-    # Get learnings from past conversations
+    # Get learnings from past conversations (separate from daily_context)
     learning_summary = await get_learning_summary_for_prompt(db, influencer_id, rel.state if rel else "STRANGERS")
-    if learning_summary:
-        daily_context = daily_context + "\n\n" + learning_summary if daily_context else learning_summary
 
     prompt = build_relationship_prompt(
         prompt_template,
@@ -221,6 +219,7 @@ async def handle_turn(
         mbti_rules=mbti_rules,
         memories=mem_block,
         daily_context=daily_context,
+        learnings=learning_summary,
         last_user_message=message,
         mood=mood,
         tone=tone,
