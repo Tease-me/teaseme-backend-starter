@@ -14,11 +14,22 @@ log = logging.getLogger("teaseme-preferences")
 
 _DEFAULT_PREFS: list[tuple[str, str]] = [
     ("food_coffee", "Coffee"),
+    ("food_brunch", "Brunch"),
+    ("food_wine", "Wine"),
     ("ent_pop", "Pop music"),
+    ("ent_reality_tv", "Reality TV"),
+    ("style_designer", "Designer fashion"),
+    ("style_jewelry", "Jewelry & accessories"),
     ("hobby_skincare", "Skincare & Beauty"),
+    ("hobby_yoga", "Yoga"),
     ("social_cozy_nights", "Cozy nights in"),
+    ("social_beach", "Beach days"),
+    ("romance_surprises", "Surprises"),
+    ("romance_love_notes", "Love notes"),
     ("vibe_sunsets", "Sunsets"),
+    ("vibe_luxury", "Luxury vibes"),
     ("culture_tiktok", "TikTok"),
+    ("culture_astrology", "Astrology"),
     ("value_humor", "Sense of humor"),
 ]
 
@@ -506,20 +517,20 @@ _DAILY_TOPIC_TEMPLATES: dict[str, list[str]] = {
 def build_preference_daily_topic(
     persona_like_keys: list[str],
 ) -> str:
-    """Pick today's conversation topic based on the persona's liked preferences."""
-    # Filter to keys that have topic templates
-    available = [k for k in persona_like_keys if k in _DAILY_TOPIC_TEMPLATES]
+    available = sorted(k for k in persona_like_keys if k in _DAILY_TOPIC_TEMPLATES)
     if not available:
         return ""
 
-    # Rotate through preferences by day-of-year
-    day_idx = date.today().timetuple().tm_yday
-    chosen_key = available[day_idx % len(available)]
+    today = date.today()
+    day_seed = today.isoformat()
+
+    rng = random.Random(hashlib.md5(day_seed.encode()).hexdigest())
+    rng.shuffle(available)
+    chosen_key = available[0]
 
     templates = _DAILY_TOPIC_TEMPLATES[chosen_key]
-    # Use day to also rotate through templates for the same key
-    chosen_template = templates[day_idx % len(templates)]
+    chosen_template = rng.choice(templates)
 
-    return f"IMPORTANT: Today, {chosen_template}."
+    return f"Today, {chosen_template}."
 
 
