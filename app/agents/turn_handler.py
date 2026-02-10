@@ -24,6 +24,8 @@ from app.constants import prompt_keys
 from app.utils.prompt_logging import log_prompt
 
 from app.relationship.processor import process_relationship_turn
+from app.agents.quality_detector import quick_detect_bad_patterns, store_conversation_analysis
+from app.agents.learning_manager import get_learning_summary_for_prompt
 
 log = logging.getLogger("teaseme-turn")
 
@@ -202,6 +204,11 @@ async def handle_turn(
     ctx_parts = [p for p in [today_script, daily_topic, pref_ctx, live_ctx] if p]
     daily_context = " ".join(ctx_parts)
 
+    # Get learnings from past conversations
+    learning_summary = await get_learning_summary_for_prompt(db, influencer_id, rel.state if rel else "STRANGERS")
+    if learning_summary:
+        daily_context = daily_context + "\n\n" + learning_summary if daily_context else learning_summary
+
     prompt = build_relationship_prompt(
         prompt_template,
         rel=rel,
@@ -242,6 +249,39 @@ async def handle_turn(
         log.error("[%s] LLM error: %s", cid, e, exc_info=True)
         return "Sorry, something went wrong. 😔"
 
+    # ========================================================================
+    # LEARNING SYSTEM INTEGRATION
+    # ========================================================================
+    
+    # Quick pattern detection (synchronous, fast)
+    bad_patterns = quick_detect_bad_patterns(reply)
+    if bad_patterns:
+        log.warning("[%s] Detected issues in AI response: %s", cid, bad_patterns)
+    
+    # Store conversation for later analysis (async background task)
+    try:
+        analysis_task = asyncio.create_task(
+            store_conversation_analysis(
+                chat_id=chat_id,
+                influencer_id=influencer_id,
+                user_id=int(user_id),
+                user_message=message,
+                ai_response=reply,
+                relationship_state=rel.state,
+                mood_at_turn=mood,
+                memories_at_turn=mem_block,
+                detected_issues=bad_patterns,
+            )
+        )
+        # Keep reference to prevent garbage collection
+        analysis_task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+    except Exception as ex:
+        log.error("[%s] Failed to store conversation analysis: %s", cid, ex, exc_info=True)
+    
+    # ========================================================================
+    # FACT EXTRACTION (existing)
+    # ========================================================================
+    
     try:
         asyncio.create_task(
             extract_and_store_facts_for_turn(

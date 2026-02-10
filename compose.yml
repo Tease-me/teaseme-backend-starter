@@ -37,6 +37,25 @@ services:
     depends_on:
       - db
       - redis
+  analyzer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: teaseme-analyzer
+    volumes:
+      - ./:/usr/src/app
+    working_dir: /usr/src/app
+    command:
+      - sh
+      - -c
+      - >
+        poetry run python -m app.jobs.analyze_conversations --continuous --batch-size 50
+    env_file:
+      - .env
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
 volumes:
   pgdata:
   redisdata:

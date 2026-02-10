@@ -853,3 +853,141 @@ class UserPreference(Base):
         UniqueConstraint("user_id", "preference_key", name="uq_user_pref"),
         Index("ix_user_pref_user", "user_id"),
     )
+
+
+# ============================================================================
+# CONVERSATION LEARNING SYSTEM
+# ============================================================================
+
+class ConversationAnalysis(Base):
+    """
+    Stores detailed analysis of each AI turn for learning purposes.
+    Records what the AI said, user's response, and quality metrics.
+    """
+    __tablename__ = "conversation_analyses"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    chat_id: Mapped[str] = mapped_column(ForeignKey("chats.id"), nullable=False)
+    influencer_id: Mapped[str] = mapped_column(ForeignKey("influencers.id"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    
+    # The messages that were analyzed
+    user_message: Mapped[str] = mapped_column(Text, nullable=False)
+    ai_response: Mapped[str] = mapped_column(Text, nullable=False)
+    user_next_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    
+    # Context at the time of the AI response
+    relationship_state: Mapped[str] = mapped_column(String, nullable=False)
+    mood_at_turn: Mapped[str | None] = mapped_column(String, nullable=True)
+    memories_at_turn: Mapped[str | None] = mapped_column(Text, nullable=True)
+    
+    # LLM-generated scores (1-10)
+    engagement_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    interest_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    initiative_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    appropriateness_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    overall_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    
+    # LLM-generated feedback
+    what_worked: Mapped[str | None] = mapped_column(Text, nullable=True)
+    what_failed: Mapped[str | None] = mapped_column(Text, nullable=True)
+    suggested_improvement: Mapped[str | None] = mapped_column(Text, nullable=True)
+    user_reaction_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    
+    # Quick pattern detection (before LLM analysis)
+    detected_issues: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    
+    # Timestamps
+    ai_response_timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+    user_next_message_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    seconds_to_reply: Mapped[float | None] = mapped_column(Float, nullable=True)
+    
+    analyzed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    
+    __table_args__ = (
+        Index('ix_analyses_chat_influencer', 'chat_id', 'influencer_id'),
+        Index('ix_analyses_overall_score', 'overall_score'),
+        Index('ix_analyses_analyzed', 'analyzed_at'),
+    )
+
+
+class ConversationLearning(Base):
+    """
+    Stores learned patterns about what works or fails for each influencer/stage.
+    Generated from ConversationAnalysis data.
+    """
+    __tablename__ = "conversation_learnings"
+    
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    influencer_id: Mapped[str] = mapped_column(ForeignKey("influencers.id"), nullable=False)
+    stage: Mapped[str] = mapped_column(String, nullable=False)
+    
+    # What pattern was observed
+    pattern_type: Mapped[str] = mapped_column(String, nullable=False)  # "avoid" or "repeat"
+    pattern_description: Mapped[str] = mapped_column(Text, nullable=False)
+    
+    # Example that triggered this learning
+    example_user_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    example_ai_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    user_reaction: Mapped[str | None] = mapped_column(String, nullable=True)
+    
+    # Confidence metrics
+    confidence: Mapped[float] = mapped_column(Float, default=0.5)
+    times_seen: Mapped[int] = mapped_column(Integer, default=1)
+    success_rate: Mapped[float] = mapped_column(Float, default=0.5)
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+    
+    __table_args__ = (
+        Index('idx_learnings_influencer_stage', 'influencer_id', 'stage'),
+        Index('ix_learnings_pattern_type', 'pattern_type'),
+        Index('ix_learnings_confidence', 'confidence'),
+    )
+
+
+class ConversationPattern(Base):
+    """
+    Curated good conversation examples (manually added or promoted from learnings).
+    """
+    __tablename__ = "conversation_patterns"
+    
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    influencer_id: Mapped[str | None] = mapped_column(ForeignKey("influencers.id"), nullable=True)
+    stage: Mapped[str] = mapped_column(String, nullable=False)
+    
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    
+    # Example
+    example_context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    example_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    
+    # When to use
+    suitable_topics: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    avoid_after: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    
+    effectiveness_score: Mapped[float] = mapped_column(Float, default=1.0)
+    times_used: Mapped[int] = mapped_column(Integer, default=0)
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+    
+    __table_args__ = (
+        Index('ix_patterns_influencer_stage', 'influencer_id', 'stage'),
+        Index('ix_patterns_effectiveness', 'effectiveness_score'),
+    )
