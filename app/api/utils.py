@@ -10,7 +10,6 @@ log = logging.getLogger(__name__)
 load_dotenv()
 
 # Use AsyncOpenAI for non-blocking API calls
-# This prevents blocking the event loop during embedding requests
 client = AsyncOpenAI()
 
 
@@ -23,26 +22,16 @@ async def get_embedding(text: str) -> list[float]:
     return response.data[0].embedding
 
 
-async def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
+async def get_embeddings_batch(texts: list[str]) -> list[list[float] | None]:
     """
     Get embeddings for multiple texts in a single API call.
     
-    This is much more efficient than calling get_embedding() in a loop:
-    - 1 API call instead of N
-    - ~70-80% latency reduction for multiple texts
-    - Non-blocking: doesn't block event loop during API call
-    
-    Args:
-        texts: List of texts to embed (max ~2000 recommended per batch)
-        
-    Returns:
-        List of embeddings in the same order as input texts
+    Returns list of embeddings (or None for failures) in the same order as input.
     """
     if not texts:
         return []
     
     if len(texts) == 1:
-        # Single text - use regular function
         return [await get_embedding(texts[0])]
     
     try:
@@ -50,23 +39,20 @@ async def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
             input=texts,
             model="text-embedding-3-small"
         )
-        # API returns embeddings in order, but let's be safe
-        # Sort by index to ensure order matches input
         sorted_data = sorted(response.data, key=lambda x: x.index)
         return [item.embedding for item in sorted_data]
     except Exception as e:
         log.error("Batch embedding failed: %s", e, exc_info=True)
         # Fallback: try one at a time
         embeddings = []
-        for text in texts:
+        for t in texts:
             try:
-                emb = await get_embedding(text)
+                emb = await get_embedding(t)
                 embeddings.append(emb)
             except Exception as inner_e:
-                log.error("Single embedding fallback failed for text: %s", inner_e)
-                embeddings.append([])  # Empty embedding on failure
+                log.error("Single embedding fallback failed: %s", inner_e)
+                embeddings.append(None)  # None (not []) so callers know it failed
         return embeddings
-
 
 async def search_similar_memories(db, chat_id, embedding, top_k=5):
     sql = text("""

@@ -38,6 +38,7 @@ class Influencer(Base):
     email: Mapped[str] = mapped_column(String, unique=True, nullable=True)
     custom_adult_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     custom_audio_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    preferences_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     created_at:     Mapped[datetime]     = mapped_column(
         DateTime(timezone=True),
@@ -810,4 +811,45 @@ class IdentityVerification(Base):
         Index("ix_identity_ver_user_status", "user_id", "status"),
         Index("ix_identity_ver_session", "session_id"),
         Index("ix_identity_ver_created", "created_at"),
+    )
+
+
+class PreferenceCatalog(Base):
+    """Master catalog of ~70 preference items for like/dislike system."""
+    __tablename__ = "preference_catalog"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)  # e.g. "food_sushi"
+    category: Mapped[str] = mapped_column(String, nullable=False, index=True)  # e.g. "food_and_drink"
+    label: Mapped[str] = mapped_column(String, nullable=False)  # e.g. "Sushi"
+    emoji: Mapped[str | None] = mapped_column(String, nullable=True)  # e.g. "🍣"
+
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class UserPreference(Base):
+    """What a user likes or dislikes."""
+    __tablename__ = "user_preferences"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    preference_key: Mapped[str] = mapped_column(
+        ForeignKey("preference_catalog.key", ondelete="CASCADE"),
+        nullable=False,
+    )
+    liked: Mapped[bool] = mapped_column(Boolean, nullable=False)  # True = likes, False = dislikes
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "preference_key", name="uq_user_pref"),
+        Index("ix_user_pref_user", "user_id"),
     )

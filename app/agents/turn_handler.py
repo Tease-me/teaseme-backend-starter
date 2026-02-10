@@ -7,7 +7,7 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import RedisChatMessageHistory
 
 from app.core.config import settings
-from app.agents.memory import find_similar_memories, store_facts_batch
+from app.agents.memory import find_similar_memories, get_recent_facts, store_facts_batch
 from app.agents.prompts import MODEL, FACT_EXTRACTOR, CONVO_ANALYZER, get_fact_prompt
 from app.db.session import SessionLocal
 from app.agents.prompt_utils import (
@@ -73,17 +73,14 @@ async def extract_and_store_facts_for_turn(
 
             facts_txt = facts_resp.content or ""
             lines = [ln.strip("- ").strip() for ln in facts_txt.split("\n") if ln.strip()]
-            
-            # Filter out empty/skip lines
+
             valid_facts = [line for line in lines[:5] if line.lower() != "no new memories."]
-            
+
             if valid_facts:
-                # Use batch storage - single API call for all facts
                 await store_facts_batch(db, chat_id, valid_facts)
                 
         except Exception as ex:
             log.error("[%s] Fact extraction failed: %s", cid, ex, exc_info=True)
-
 
 
 async def handle_turn(
@@ -107,14 +104,14 @@ async def handle_turn(
 
     recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
 
-    # Phase 1: Fetch cached prompts in parallel (Redis cache, no DB contention)
+    # System prompts use Redis caching (safe to parallelize)
     prompt_template, weekday_prompt, weekend_prompt = await asyncio.gather(
         get_global_prompt(db, is_audio),
         get_system_prompt(db, prompt_keys.WEEKDAY_TIME_PROMPT),
         get_system_prompt(db, prompt_keys.WEEKEND_TIME_PROMPT),
     )
-    
-    # Phase 2: DB operation sequentially (AsyncSession doesn't allow concurrent access)
+
+    # DB gets must be sequential (AsyncSession concurrency restriction)
     influencer = await db.get(Influencer, influencer_id)
     
     mood = pick_time_mood(weekday_prompt, weekend_prompt, user_timezone)
@@ -142,18 +139,29 @@ async def handle_turn(
     dtr_goal = rel_pack["dtr_goal"]
 
     memories_result = await find_similar_memories(db, chat_id, message) if (db and user_id) else []
-    memories = memories_result[0] if isinstance(memories_result, tuple) else memories_result
+    similar_mems = memories_result[0] if isinstance(memories_result, tuple) else memories_result
+    recent_facts = await get_recent_facts(db, chat_id, limit=15) if (db and user_id) else []
 
-    mem_block = "\n".join(s for s in (_norm(m) for m in memories or []) if s)
+    # COPILOT FIX: Properly merge similar memories + recent facts with deduplication
+    seen = set()
+    merged = []
+    for m in list(similar_mems or []) + list(recent_facts or []):
+        txt = _norm(m)
+        if txt and txt not in seen:
+            seen.add(txt)
+            merged.append(txt)
+
+    mem_block = "\n".join(merged)
 
     bio = influencer.bio_json or {}
 
-    persona_likes = bio.get("likes", [])
-    persona_dislikes = bio.get("dislikes", [])
-    if not isinstance(persona_likes, list):
-        persona_likes = []
-    if not isinstance(persona_dislikes, list):
-        persona_dislikes = []
+    from app.services.preference_service import (
+        get_persona_preference_labels,
+        build_preference_context,
+        build_preference_time_activity,
+        build_preference_daily_topic,
+    )
+    persona_likes, persona_dislikes, pref_keys = await get_persona_preference_labels(db, influencer_id)
     
     stages = await get_relationship_stage_prompts(db)
     bio_stages = bio.get("stages", {})
@@ -162,12 +170,37 @@ async def handle_turn(
             if val: 
                 stages[key.upper()] = val
 
-    mbti_archetype = bio.get("mbti_architype", "")  
-    mbti_addon = bio.get("mbti_rules", "")  
+    mbti_archetype = bio.get("mbti_architype", "")
+    mbti_addon = bio.get("mbti_rules", "")
     mbti_rules = await get_mbti_rules_for_archetype(db, mbti_archetype, mbti_addon)
     personality_rules = bio.get("personality_rules", "")
     tone = bio.get("tone", "")
-    daily_context = ""  
+
+    pref_activity = build_preference_time_activity(pref_keys, user_timezone)
+    if pref_activity:
+        mood = f"{mood}. Right now you're {pref_activity}" if mood else f"Right now you're {pref_activity}"
+
+    daily_topic = build_preference_daily_topic(pref_keys)
+
+    from datetime import date
+    today_script = ""
+    if influencer.daily_scripts:
+        idx = date.today().timetuple().tm_yday % len(influencer.daily_scripts)
+        today_script = influencer.daily_scripts[idx]
+
+    pref_ctx = ""
+    if user_id:
+        pref_ctx = await build_preference_context(db, int(user_id), influencer_id)
+
+    try:
+        from app.services.brave_search import fetch_trending_context
+        live_ctx = await fetch_trending_context(pref_keys, influencer_id, user_timezone)
+    except Exception as exc:
+        log.warning("[%s] Brave search failed (non-fatal): %s", cid, exc)
+        live_ctx = ""
+
+    ctx_parts = [p for p in [today_script, daily_topic, pref_ctx, live_ctx] if p]
+    daily_context = " ".join(ctx_parts)
 
     prompt = build_relationship_prompt(
         prompt_template,

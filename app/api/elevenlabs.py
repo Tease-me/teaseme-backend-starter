@@ -33,6 +33,7 @@ from app.services.system_prompt_service import get_system_prompt
 from app.constants import prompt_keys
 from app.agents.prompts import GREETING_GENERATOR
 from app.utils.prompt_logging import log_prompt
+from app.services.relationship import _get_relationship_payload
 
 router = APIRouter(prefix="/elevenlabs", tags=["elevenlabs"])
 log = logging.getLogger(__name__)
@@ -890,26 +891,27 @@ async def _poll_and_persist_conversation(
         if chat_id and normalized_transcript:
             try:
                 from app.agents.turn_handler import extract_and_store_facts_for_turn
-                user_messages = [t.get("message") or t.get("text") or "" for t in normalized_transcript 
-                                 if (t.get("role") or "").lower() in ("user", "human")]
-                last_user_msg = user_messages[-1] if user_messages else ""
-                ctx_lines = [f"{t.get('role', 'unknown')}: {t.get('message') or t.get('text') or ''}" 
+                user_messages = [t.get("text") or "" for t in normalized_transcript 
+                                 if (t.get("sender") or "").lower() in ("user", "human")]
+                all_user_text = "\n".join(m for m in user_messages if m.strip())
+                ctx_lines = [f"{t.get('sender', 'unknown')}: {t.get('text', '')}" 
                              for t in normalized_transcript]
                 recent_ctx = "\n".join(ctx_lines)
                 
-                if last_user_msg:
+                if all_user_text:
                     asyncio.create_task(
                         extract_and_store_facts_for_turn(
-                            message=last_user_msg,
+                            message=all_user_text,
                             recent_ctx=recent_ctx,
                             chat_id=chat_id,
                             cid=conversation_id,
                         )
                     )
                     log.info(
-                        "background.fact_extraction_scheduled conv=%s chat=%s",
+                        "background.fact_extraction_scheduled conv=%s chat=%s user_turns=%d",
                         conversation_id,
                         chat_id,
+                        len(user_messages),
                     )
             except Exception as exc:
                 log.warning(
@@ -1152,13 +1154,11 @@ async def _persist_transcript_to_chat(
     chat = await db.get(Chat, chat_id)
     user_id = chat.user_id if chat else None
     resolved_influencer_id = influencer_id or (chat.influencer_id if chat else None)
-    if not chat: 
+    if not chat:
         log.warning(
-            log.warning(
-                "_persist_transcript.chat_not_found conv=%s chat=%s",
-                conversation_id,
-                chat_id,
-            )
+            "_persist_transcript.chat_not_found conv=%s chat=%s",
+            conversation_id,
+            chat_id,
         )
     moderation_enabled =  bool(user_id and resolved_influencer_id)
     start_ts = (conversation_json.get("metadata") or {}).get("start_time_unix_secs")
@@ -1224,7 +1224,7 @@ async def _persist_transcript_to_chat(
                         context=context,
                         result=mod_result,
                     )
-                    log.logging.warning(
+                    log.warning(
                         "persist_transcript.violation chat=%s conv=%s msg=%s",
                         chat_id,
                         conversation_id,
@@ -1363,6 +1363,7 @@ async def get_signed_url(
 @router.get("/conversation-token")
 async def get_conversation_token(
     influencer_id: str,
+    user_timezone: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1382,7 +1383,6 @@ async def get_conversation_token(
         )
     
     agent_id = await get_agent_id_from_influencer(db, influencer_id)
-    # Sequential to avoid SQLAlchemy AsyncSession concurrent access issue
     prompt_template = await get_global_prompt(db, True)
     influencer = await db.get(Influencer, influencer_id)
     chat_id = await get_or_create_chat(db, user_id, influencer_id)
@@ -1391,26 +1391,46 @@ async def get_conversation_token(
         raise HTTPException(404, "Influencer not found")
     
     bio = influencer.bio_json or {}
-    persona_likes = bio.get("likes", [])
-    persona_dislikes = bio.get("dislikes", [])
-    if not isinstance(persona_likes, list):
-        persona_likes = []
-    if not isinstance(persona_dislikes, list):
-        persona_dislikes = []
+
+
+    from app.services.preference_service import (
+        get_persona_preference_labels,
+        build_preference_context,
+        build_preference_time_activity,
+        build_preference_daily_topic,
+    )
+    persona_likes, persona_dislikes, pref_keys = await get_persona_preference_labels(db, influencer_id)
     
-    # Get stage prompts from DB, with potential bio_json override
+
     stages = await get_relationship_stage_prompts(db)
     bio_stages = bio.get("stages", {})
     if isinstance(bio_stages, dict) and bio_stages:
         for key, val in bio_stages.items():
-            if val:  # Only override if value is non-empty
+            if val:
                 stages[key.upper()] = val
     personality_rules = bio.get("personality_rules", "")
     tone = bio.get("tone", "")
     mbti_archetype = bio.get("mbti_architype", "")
     mbti_addon = bio.get("mbti_rules", "")
     mbti_rules = await get_mbti_rules_for_archetype(db, mbti_archetype, mbti_addon)
-    daily_context = ""
+
+
+    pref_activity = build_preference_time_activity(pref_keys, user_timezone)
+    mood = f"Right now you're {pref_activity}" if pref_activity else ""
+
+    daily_topic = build_preference_daily_topic(pref_keys)
+
+    pref_ctx = await build_preference_context(db, int(user_id), influencer_id)
+
+    try:
+        from app.services.brave_search import fetch_trending_context
+        live_ctx = await fetch_trending_context(pref_keys, influencer_id, user_timezone)
+    except Exception as exc:
+        log.warning("conversation_token.brave_search_failed err=%s", exc)
+        live_ctx = ""
+
+    ctx_parts = [p for p in [daily_topic, pref_ctx, live_ctx] if p]
+    daily_context = " ".join(ctx_parts)
 
     history = redis_history(chat_id)
 
@@ -1433,6 +1453,15 @@ async def get_conversation_token(
 
     dtr_goal = plan_dtr_goal(rel, can_ask)
 
+    # Load stored facts/memories so the AI knows what was discussed before
+    from app.agents.memory import get_recent_facts
+    try:
+        recent_facts = await get_recent_facts(db, chat_id, limit=15)
+        mem_block = "\n".join(recent_facts) if recent_facts else ""
+    except Exception as exc:
+        log.warning("conversation_token.facts_load_failed chat=%s err=%s", chat_id, exc)
+        mem_block = ""
+
     prompt = build_relationship_prompt(
         prompt_template,
         rel=rel,
@@ -1443,15 +1472,16 @@ async def get_conversation_token(
         persona_likes=persona_likes,
         persona_dislikes=persona_dislikes,
         mbti_rules=mbti_rules,
-        memories="",
+        memories=mem_block,
         daily_context=daily_context,
         last_user_message="",
         tone=tone,
+        mood=mood,
         analysis="",
         influencer_name=influencer.display_name,
     )
     
-    log_prompt(log, prompt, cid="", input="")
+    log_prompt(log, prompt, cid="", input="", history=[])
 
     try:
         client = await get_elevenlabs_client()
@@ -1491,7 +1521,7 @@ async def get_conversation_token(
         "agent_id": agent_id, 
         "credits_remainder_secs": credits_remainder_secs, 
         "greeting_used": greeting,
-        "prompt": prompt.format(input=""),
+        "prompt": prompt.format(input="", history=[]),
         "voice_id": influencer.voice_id or DEFAULT_ELEVENLABS_VOICE_ID,
         "native_language": influencer.native_language if influencer else "en",
     }
@@ -1769,6 +1799,14 @@ async def finalize_conversation(
             "finalize.update_call_record_failed conv=%s err=%s", conversation_id, exc
         )
 
+    # ── fetch latest relationship stats to send to frontend ──
+    rel_payload = None
+    if resolved_influencer_id:
+        try:
+            rel_payload = await _get_relationship_payload(db, body.user_id, resolved_influencer_id)
+        except Exception as exc:
+            log.warning("finalize.relationship_fetch_failed conv=%s err=%s", conversation_id, exc)
+
     if status == "failed":
         log.warning("Conversation %s ended as FAILED; skipping charge.", conversation_id)
         return {
@@ -1780,6 +1818,7 @@ async def finalize_conversation(
             "meta": meta,
             "transcript_synced": transcript_synced,
             "refresh_required": transcript_synced,
+            "relationship": rel_payload,
         }
 
     if status != "done":
@@ -1793,6 +1832,7 @@ async def finalize_conversation(
             "note": "Conversation not done yet; waiting for webhook or try again later.",
             "transcript_synced": transcript_synced,
             "refresh_required": transcript_synced,
+            "relationship": rel_payload,
         }
 
     if body.charge_if_not_billed and not await was_already_billed(db, conversation_id):
@@ -1820,6 +1860,7 @@ async def finalize_conversation(
             "meta": meta,
             "transcript_synced": transcript_synced,
             "refresh_required": transcript_synced,
+            "relationship": rel_payload,
         }
 
     return {
@@ -1831,6 +1872,7 @@ async def finalize_conversation(
         "meta": meta,
         "transcript_synced": transcript_synced,
         "refresh_required": transcript_synced,
+        "relationship": rel_payload,
     }
 
 

@@ -199,6 +199,7 @@ async def get_global_prompt(
     return ChatPromptTemplate.from_messages(
         [
             ("system", system_prompt),
+            MessagesPlaceholder("history"),
             ("user", "{input}"),
         ]
     )

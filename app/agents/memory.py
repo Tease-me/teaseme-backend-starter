@@ -4,7 +4,7 @@ from sqlalchemy.sql import func
 from app.db.models import Memory
 import logging
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("memory")
 
 
 async def find_similar_messages(
@@ -35,7 +35,6 @@ async def find_similar_messages(
     
     return chat_memories
 
-
 async def find_similar_memories(
     db,
     chat_id: str,
@@ -50,10 +49,8 @@ async def find_similar_memories(
 
     return chat_memories
 
-
 def _norm(s: str) -> str:
     return " ".join(s.lower().split())
-
 
 async def _already_have(db, chat_id: str, fact: str) -> bool:
     """Check if the normalized fact already exists for this chat_id."""
@@ -67,7 +64,6 @@ async def _already_have(db, chat_id: str, fact: str) -> bool:
 
 
 async def store_fact(db, chat_id: str, fact: str, sender: str = "user"):
-    """Store a single fact (legacy function for backward compatibility)."""
     norm_fact = _norm(fact)
     if not norm_fact or norm_fact == "no new memories.":
         return
@@ -90,38 +86,31 @@ async def store_fact(db, chat_id: str, fact: str, sender: str = "user"):
     )
 
 
+async def get_recent_facts(db, chat_id: str, limit: int = 15) -> list[str]:
+    """Return the most recent facts for a chat, newest first."""
+    result = await db.execute(
+        select(Memory.content)
+        .where(Memory.chat_id == chat_id)
+        .order_by(Memory.created_at.desc())
+        .limit(limit)
+    )
+    return [row[0] for row in result.fetchall()]
+
+
 async def store_facts_batch(
-    db,
-    chat_id: str,
-    facts: list[str],
-    sender: str = "user",
+    db, chat_id: str, facts: list[str], sender: str = "user"
 ) -> int:
     """
-    Store multiple facts using batch embedding (70-80% faster than sequential).
-    
-    Args:
-        db: Database session
-        chat_id: Chat ID to associate facts with
-        facts: List of fact strings to store
-        sender: Sender identifier
-        
-    Returns:
-        Number of facts successfully stored
+    Store multiple facts in batch using a single embedding API call.
+    Returns the number of facts actually stored.
     """
     if not facts:
         return 0
-    
-    # 1. Normalize and deduplicate
-    normalized = []
-    for fact in facts:
-        norm = _norm(fact)
-        if norm and norm != "no new memories." and norm not in normalized:
-            normalized.append(norm)
-    
+
+    normalized = [_norm(f) for f in facts if _norm(f) and _norm(f) != "no new memories."]
     if not normalized:
         return 0
-    
-    # 2. Filter out already-existing facts
+
     new_facts = []
     for norm in normalized:
         if not await _already_have(db, chat_id, norm):
@@ -130,18 +119,16 @@ async def store_facts_batch(
     if not new_facts:
         log.debug("All %d facts already exist for chat=%s", len(normalized), chat_id)
         return 0
-    
-    # 3. Batch embed all new facts in ONE API call
+
     try:
         embeddings = await get_embeddings_batch(new_facts)
     except Exception as exc:
         log.error("Batch embedding failed for chat=%s: %s", chat_id, exc, exc_info=True)
         return 0
-    
-    # 4. Store all facts
+
     stored = 0
     for fact, emb in zip(new_facts, embeddings):
-        if not emb:  # Skip failed embeddings
+        if not emb:
             continue
         try:
             await upsert_memory(
@@ -157,4 +144,3 @@ async def store_facts_batch(
     
     log.info("Stored %d/%d facts for chat=%s", stored, len(new_facts), chat_id)
     return stored
-

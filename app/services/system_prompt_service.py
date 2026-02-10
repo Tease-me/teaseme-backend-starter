@@ -37,8 +37,6 @@ async def get_system_prompt(db: AsyncSession, key: str) -> str:
         log.warning("Redis cache read failed for key=%s: %s", key, e)
     
     # Cache miss - query database with a FRESH session to avoid concurrency issues
-    # This is necessary because asyncio.gather may call this function in parallel,
-    # and SQLAlchemy AsyncSession doesn't allow concurrent operations on same session
     async with SessionLocal() as fresh_db:
         result = await fresh_db.execute(
             select(SystemPrompt).where(SystemPrompt.key == key)

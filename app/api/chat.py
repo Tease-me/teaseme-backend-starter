@@ -475,11 +475,28 @@ async def chat_audio(
         db.add(msg_ai)
         await db.commit()
 
+        # ── relationship + usage snapshot (mirrors WS text flush) ──
+        rel_payload = None
+        try:
+            rel_payload = await _get_relationship_payload(db, user_id, influencer_id)
+        except Exception:
+            log.exception("chat_audio: failed to load relationship snapshot")
+
+        usage_payload = None
+        try:
+            usage_payload = await _get_usage_snapshot_simple(
+                db, user_id=user_id, influencer_id=influencer_id, is_18=False,
+            )
+        except Exception:
+            log.exception("chat_audio: failed to load usage snapshot")
+
         return {
             "ai_text": ai_reply,
             "ai_audio_url": generate_presigned_url(ai_audio_key),
             "user_audio_url": generate_presigned_url(user_audio_key),
             "transcript": transcript_text,
+            "relationship": rel_payload,
+            "usage": usage_payload,
         }
 
     except HTTPException:
