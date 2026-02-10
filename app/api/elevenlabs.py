@@ -1418,7 +1418,7 @@ async def get_conversation_token(
     pref_activity = build_preference_time_activity(pref_keys, user_timezone)
     mood = f"Right now you're {pref_activity}" if pref_activity else ""
 
-    daily_topic = build_preference_daily_topic(pref_keys)
+    daily_topic = build_preference_daily_topic(pref_keys, chat_id)
 
     pref_ctx = await build_preference_context(db, int(user_id), influencer_id)
 

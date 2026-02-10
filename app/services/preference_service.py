@@ -516,15 +516,14 @@ _DAILY_TOPIC_TEMPLATES: dict[str, list[str]] = {
 
 def build_preference_daily_topic(
     persona_like_keys: list[str],
+    chat_id: str = "",
 ) -> str:
     available = sorted(k for k in persona_like_keys if k in _DAILY_TOPIC_TEMPLATES)
     if not available:
         return ""
 
-    today = date.today()
-    day_seed = today.isoformat()
-
-    rng = random.Random(hashlib.md5(day_seed.encode()).hexdigest())
+    seed = hashlib.md5(f"{date.today().isoformat()}:{chat_id}".encode()).hexdigest()
+    rng = random.Random(seed)
     rng.shuffle(available)
     chosen_key = available[0]
 

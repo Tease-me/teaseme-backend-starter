@@ -180,7 +180,7 @@ async def handle_turn(
     if pref_activity:
         mood = f"{mood}. Right now you're {pref_activity}" if mood else f"Right now you're {pref_activity}"
 
-    daily_topic = build_preference_daily_topic(pref_keys)
+    daily_topic = build_preference_daily_topic(pref_keys, chat_id) if not history.messages else ""
 
     from datetime import date
     today_script = ""
