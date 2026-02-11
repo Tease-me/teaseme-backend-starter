@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 import redis.asyncio as redis
 from fastapi import HTTPException
 
-from app.utils.redis_pool import get_redis
+from app.utils.infrastructure.redis_pool import get_redis
 
 log = logging.getLogger(__name__)
 
