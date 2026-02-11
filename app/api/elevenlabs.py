@@ -28,7 +28,7 @@ from app.services.chat_service import get_or_create_chat
 from app.agents.turn_handler import _norm, redis_history
 from langchain_core.prompts import ChatPromptTemplate
 from app.db.session import SessionLocal
-from app.api.utils import get_embedding
+from app.services.embeddings import get_embedding
 from app.services.system_prompt_service import get_system_prompt
 from app.constants import prompt_keys
 from app.agents.prompts import GREETING_GENERATOR
@@ -1260,7 +1260,7 @@ async def _persist_transcript_to_chat(
     texts_to_embed = [e["text"] for e in pending_entries]
     embeddings: List[Optional[List[float]]] = []
     try:
-        from app.api.utils import get_embeddings_batch
+        from app.services.embeddings import get_embeddings_batch
         embeddings = await get_embeddings_batch(texts_to_embed)
     except Exception as exc:
         log.warning("persist_transcript.batch_embed_failed chat=%s err=%s", chat_id, exc)

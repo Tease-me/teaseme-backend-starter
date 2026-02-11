@@ -11,7 +11,7 @@ from app.agents.turn_handler import handle_turn
 from app.db.session import get_db
 from app.db.models import Message, Chat
 from jose import jwt
-from app.api.utils import get_embedding
+from app.services.embeddings import get_embedding
 from app.services.relationship import _get_relationship_payload
 from app.services.user import _get_usage_snapshot_simple
 

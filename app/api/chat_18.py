@@ -11,7 +11,7 @@ from app.agents.turn_handler_18 import handle_turn_18
 from app.db.session import get_db
 from app.db.models import Message18, Chat18
 from jose import jwt
-from app.api.utils import get_embedding
+from app.services.embeddings import get_embedding
 from starlette.websockets import WebSocketDisconnect
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession

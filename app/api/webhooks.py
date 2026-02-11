@@ -396,7 +396,7 @@ async def eleven_webhook_get_memories(
     try:
         # Compute embedding ONCE, then query memories and messages in PARALLEL
         # Embedding typically completes in 50-100ms, reduced timeout for faster failover
-        from app.api.utils import get_embedding
+        from app.services.embeddings import get_embedding
         embedding = await asyncio.wait_for(
             get_embedding(user_text),
             timeout=1.5,  # Reduced from 3.0s - embeddings are fast

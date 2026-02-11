@@ -1,13 +1,19 @@
-#TODO: add file into UTILS folder
-from openai import AsyncOpenAI
-from sqlalchemy import text
-from dotenv import load_dotenv
-from datetime import datetime
+"""
+Embedding and vector search service for AI-powered memory and message retrieval.
+
+This module provides:
+- OpenAI text embeddings generation (single and batch)
+- Vector similarity search for memories and messages
+- Memory upsert with deduplication based on semantic similarity
+"""
+
 import logging
+from datetime import datetime, timezone
+
+from openai import AsyncOpenAI
+from sqlalchemy import text, func
 
 log = logging.getLogger(__name__)
-
-load_dotenv()
 
 # Use AsyncOpenAI for non-blocking API calls
 # This prevents blocking the event loop during embedding requests
@@ -15,7 +21,15 @@ client = AsyncOpenAI()
 
 
 async def get_embedding(text: str) -> list[float]:
-    """Get embedding for a single text (non-blocking)."""
+    """
+    Get embedding for a single text (non-blocking).
+    
+    Args:
+        text: Text to embed
+        
+    Returns:
+        Embedding vector as list of floats
+    """
     response = await client.embeddings.create(
         input=text,
         model="text-embedding-3-small"
@@ -68,7 +82,19 @@ async def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
         return embeddings
 
 
-async def search_similar_memories(db, chat_id, embedding, top_k=5):
+async def search_similar_memories(db, chat_id: str, embedding: list[float], top_k: int = 5) -> list[str]:
+    """
+    Search for similar memories using vector similarity.
+    
+    Args:
+        db: Database session
+        chat_id: Chat ID to search within
+        embedding: Query embedding vector
+        top_k: Number of results to return
+        
+    Returns:
+        List of memory content strings ordered by similarity
+    """
     sql = text("""
         SELECT content
         FROM memories
@@ -86,7 +112,20 @@ async def search_similar_memories(db, chat_id, embedding, top_k=5):
     result = await db.execute(sql, params)
     return [row[0] for row in result.fetchall()]
 
-async def search_similar_messages(db, chat_id, embedding, top_k=5):
+
+async def search_similar_messages(db, chat_id: str, embedding: list[float], top_k: int = 5) -> list[str]:
+    """
+    Search for similar messages using vector similarity.
+    
+    Args:
+        db: Database session
+        chat_id: Chat ID to search within
+        embedding: Query embedding vector
+        top_k: Number of results to return
+        
+    Returns:
+        List of message content strings ordered by similarity
+    """
     sql = text("""
         SELECT content
         FROM messages
@@ -105,10 +144,6 @@ async def search_similar_messages(db, chat_id, embedding, top_k=5):
     return [row[0] for row in result.fetchall()]
 
 
-
-from sqlalchemy import text, func
-from datetime import datetime, timezone
-
 async def upsert_memory(
     db,
     chat_id: str,
@@ -116,8 +151,24 @@ async def upsert_memory(
     embedding: list[float],
     sender: str = "fact",
     similarity_threshold: float = 0.1,
-):
-
+) -> str | None:
+    """
+    Insert or update a memory based on semantic similarity.
+    
+    If a similar memory already exists (within similarity_threshold), it will be updated.
+    Otherwise, a new memory is inserted.
+    
+    Args:
+        db: Database session
+        chat_id: Chat ID
+        content: Memory content
+        embedding: Content embedding vector
+        sender: Sender identifier (default: "fact")
+        similarity_threshold: Maximum distance for considering memories similar (default: 0.1)
+        
+    Returns:
+        "update" if existing memory was updated, "insert" if new memory created, None on error
+    """
     try:
         embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
 
@@ -138,6 +189,7 @@ async def upsert_memory(
         similar = result.fetchone()
 
         if similar and similar[1] <= similarity_threshold:
+            # Update existing similar memory
             sql_update = text("""
                 UPDATE memories
                 SET content = :content, embedding = :embedding, sender = :sender, created_at = NOW()
@@ -152,7 +204,7 @@ async def upsert_memory(
             await db.execute(sql_update, params_update)
             result_action = "update"
         else:
-            # 3. Insert as a new memory - use PostgreSQL's NOW() to avoid timezone issues
+            # Insert as a new memory
             sql_insert = text("""
                 INSERT INTO memories (chat_id, content, embedding, sender, created_at)
                 VALUES (:chat_id, :content, :embedding, :sender, NOW())
@@ -170,9 +222,5 @@ async def upsert_memory(
         return result_action
     except Exception as e:
         await db.rollback()
-        import logging
-        log = logging.getLogger(__name__)
         log.error(f"Failed to upsert memory for chat_id={chat_id}: {e}", exc_info=True)
         return None
-
-
