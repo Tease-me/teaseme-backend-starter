@@ -365,12 +365,15 @@ async def _get_contextual_first_message_prompt(db: AsyncSession) -> ChatPromptTe
 
 
 async def _generate_contextual_greeting(
-    db: AsyncSession, chat_id: str, influencer_id: str
+    db: AsyncSession, chat_id: str, influencer_id: str,
+    relationship_state: Optional[str] = None,
 ) -> Optional[str]:
     """
     Generate a contextual greeting using parallel DB lookups for speed.
     Uses dedicated sessions to avoid AsyncSession concurrency issues.
     Performance: ~100-200ms faster than sequential approach.
+    
+    If relationship_state is provided, skips the extra DB fetch.
     """
     if GREETING_GENERATOR is None:
         return None
@@ -426,18 +429,42 @@ async def _generate_contextual_greeting(
         log.warning("contextual_greeting.parallel_fetch_failed chat=%s err=%s", chat_id, exc)
         db_messages, chat, influencer = [], None, None
 
-    # Second wave: last call (depends on user_id from chat)
+    # Second wave: last call + relationship (depends on user_id from chat)
     user_id = chat.user_id if chat else None
     last_call: Optional[CallRecord] = None
+    # Use provided state or default; only fetch if not pre-supplied
+    _rel_state = (relationship_state or "").upper() or "STRANGERS"
     
     if user_id:
-        try:
-            last_call = await _fetch_last_call_standalone(user_id)
-        except Exception as exc:
-            log.warning(
-                "contextual_greeting.call_fetch_failed chat=%s user=%s infl=%s err=%s",
-                chat_id, user_id, influencer_id, exc,
-            )
+        if not relationship_state:
+            # Need to fetch relationship state — import here to avoid circular
+            from app.services.relationship_service import get_or_create_relationship
+            async def _fetch_relationship_standalone(uid: int) -> Optional[str]:
+                try:
+                    async with SessionLocal() as session:
+                        rel = await get_or_create_relationship(session, uid, influencer_id)
+                        return getattr(rel, "state", "STRANGERS").upper()
+                except Exception:
+                    return "STRANGERS"
+            try:
+                last_call, _rel_state = await asyncio.gather(
+                    _fetch_last_call_standalone(user_id),
+                    _fetch_relationship_standalone(user_id),
+                )
+            except Exception as exc:
+                log.warning(
+                    "contextual_greeting.call_fetch_failed chat=%s user=%s infl=%s err=%s",
+                    chat_id, user_id, influencer_id, exc,
+                )
+        else:
+            # State already known — just fetch last call
+            try:
+                last_call = await _fetch_last_call_standalone(user_id)
+            except Exception as exc:
+                log.warning(
+                    "contextual_greeting.call_fetch_failed chat=%s user=%s infl=%s err=%s",
+                    chat_id, user_id, influencer_id, exc,
+                )
 
     # ============================================================
     # PHASE 2: Process fetched data (same logic as before)
@@ -501,6 +528,7 @@ async def _generate_contextual_greeting(
         prompt = await _get_contextual_first_message_prompt(db)
         chain = prompt.partial(
             influencer_name=persona_name,
+            relationship_state=_rel_state,
             gap_category=gap_category,
             gap_minutes=str(round(gap_minutes, 1)),
             call_ending_type=call_ending_type,
@@ -1517,7 +1545,10 @@ async def get_conversation_token(
     # chat_id already obtained at line 1350 - removed duplicate call
     credits_remainder_secs = await get_remaining_units(db, user_id, influencer_id, feature="live_chat")
 
-    greeting: Optional[str] = await _generate_contextual_greeting(db, chat_id, influencer_id)
+    greeting: Optional[str] = await _generate_contextual_greeting(
+        db, chat_id, influencer_id,
+        relationship_state=getattr(rel, "state", None),
+    )
     
     if not greeting:
         greeting = _pick_greeting(influencer_id, "random")

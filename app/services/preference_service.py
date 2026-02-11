@@ -387,6 +387,44 @@ _TIME_BUCKETS = {
     "late_night":     list(range(23, 24)) + list(range(0, 5)),
 }
 
+# ── Voice energy / tiredness descriptors per time bucket ─────────────
+# Natural language only — no [tag] syntax here because ConvAI TTS reads
+# tags as literal text. V3 expression tags for voice messages are handled
+# post-hoc by _enhance_text_with_v3_tags() in chat.py.
+_TIME_ENERGY_CUES: dict[str, str] = {
+    "early_morning": "You just woke up — voice is soft and groggy, you're still half-asleep. You might yawn or trail off mid-sentence. Speak slowly.",
+    "late_morning":  "You're awake and settling into your day — voice is relaxed and easy-going.",
+    "midday":        "Normal daytime energy — voice is natural and casual.",
+    "afternoon":     "Comfortable afternoon energy — voice is chill and steady.",
+    "golden_hour":   "Warm, mellow energy — voice is soft and reflective, winding down.",
+    "evening":       "Relaxed evening vibe — voice is warm and a little low, settled in for the night.",
+    "late_evening":  "Getting sleepy — voice is quieter and slower. You're cozy and winding down, sentences get shorter. Sigh between thoughts.",
+    "late_night":    "You're very tired and drowsy — voice is barely above a whisper, you yawn between words, you might fall asleep mid-sentence. Keep responses very short.",
+}
+
+# ── Generic fallback activities when no preference matches ──────────
+_DEFAULT_TIME_ACTIVITIES: dict[str, list[str]] = {
+    "early_morning": ["still in bed, barely awake", "just opened your eyes, haven't moved yet", "lying in bed scrolling your phone with one eye open", "hitting snooze for the third time", "buried under blankets, not ready to face the day"],
+    "late_morning":  ["getting ready for the day", "making breakfast, taking your time", "lounging around the house in comfy clothes", "sipping something warm by the window", "finally showered, hair still wet"],
+    "midday":        ["just having lunch", "scrolling your phone during a break", "chilling, not doing much", "snacking on something while watching a video", "sitting at your desk, kinda zoned out"],
+    "afternoon":     ["doing your own thing at home", "procrastinating on something", "lying on the couch, being lazy", "staring out the window, spacing out", "reorganizing your room instead of being productive"],
+    "golden_hour":   ["watching the light change from your window", "relaxing before the evening", "thinking about what to do tonight", "sitting outside, enjoying the last bit of warmth", "taking a slow walk, no rush"],
+    "evening":       ["on the couch watching something", "scrolling through your phone, feet up", "deciding what to eat for dinner", "just finished eating, feeling full and lazy", "lighting a candle, settling in for the night"],
+    "late_evening":  ["in bed already, getting sleepy", "watching something with the lights off", "lying in bed, eyes getting heavy", "scrolling through your phone in the dark, fighting sleep", "wrapped in blankets, barely keeping your eyes open"],
+    "late_night":    ["half asleep in bed", "in the dark, phone light on your face, almost dozing off", "drifting in and out of sleep", "can't sleep, just lying there thinking", "eyes closed but mind still wandering"],
+}
+
+_DEFAULT_TIME_ACTIVITIES_18: dict[str, list[str]] = {
+    "early_morning": ["tangled in sheets, barely awake, hair messy", "lying in bed in just underwear, too sleepy to move", "stretching in bed wearing nothing, sunlight creeping in", "face down in the pillow, blanket barely covering you"],
+    "late_morning":  ["wrapped in a towel, just got out of the shower", "stretching in bed in a tank top, taking your time getting up", "walking around the apartment in just a shirt, no pants", "wet hair dripping on bare shoulders, fresh out the shower"],
+    "midday":        ["lounging around in a crop top and shorts", "lying on the couch in comfy clothes, being lazy", "in a sports bra and sweats, not going anywhere", "braless in a loose tee, fully comfortable"],
+    "afternoon":     ["lying in bed scrolling your phone in underwear", "in a thin tank top, just relaxing", "on the couch in tiny shorts, legs up", "peeling off your jeans and changing into something barely there"],
+    "golden_hour":   ["catching the warm light on your skin by the window", "changing into something more comfortable for the evening", "in a sundress with nothing underneath, golden light on your skin", "fresh out the bath, wrapped in a towel, skin still warm"],
+    "evening":       ["in silk shorts and a loose top, candles lit", "curled up in something silky, relaxed and warm", "wearing an oversized hoodie and nothing else, curled up on the couch", "in lace underwear under a robe, feeling cozy and pretty"],
+    "late_evening":  ["in bed wearing almost nothing, sheets half off", "getting ready for bed, stripping down to almost nothing", "lying in bed in just panties, too warm for anything else", "skin against cool sheets, barely dressed, eyes heavy"],
+    "late_night":    ["naked under the sheets, half asleep", "sprawled in bed barely covered, too tired to care", "sheets tangled around your waist, skin exposed, drifting off", "sleeping naked, blanket kicked off, completely knocked out"],
+}
+
 
 def _current_time_bucket(user_timezone: str | None) -> str:
     hour = datetime.now(_resolve_tz(user_timezone)).hour
@@ -406,7 +444,8 @@ def build_preference_time_activity(
     preference keys and the current time of day.
 
     When is_adult=True, uses the flirty/teasing 18+ activity map.
-    Returns empty string if no matching activities found.
+    Includes energy/voice cues (sleepy, groggy, etc.) and falls back
+    to generic default activities when no preference matches.
     """
     bucket = _current_time_bucket(user_timezone)
     activity_map = _PREF_TIME_ACTIVITIES_18 if is_adult else _PREF_TIME_ACTIVITIES
@@ -437,14 +476,26 @@ def build_preference_time_activity(
             if candidates:
                 break
 
+    # Fall back to generic default activities if still nothing
+    if not candidates:
+        defaults = (
+            _DEFAULT_TIME_ACTIVITIES_18 if is_adult else _DEFAULT_TIME_ACTIVITIES
+        )
+        candidates = list(defaults.get(bucket, []))
+
     if not candidates:
         return ""
 
-    # Use hour in seed so the activity rotates hourly
-    hour = datetime.now(_resolve_tz(user_timezone)).hour
-    seed = hashlib.md5(f"{date.today().isoformat()}:{hour}".encode()).hexdigest()
+    # Use bucket in seed so the activity rotates every 2-3 hours (per time bucket)
+    seed = hashlib.md5(f"{date.today().isoformat()}:{bucket}".encode()).hexdigest()
     rng = random.Random(seed)
-    return rng.choice(candidates)
+    activity = rng.choice(candidates)
+
+    # Append energy/voice cue for the time of day
+    energy_cue = _TIME_ENERGY_CUES.get(bucket, "")
+    if energy_cue:
+        return f"{activity}. {energy_cue}"
+    return activity
 
 
 _DAILY_TOPIC_TEMPLATES: dict[str, list[str]] = {

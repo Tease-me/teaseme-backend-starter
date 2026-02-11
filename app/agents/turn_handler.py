@@ -13,14 +13,13 @@ from app.db.session import SessionLocal
 from app.agents.prompt_utils import (
     get_global_prompt,
     build_relationship_prompt,
-    pick_time_mood,
     get_mbti_rules_for_archetype,
     get_relationship_stage_prompts,
 )
 from app.db.models import Influencer
 from app.utils.tts_sanitizer import sanitize_tts_text
-from app.services.system_prompt_service import get_system_prompt
-from app.constants import prompt_keys
+
+
 from app.utils.prompt_logging import log_prompt
 
 from app.relationship.processor import process_relationship_turn
@@ -104,17 +103,11 @@ async def handle_turn(
 
     recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
 
-    # System prompts use Redis caching (safe to parallelize)
-    prompt_template, weekday_prompt, weekend_prompt = await asyncio.gather(
-        get_global_prompt(db, is_audio),
-        get_system_prompt(db, prompt_keys.WEEKDAY_TIME_PROMPT),
-        get_system_prompt(db, prompt_keys.WEEKEND_TIME_PROMPT),
-    )
+    # System prompt uses Redis caching
+    prompt_template = await get_global_prompt(db, is_audio)
 
     # DB gets must be sequential (AsyncSession concurrency restriction)
     influencer = await db.get(Influencer, influencer_id)
-    
-    mood = pick_time_mood(weekday_prompt, weekend_prompt, user_timezone)
 
     if not influencer:
         raise HTTPException(404, "Influencer not found")
@@ -179,9 +172,9 @@ async def handle_turn(
     rel_state = getattr(rel, "state", "STRANGERS").upper()
     _early_stages = {"HATE", "DISLIKE", "STRANGER", "STRANGERS"}
 
+    # Preference-based activity is the sole mood source (replaced old WEEKDAY/WEEKEND prompts)
     pref_activity = build_preference_time_activity(pref_keys, user_timezone)
-    if pref_activity and rel_state not in _early_stages:
-        mood = f"{mood}. Right now you're {pref_activity}" if mood else f"Right now you're {pref_activity}"
+    mood = f"Right now you're {pref_activity}" if (pref_activity and rel_state not in _early_stages) else ""
 
     daily_topic = build_preference_daily_topic(pref_keys, chat_id) if not history.messages else ""
 

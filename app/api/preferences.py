@@ -115,8 +115,15 @@ async def set_persona_prefs(
     if not influencer:
         raise HTTPException(status_code=404, detail="Influencer not found")
 
+    # Allow if user owns this influencer OR owns any influencer (admin)
     if influencer.owner_id != user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to modify this persona")
+        is_admin = (
+            await db.execute(
+                select(Influencer.id).where(Influencer.owner_id == user.id).limit(1)
+            )
+        ).scalar_one_or_none()
+        if not is_admin:
+            raise HTTPException(status_code=403, detail="Not authorized to modify this persona")
 
     count = await set_persona_preferences(
         db, influencer_id,
