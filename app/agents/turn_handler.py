@@ -18,10 +18,10 @@ from app.agents.prompt_utils import (
     get_relationship_stage_prompts,
 )
 from app.db.models import Influencer
-from app.utils.tts_sanitizer import sanitize_tts_text
+from app.utils.messaging.tts_sanitizer import sanitize_tts_text
 from app.services.system_prompt_service import get_system_prompt
 from app.constants import prompt_keys
-from app.utils.prompt_logging import log_prompt
+from app.utils.logging.prompt_logging import log_prompt
 
 from app.relationship.processor import process_relationship_turn
 

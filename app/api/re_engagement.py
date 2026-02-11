@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.db.models import User
-from app.utils.deps import get_current_user
+from app.utils.auth.dependencies import get_current_user
 from app.services.re_engagement import (
     run_reengagement_job,
     get_reengagement_stats,

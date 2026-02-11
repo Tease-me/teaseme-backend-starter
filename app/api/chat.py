@@ -21,11 +21,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.chat_service import get_or_create_chat
 from app.schemas.chat import ChatCreateRequest,PaginatedMessages
 from app.db.models import User
-from app.utils.deps import get_current_user
+from app.utils.auth.dependencies import get_current_user
 
 from app.core.config import settings
-from app.utils.chat import transcribe_audio, synthesize_audio_with_elevenlabs_V3, get_ai_reply_via_websocket
-from app.utils.s3 import save_audio_to_s3, save_ia_audio_to_s3, generate_presigned_url, message_to_schema_with_presigned
+from app.utils.messaging.chat import transcribe_audio, synthesize_audio_with_elevenlabs_V3, get_ai_reply_via_websocket
+from app.utils.storage.s3 import save_audio_to_s3, save_ia_audio_to_s3, generate_presigned_url, message_to_schema_with_presigned
 from app.services.billing import charge_feature, get_duration_seconds, can_afford
 from app.moderation import moderate_message, handle_violation
 

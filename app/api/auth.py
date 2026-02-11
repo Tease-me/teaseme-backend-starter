@@ -13,16 +13,16 @@ from app.db.models import User
 from pydantic import BaseModel
 from app.schemas.auth import RegisterRequest, LoginRequest, Token, PasswordResetRequest
 from app.core.config import settings
-from app.utils.deps import get_current_user
-from app.utils.email import send_verification_email, send_password_reset_email
-from app.utils.auth import create_token
+from app.utils.auth.dependencies import get_current_user
+from app.utils.messaging.email import send_verification_email, send_password_reset_email
+from app.utils.auth.tokens import create_token
 from app.api.notify_ws import notify_email_verified
 from app.services.firstpromoter import fp_track_signup
 from app.schemas.user import UserOut
-from app.utils.s3 import generate_user_presigned_url, save_user_photo_to_s3, delete_file_from_s3
+from app.utils.storage.s3 import generate_user_presigned_url, save_user_photo_to_s3, delete_file_from_s3
 from app.services.follow import create_follow_if_missing
 from app.services.influencer import ensure_influencer
-from app.utils.rate_limiter import rate_limit
+from app.utils.infrastructure.rate_limiter import rate_limit
 
 log = logging.getLogger(__name__)
 

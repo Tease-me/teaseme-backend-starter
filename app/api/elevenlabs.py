@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 from app.core.config import settings
 from app.db.models import Influencer, Chat, Message, CallRecord, User, PreInfluencer
 from app.db.session import get_db
-from app.utils.deps import get_current_user
+from app.utils.auth.dependencies import get_current_user
 from app.schemas.elevenlabs import FinalizeConversationBody, RegisterConversationBody, UpdatePromptBody
 from app.services.billing import charge_feature,_get_influencer_id_from_chat
 from sqlalchemy import select
@@ -32,7 +32,7 @@ from app.api.utils import get_embedding
 from app.services.system_prompt_service import get_system_prompt
 from app.constants import prompt_keys
 from app.agents.prompts import GREETING_GENERATOR
-from app.utils.prompt_logging import log_prompt
+from app.utils.logging.prompt_logging import log_prompt
 
 router = APIRouter(prefix="/elevenlabs", tags=["elevenlabs"])
 log = logging.getLogger(__name__)

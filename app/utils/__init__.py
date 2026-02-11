@@ -10,12 +10,12 @@ All utilities are organized by domain for better maintainability:
 
 For backward compatibility, all functions are re-exported at the top level.
 You can import from either:
-    from app.utils.auth import create_token  # Old way (still works)
-    from app.utils import create_token       # Also works
+    from app.utils.auth.tokens import create_token  # Recommended (organized)
+    from app.utils import create_token              # Also works (via __init__)
 """
 
 # Re-export everything for backward compatibility
-# This ensures existing imports like "from app.utils.auth import X" still work
+# This allows imports like "from app.utils import create_token" to work
 
 # Auth utilities
 from .auth.tokens import create_token

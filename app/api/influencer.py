@@ -6,11 +6,11 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.db.models import Influencer, User
-from app.utils.deps import get_current_user
+from app.utils.auth.dependencies import get_current_user
 
 from app.db.session import get_db
 from app.schemas.influencer import InfluencerCreate, InfluencerOut, InfluencerUpdate, InfluencerDetail
-from app.utils.s3 import (
+from app.utils.storage.s3 import (
     generate_presigned_url,
     get_influencer_audio_download_url,
     get_influencer_profile_from_s3,
