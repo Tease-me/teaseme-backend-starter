@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Message, Message18, Chat, Chat18
 from app.services.embeddings import get_embedding
 from app.services.billing import charge_feature
-from app.services.relationship import _get_relationship_payload
+from app.relationship import get_relationship_payload
 from app.services.user import _get_usage_snapshot_simple
 
 log = logging.getLogger(__name__)
@@ -306,7 +306,7 @@ async def flush_buffer(
     # Add relationship data for regular chats
     if config.include_relationship:
         try:
-            rel_payload = await _get_relationship_payload(db, user_id, influencer_id)
+            rel_payload = await get_relationship_payload(db, user_id, influencer_id)
             response_payload["relationship"] = rel_payload
         except Exception:
             log.exception("[BUF %s] Failed to load relationship snapshot", chat_id)
