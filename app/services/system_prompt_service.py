@@ -103,15 +103,24 @@ async def update_system_prompt(
     now = datetime.now(timezone.utc)
 
     if row:
-        row.prompt = new_prompt
-        if description is not None:
+        # Only bump version if something actually changed
+        changed = False
+        if row.prompt != new_prompt:
+            row.prompt = new_prompt
+            changed = True
+        if description is not None and row.description != description:
             row.description = description
-        if name is not None:
+            changed = True
+        if name is not None and row.name != name:
             row.name = name
-        if prompt_type is not None:
+            changed = True
+        if prompt_type is not None and row.type != prompt_type:
             row.type = prompt_type
-        row.version = (row.version or 0) + 1
-        row.updated_at = now
+            changed = True
+
+        if changed:
+            row.version = (row.version or 0) + 1
+            row.updated_at = now
     else:
         row = SystemPrompt(
             key=key,
