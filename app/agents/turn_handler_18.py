@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 
-
+from app.agents.prompt_utils import pick_time_mood
 from app.db.models import Influencer, Message18, User
 from app.agents.prompts import XAI_MODEL
 from app.utils.tts_sanitizer import sanitize_tts_text
@@ -13,6 +13,7 @@ from app.utils.prompt_logging import log_prompt
 from app.services.system_prompt_service import get_system_prompt
 from app.constants import prompt_keys
 from langchain_core.prompts import ChatPromptTemplate
+from app.agents.prompt_utils import pick_time_mood
 log = logging.getLogger("teaseme-turn-18")
 
 
@@ -59,12 +60,12 @@ async def handle_turn_18(
     cid = uuid4().hex[:8]
     log.info("[%s] START(18) persona=%s chat=%s user=%s", cid, influencer_id, chat_id, user_id)
 
-    # Phase 1: Fetch system prompts in parallel
-    # Uses Redis-backed caching; cache misses use separate DB sessions,
-    # avoiding concurrent access to the shared AsyncSession.
-    base_adult_prompt, base_audio_prompt = await asyncio.gather(
+    # Phase 1: Fetch cached system prompts in parallel (Redis cache, no DB contention)
+    base_adult_prompt, base_audio_prompt, weekday_prompt, weekend_prompt = await asyncio.gather(
         get_system_prompt(db, prompt_keys.BASE_ADULT_PROMPT),
         get_system_prompt(db, prompt_keys.BASE_ADULT_AUDIO_PROMPT),
+        get_system_prompt(db, prompt_keys.WEEKDAY_TIME_PROMPT_ADULT),
+        get_system_prompt(db, prompt_keys.WEEKEND_TIME_PROMPT_ADULT),
     )
     
     # Phase 2: DB operations sequentially (AsyncSession doesn't allow concurrent access)
@@ -79,13 +80,6 @@ async def handle_turn_18(
     if is_audio and base_audio_prompt:
         system_prompt = f"{base_adult_prompt}\n{base_audio_prompt}"
 
-    # Load persona preferences and generate 18+ time-of-day activity
-    from app.services.preference_service import (
-        get_persona_preference_labels,
-        build_preference_time_activity,
-    )
-    _, _, pref_keys = await get_persona_preference_labels(db, influencer_id)
-    pref_activity = build_preference_time_activity(pref_keys, user_timezone, is_adult=True)
 
     prompt = ChatPromptTemplate.from_messages(
         [
@@ -93,8 +87,7 @@ async def handle_turn_18(
             ("user", "{input}"),
         ]
     )
-    # Preference-based 18+ activity is the sole mood source
-    mood = f"Right now you're {pref_activity}" if pref_activity else ""
+    mood = pick_time_mood(weekday_prompt, weekend_prompt, user_timezone)
 
     user_adult_prompt = user.custom_adult_prompt if user else None
     prompt = prompt.partial(user_prompt=user_adult_prompt, history=recent_ctx, mood=mood)

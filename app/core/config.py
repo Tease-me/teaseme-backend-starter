@@ -87,7 +87,4 @@ class Settings(BaseSettings):
     DIDIT_WORKFLOW_ID_KYC: str | None = None  # KYC workflow ID from Didit console
     DIDIT_REDIRECT_URL: str | None = None  # Default redirect URL after verification
 
-    # Brave Search API (live context for personas)
-    BRAVE_SEARCH_API_KEY: str | None = None
-
 settings = Settings()

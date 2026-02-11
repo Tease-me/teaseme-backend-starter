@@ -37,6 +37,8 @@ async def get_system_prompt(db: AsyncSession, key: str) -> str:
         log.warning("Redis cache read failed for key=%s: %s", key, e)
     
     # Cache miss - query database with a FRESH session to avoid concurrency issues
+    # This is necessary because asyncio.gather may call this function in parallel,
+    # and SQLAlchemy AsyncSession doesn't allow concurrent operations on same session
     async with SessionLocal() as fresh_db:
         result = await fresh_db.execute(
             select(SystemPrompt).where(SystemPrompt.key == key)
@@ -103,24 +105,14 @@ async def update_system_prompt(
     now = datetime.now(timezone.utc)
 
     if row:
-        # Only bump version if something actually changed
-        changed = False
-        if row.prompt != new_prompt:
-            row.prompt = new_prompt
-            changed = True
-        if description is not None and row.description != description:
+        row.prompt = new_prompt
+        if description is not None:
             row.description = description
-            changed = True
-        if name is not None and row.name != name:
+        if name is not None:
             row.name = name
-            changed = True
-        if prompt_type is not None and row.type != prompt_type:
+        if prompt_type is not None:
             row.type = prompt_type
-            changed = True
-
-        if changed:
-            row.version = (row.version or 0) + 1
-            row.updated_at = now
+        row.updated_at = now
     else:
         row = SystemPrompt(
             key=key,

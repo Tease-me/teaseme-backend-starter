@@ -43,7 +43,6 @@ async def list_prompts(
             "name": r.name,
             "description": r.description,
             "type": r.type,
-            "version": r.version,
             "updated_at": r.updated_at,
         }
         for r in rows
@@ -82,6 +81,5 @@ async def upsert_prompt(
         "name": row.name,
         "description": row.description,
         "type": row.type,
-        "version": row.version,
         "updated_at": row.updated_at,
     }

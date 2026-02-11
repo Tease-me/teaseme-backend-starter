@@ -33,13 +33,18 @@ SOCKET_CONNECT_TIMEOUT = 5.0    # Timeout for establishing connection (seconds)
 HEALTH_CHECK_INTERVAL = 30      # Seconds between connection health checks
 RETRY_ATTEMPTS = 3              # Number of retry attempts on transient errors
 
-# Cache the retry config (Copilot review fix: avoid re-creating on every call)
-_retry_config: Optional[Retry] = None
-
 
 def _create_pool() -> redis.ConnectionPool:
     """
     Creates a configured Redis connection pool.
+    
+    Key configurations:
+    - max_connections: Limits concurrent connections to avoid overwhelming Redis
+    - socket_timeout: Prevents hung operations on network issues
+    - socket_connect_timeout: Fails fast if Redis is unreachable
+    - health_check_interval: Periodically verifies connection liveness, 
+      automatically reconnects stale connections before use
+    - decode_responses: Returns str instead of bytes for convenience
     """
     return redis.ConnectionPool.from_url(
         settings.REDIS_URL,
@@ -51,18 +56,20 @@ def _create_pool() -> redis.ConnectionPool:
     )
 
 
-def _get_retry() -> Retry:
+def _create_retry() -> Retry:
     """
-    Returns a cached retry configuration for transient Redis errors.
+    Creates a retry configuration for transient Redis errors.
+    
+    Uses exponential backoff (cap=0.5s) for these recoverable errors:
+    - ConnectionError: Network blips, Redis restarts
+    - TimeoutError: Temporary slowness
+    - BusyLoadingError: Redis loading dataset after restart
     """
-    global _retry_config
-    if _retry_config is None:
-        _retry_config = Retry(
-            retries=RETRY_ATTEMPTS,
-            backoff=ExponentialBackoff(cap=0.5, base=0.1),
-            supported_errors=(ConnectionError, TimeoutError, BusyLoadingError),
-        )
-    return _retry_config
+    return Retry(
+        retries=RETRY_ATTEMPTS,
+        backoff=ExponentialBackoff(cap=0.5, base=0.1),
+        supported_errors=(ConnectionError, TimeoutError, BusyLoadingError),
+    )
 
 
 async def get_redis() -> redis.Redis:
@@ -72,6 +79,8 @@ async def get_redis() -> redis.Redis:
     The pool is lazily initialized on first call. Each invocation returns
     a lightweight client object that borrows connections from the pool
     as needed—no new connections are created per call.
+    
+    The retry configuration automatically handles transient failures.
     """
     global _redis_pool
     if _redis_pool is None:
@@ -84,7 +93,7 @@ async def get_redis() -> redis.Redis:
     
     return redis.Redis(
         connection_pool=_redis_pool,
-        retry=_get_retry(),
+        retry=_create_retry(),
         retry_on_error=[ConnectionError, TimeoutError, BusyLoadingError],
     )
 

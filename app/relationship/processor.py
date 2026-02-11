@@ -137,11 +137,13 @@ async def process_relationship_turn(
 
     bio = influencer.bio_json or {}
 
-    from app.services.preference_service import (
-        get_persona_preference_labels,
-        compute_preference_alignment,
-    )
-    persona_likes, persona_dislikes, _ = await get_persona_preference_labels(db, influencer_id)
+    persona_likes: List[str] = bio.get("likes", []) or []
+    persona_dislikes: List[str] = bio.get("dislikes", []) or []
+
+    if not isinstance(persona_likes, list):
+        persona_likes = []
+    if not isinstance(persona_dislikes, list):
+        persona_dislikes = []
 
     sig_dict = await classify_signals(
         db, message, recent_ctx, persona_likes, persona_dislikes, convo_analyzer
@@ -192,12 +194,6 @@ async def process_relationship_turn(
 
     prev_sp = float(rel.stage_points or 0.0)
     delta = compute_stage_delta(sig)
-
-    alignment = await compute_preference_alignment(db, int(user_id), influencer_id)
-    pref_bonus = alignment * 0.3
-    delta += pref_bonus
-    delta = max(-8.0, min(3.0, delta))
-
     rel.stage_points = max(-20.0, min(100.0, prev_sp + delta))  # Allow negative points down to -20
 
     # CHECK girlfriend_confirmed FIRST to preserve relationship status

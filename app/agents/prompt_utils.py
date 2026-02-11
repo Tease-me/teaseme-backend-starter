@@ -1,7 +1,9 @@
 import json
 import random
+import re
 from datetime import date, datetime, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from langchain_core.prompts import (
     ChatPromptTemplate,
@@ -17,7 +19,91 @@ from app.constants import prompt_keys
 import logging
 log = logging.getLogger("teaseme-script")
 
+_TIME_RANGE_RE = re.compile(r"^\s*(\d{1,2})\s*(AM|PM)\s*-\s*(\d{1,2})\s*(AM|PM)\s*$", re.IGNORECASE)
 
+
+def _resolve_tz(tz_name: str | None):
+    if not tz_name:
+        return timezone.utc
+    try:
+        return ZoneInfo(tz_name)
+    except ZoneInfoNotFoundError:
+        return timezone.utc
+
+
+def _is_weekend(user_timezone: str | None) -> bool:
+    tz = _resolve_tz(user_timezone)
+    now = datetime.now(tz)
+    return now.weekday() >= 5 
+
+
+def _hour_from_12h(hour: int, meridiem: str) -> int:
+    hour = hour % 12
+    if meridiem.upper() == "PM":
+        hour += 12
+    return hour
+
+
+def _range_span(start: int, end: int) -> int:
+    if start <= end:
+        return end - start + 1
+    return (24 - start) + (end + 1)
+
+
+def _hour_in_range(hour: int, start: int, end: int) -> bool:
+    if start <= end:
+        return start <= hour <= end
+    return hour >= start or hour <= end
+
+
+def _parse_time_range(label: str):
+    m = _TIME_RANGE_RE.match(label or "")
+    if not m:
+        return None
+    start_raw, start_ampm, end_raw, end_ampm = m.groups()
+    start = _hour_from_12h(int(start_raw), start_ampm)
+    end = _hour_from_12h(int(end_raw), end_ampm)
+    return (start, end)
+
+
+def pick_time_mood(
+    weekday_prompt: str | None,
+    weekend_prompt: str | None,
+    user_timezone: str | None,
+) -> str:
+    is_weekend = _is_weekend(user_timezone)
+    time_prompt = weekend_prompt if is_weekend else weekday_prompt
+
+    if not time_prompt:
+        return ""
+    try:
+        mood_map = json.loads(time_prompt)
+    except json.JSONDecodeError:
+        log.warning("Invalid TIME_PROMPT JSON; using empty mood")
+        return ""
+    if not isinstance(mood_map, dict):
+        return ""
+
+    hour = datetime.now(_resolve_tz(user_timezone)).hour
+
+    matches: list[tuple[int, list[str]]] = []
+    for label, options in mood_map.items():
+        if not isinstance(options, list) or not options:
+            continue
+        parsed = _parse_time_range(label)
+        if not parsed:
+            continue
+        start, end = parsed
+        if _hour_in_range(hour, start, end):
+            matches.append((_range_span(start, end), options))
+
+    if matches:
+        matches.sort(key=lambda item: item[0])
+        return random.choice(matches[0][1])
+
+    flat = [m for opts in mood_map.values() if isinstance(opts, list) for m in opts]
+    return random.choice(flat) if flat else ""
+ 
 
 _mbti_cache: Optional[dict] = None
 _stage_prompts_cache: Optional[dict] = None
@@ -113,7 +199,6 @@ async def get_global_prompt(
     return ChatPromptTemplate.from_messages(
         [
             ("system", system_prompt),
-            MessagesPlaceholder("history"),
             ("user", "{input}"),
         ]
     )
@@ -175,64 +260,9 @@ def build_relationship_prompt(
     filtered = {k: v for k, v in partial_vars.items() if k in expected}
     return prompt_template.partial(**filtered)
 
-# ── stage-aware daily-script selection ────────────────────────────
-_ALL_TIERS = ["universal", "talking", "flirting", "dating"]
-
-_STAGE_UNLOCK: dict[str, list[str]] = {
-    "HATE": [],
-    "DISLIKE": [],
-    "STRANGER": ["universal"],
-    "STRANGERS": ["universal"],
-    "TALKING": ["universal", "talking"],
-    "FRIENDS": ["universal", "talking"],
-    "FLIRTING": ["universal", "talking", "flirting"],
-    "DATING": _ALL_TIERS,
-    "IN LOVE": _ALL_TIERS,
-    "GIRLFRIEND": _ALL_TIERS,
-}
-
-
-def pick_daily_script(
-    daily_scripts,
-    rel_state: str = "STRANGERS",
-    chat_id: str = "",
-) -> str:
-    """Select a stage-appropriate daily script.
-
-    Accepts either new dict format ``{"universal": [...], ...}``
-    or legacy flat ``[...]``.  Returns "" when nothing is eligible.
-    """
-    import hashlib
-
-    if not daily_scripts:
-        return ""
-
-    # ── collect eligible scripts ──────────────────────────────────
-    state_upper = (rel_state or "STRANGERS").strip().upper()
-    allowed_tiers = _STAGE_UNLOCK.get(state_upper, ["universal"])
-
-    if isinstance(daily_scripts, dict):
-        pool: list[str] = []
-        for tier in allowed_tiers:
-            pool.extend(daily_scripts.get(tier, []))
-    elif isinstance(daily_scripts, list):
-        # legacy flat list – treat everything as universal
-        pool = list(daily_scripts)
-    else:
-        return ""
-
-    if not pool:
-        return ""
-
-    # ── deterministic but daily-rotating pick ─────────────────────
-    seed = hashlib.md5(f"{date.today().isoformat()}:{chat_id}".encode()).hexdigest()
-    rng = random.Random(seed)
-    return rng.choice(pool)
-
-
 async def get_today_script(
     db: AsyncSession = Depends(get_db),
-    influencer_id: str = None,
+    influencer_id: str = None
 ) -> str:
     if not influencer_id:
         raise HTTPException(400, "influencer_id is required")
@@ -240,50 +270,6 @@ async def get_today_script(
     scripts = influencer.daily_scripts if influencer and influencer.daily_scripts else []
     if not scripts:
         return ""
-    return pick_daily_script(scripts)
-
-
-# ── unified inner-state brief ────────────────────────────────────
-
-def build_inner_state(
-    *,
-    mood: str = "",
-    daily_topic: str = "",
-    trending: str = "",
-    pref_ctx: str = "",
-) -> str:
-    """Assemble a structured 'Inner State' brief from separate context pieces.
-
-    Each non-empty piece gets a labeled section.  The overall block includes
-    a "pick at most one" guardrail so the LLM doesn't force all of them
-    into a single reply.
-    """
-    sections: list[str] = []
-
-    if mood:
-        sections.append(f"MOOD: {mood}")
-
-    if daily_topic:
-        sections.append(f"WHAT'S ON YOUR MIND: {daily_topic}")
-
-    if trending:
-        sections.append(f"SOMETHING YOU SAW ON YOUR PHONE: {trending}")
-
-    if pref_ctx:
-        sections.append(f"SHARED INTERESTS WITH THE USER: {pref_ctx}")
-
-    if not sections:
-        return ""
-
-    body = "\n\n".join(sections)
-
-    return (
-        "\u2501\u2501\u2501 YOUR INNER STATE TODAY \u2501\u2501\u2501\n\n"
-        f"{body}\n\n"
-        "RULES: Pick AT MOST ONE of these to weave in naturally. "
-        "Do NOT force any of them. "
-        "If nothing fits the conversation, ignore all of this.\n"
-        "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501"
-    )
-
-
+    idx = date.today().timetuple().tm_yday % len(scripts)
+    frase = scripts[idx]
+    return frase

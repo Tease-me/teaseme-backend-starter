@@ -29,9 +29,6 @@ from app.api import system_prompts as system_prompts_router
 
 from .api import health_router
 from app.scheduler import start_scheduler, stop_scheduler
-from app.utils.redis_pool import close_redis
-from app.api.elevenlabs import close_elevenlabs_client
-from app.api.preferences import router as preferences_router
 
 log = logging.getLogger("teaseme")
 logging.basicConfig(
@@ -41,6 +38,10 @@ logging.basicConfig(
 
 origins_str = os.getenv("CORS_ORIGINS", "")
 origins = [origin.strip() for origin in origins_str.split(",") if origin.strip()]
+
+
+from app.utils.redis_pool import close_redis
+from app.api.elevenlabs import close_elevenlabs_client
 
 
 @asynccontextmanager
@@ -58,6 +59,7 @@ async def lifespan(app: FastAPI):
     
     log.info("Closing ElevenLabs HTTP client...")
     await close_elevenlabs_client()
+
 
 
 app = FastAPI(lifespan=lifespan)
@@ -90,4 +92,3 @@ app.include_router(admin_router)
 app.include_router(relationship_router)
 app.include_router(re_engagement_router)
 app.include_router(verification_router)
-app.include_router(preferences_router)

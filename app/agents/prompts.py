@@ -12,7 +12,7 @@ MODEL = ChatOpenAI(
     api_key=settings.OPENAI_API_KEY,
     model_name="gpt-5.2",
     temperature=0.8,
-    max_tokens=200,  # Hard cap: 2-3 sentences max (~40-80 tokens)
+    max_tokens=512,
 )
 
 FACT_EXTRACTOR = ChatOpenAI(

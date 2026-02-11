@@ -33,7 +33,6 @@ from app.services.system_prompt_service import get_system_prompt
 from app.constants import prompt_keys
 from app.agents.prompts import GREETING_GENERATOR
 from app.utils.prompt_logging import log_prompt
-from app.services.relationship import _get_relationship_payload
 
 router = APIRouter(prefix="/elevenlabs", tags=["elevenlabs"])
 log = logging.getLogger(__name__)
@@ -365,15 +364,12 @@ async def _get_contextual_first_message_prompt(db: AsyncSession) -> ChatPromptTe
 
 
 async def _generate_contextual_greeting(
-    db: AsyncSession, chat_id: str, influencer_id: str,
-    relationship_state: Optional[str] = None,
+    db: AsyncSession, chat_id: str, influencer_id: str
 ) -> Optional[str]:
     """
     Generate a contextual greeting using parallel DB lookups for speed.
     Uses dedicated sessions to avoid AsyncSession concurrency issues.
     Performance: ~100-200ms faster than sequential approach.
-    
-    If relationship_state is provided, skips the extra DB fetch.
     """
     if GREETING_GENERATOR is None:
         return None
@@ -429,42 +425,18 @@ async def _generate_contextual_greeting(
         log.warning("contextual_greeting.parallel_fetch_failed chat=%s err=%s", chat_id, exc)
         db_messages, chat, influencer = [], None, None
 
-    # Second wave: last call + relationship (depends on user_id from chat)
+    # Second wave: last call (depends on user_id from chat)
     user_id = chat.user_id if chat else None
     last_call: Optional[CallRecord] = None
-    # Use provided state or default; only fetch if not pre-supplied
-    _rel_state = (relationship_state or "").upper() or "STRANGERS"
     
     if user_id:
-        if not relationship_state:
-            # Need to fetch relationship state — import here to avoid circular
-            from app.services.relationship_service import get_or_create_relationship
-            async def _fetch_relationship_standalone(uid: int) -> Optional[str]:
-                try:
-                    async with SessionLocal() as session:
-                        rel = await get_or_create_relationship(session, uid, influencer_id)
-                        return getattr(rel, "state", "STRANGERS").upper()
-                except Exception:
-                    return "STRANGERS"
-            try:
-                last_call, _rel_state = await asyncio.gather(
-                    _fetch_last_call_standalone(user_id),
-                    _fetch_relationship_standalone(user_id),
-                )
-            except Exception as exc:
-                log.warning(
-                    "contextual_greeting.call_fetch_failed chat=%s user=%s infl=%s err=%s",
-                    chat_id, user_id, influencer_id, exc,
-                )
-        else:
-            # State already known — just fetch last call
-            try:
-                last_call = await _fetch_last_call_standalone(user_id)
-            except Exception as exc:
-                log.warning(
-                    "contextual_greeting.call_fetch_failed chat=%s user=%s infl=%s err=%s",
-                    chat_id, user_id, influencer_id, exc,
-                )
+        try:
+            last_call = await _fetch_last_call_standalone(user_id)
+        except Exception as exc:
+            log.warning(
+                "contextual_greeting.call_fetch_failed chat=%s user=%s infl=%s err=%s",
+                chat_id, user_id, influencer_id, exc,
+            )
 
     # ============================================================
     # PHASE 2: Process fetched data (same logic as before)
@@ -528,7 +500,6 @@ async def _generate_contextual_greeting(
         prompt = await _get_contextual_first_message_prompt(db)
         chain = prompt.partial(
             influencer_name=persona_name,
-            relationship_state=_rel_state,
             gap_category=gap_category,
             gap_minutes=str(round(gap_minutes, 1)),
             call_ending_type=call_ending_type,
@@ -919,27 +890,26 @@ async def _poll_and_persist_conversation(
         if chat_id and normalized_transcript:
             try:
                 from app.agents.turn_handler import extract_and_store_facts_for_turn
-                user_messages = [t.get("text") or "" for t in normalized_transcript 
-                                 if (t.get("sender") or "").lower() in ("user", "human")]
-                all_user_text = "\n".join(m for m in user_messages if m.strip())
-                ctx_lines = [f"{t.get('sender', 'unknown')}: {t.get('text', '')}" 
+                user_messages = [t.get("message") or t.get("text") or "" for t in normalized_transcript 
+                                 if (t.get("role") or "").lower() in ("user", "human")]
+                last_user_msg = user_messages[-1] if user_messages else ""
+                ctx_lines = [f"{t.get('role', 'unknown')}: {t.get('message') or t.get('text') or ''}" 
                              for t in normalized_transcript]
                 recent_ctx = "\n".join(ctx_lines)
                 
-                if all_user_text:
+                if last_user_msg:
                     asyncio.create_task(
                         extract_and_store_facts_for_turn(
-                            message=all_user_text,
+                            message=last_user_msg,
                             recent_ctx=recent_ctx,
                             chat_id=chat_id,
                             cid=conversation_id,
                         )
                     )
                     log.info(
-                        "background.fact_extraction_scheduled conv=%s chat=%s user_turns=%d",
+                        "background.fact_extraction_scheduled conv=%s chat=%s",
                         conversation_id,
                         chat_id,
-                        len(user_messages),
                     )
             except Exception as exc:
                 log.warning(
@@ -1182,11 +1152,13 @@ async def _persist_transcript_to_chat(
     chat = await db.get(Chat, chat_id)
     user_id = chat.user_id if chat else None
     resolved_influencer_id = influencer_id or (chat.influencer_id if chat else None)
-    if not chat:
+    if not chat: 
         log.warning(
-            "_persist_transcript.chat_not_found conv=%s chat=%s",
-            conversation_id,
-            chat_id,
+            log.warning(
+                "_persist_transcript.chat_not_found conv=%s chat=%s",
+                conversation_id,
+                chat_id,
+            )
         )
     moderation_enabled =  bool(user_id and resolved_influencer_id)
     start_ts = (conversation_json.get("metadata") or {}).get("start_time_unix_secs")
@@ -1252,7 +1224,7 @@ async def _persist_transcript_to_chat(
                         context=context,
                         result=mod_result,
                     )
-                    log.warning(
+                    log.logging.warning(
                         "persist_transcript.violation chat=%s conv=%s msg=%s",
                         chat_id,
                         conversation_id,
@@ -1391,7 +1363,6 @@ async def get_signed_url(
 @router.get("/conversation-token")
 async def get_conversation_token(
     influencer_id: str,
-    user_timezone: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1411,6 +1382,7 @@ async def get_conversation_token(
         )
     
     agent_id = await get_agent_id_from_influencer(db, influencer_id)
+    # Sequential to avoid SQLAlchemy AsyncSession concurrent access issue
     prompt_template = await get_global_prompt(db, True)
     influencer = await db.get(Influencer, influencer_id)
     chat_id = await get_or_create_chat(db, user_id, influencer_id)
@@ -1419,47 +1391,26 @@ async def get_conversation_token(
         raise HTTPException(404, "Influencer not found")
     
     bio = influencer.bio_json or {}
-
-
-    from app.services.preference_service import (
-        get_persona_preference_labels,
-        build_preference_context,
-        build_preference_time_activity,
-        build_preference_daily_topic,
-    )
-    persona_likes, persona_dislikes, pref_keys = await get_persona_preference_labels(db, influencer_id)
+    persona_likes = bio.get("likes", [])
+    persona_dislikes = bio.get("dislikes", [])
+    if not isinstance(persona_likes, list):
+        persona_likes = []
+    if not isinstance(persona_dislikes, list):
+        persona_dislikes = []
     
-
+    # Get stage prompts from DB, with potential bio_json override
     stages = await get_relationship_stage_prompts(db)
     bio_stages = bio.get("stages", {})
     if isinstance(bio_stages, dict) and bio_stages:
         for key, val in bio_stages.items():
-            if val:
+            if val:  # Only override if value is non-empty
                 stages[key.upper()] = val
     personality_rules = bio.get("personality_rules", "")
     tone = bio.get("tone", "")
     mbti_archetype = bio.get("mbti_architype", "")
     mbti_addon = bio.get("mbti_rules", "")
     mbti_rules = await get_mbti_rules_for_archetype(db, mbti_archetype, mbti_addon)
-
-
-    pref_activity = build_preference_time_activity(pref_keys, user_timezone)
-    # Mood injection deferred until after rel is fetched (stage-gated)
-    mood = ""
-
-    daily_topic = build_preference_daily_topic(pref_keys, chat_id)
-
-    pref_ctx = await build_preference_context(db, int(user_id), influencer_id)
-
-    try:
-        from app.services.brave_search import fetch_trending_context
-        live_ctx = await fetch_trending_context(pref_keys, influencer_id, user_timezone)
-    except Exception as exc:
-        log.warning("conversation_token.brave_search_failed err=%s", exc)
-        live_ctx = ""
-
-    ctx_parts = [p for p in [daily_topic, pref_ctx, live_ctx] if p]
-    daily_context = " ".join(ctx_parts)
+    daily_context = ""
 
     history = redis_history(chat_id)
 
@@ -1472,11 +1423,6 @@ async def get_conversation_token(
     rel = await get_or_create_relationship(db, int(user_id), influencer_id)
     days_idle = apply_inactivity_decay(rel, now)
 
-    # Gate activity context on relationship stage (TALKING+)
-    _early_stages = {"HATE", "DISLIKE", "STRANGER", "STRANGERS"}
-    if pref_activity and getattr(rel, "state", "STRANGERS").upper() not in _early_stages:
-        mood = f"Right now you're {pref_activity}"
-
     can_ask = (
         rel.state == "DATING"
         and rel.safety >= 70
@@ -1486,15 +1432,6 @@ async def get_conversation_token(
     )
 
     dtr_goal = plan_dtr_goal(rel, can_ask)
-
-    # Load stored facts/memories so the AI knows what was discussed before
-    from app.agents.memory import get_recent_facts
-    try:
-        recent_facts = await get_recent_facts(db, chat_id, limit=15)
-        mem_block = "\n".join(recent_facts) if recent_facts else ""
-    except Exception as exc:
-        log.warning("conversation_token.facts_load_failed chat=%s err=%s", chat_id, exc)
-        mem_block = ""
 
     prompt = build_relationship_prompt(
         prompt_template,
@@ -1506,16 +1443,15 @@ async def get_conversation_token(
         persona_likes=persona_likes,
         persona_dislikes=persona_dislikes,
         mbti_rules=mbti_rules,
-        memories=mem_block,
+        memories="",
         daily_context=daily_context,
         last_user_message="",
         tone=tone,
-        mood=mood,
         analysis="",
         influencer_name=influencer.display_name,
     )
     
-    log_prompt(log, prompt, cid="", input="", history=[])
+    log_prompt(log, prompt, cid="", input="")
 
     try:
         client = await get_elevenlabs_client()
@@ -1545,10 +1481,7 @@ async def get_conversation_token(
     # chat_id already obtained at line 1350 - removed duplicate call
     credits_remainder_secs = await get_remaining_units(db, user_id, influencer_id, feature="live_chat")
 
-    greeting: Optional[str] = await _generate_contextual_greeting(
-        db, chat_id, influencer_id,
-        relationship_state=getattr(rel, "state", None),
-    )
+    greeting: Optional[str] = await _generate_contextual_greeting(db, chat_id, influencer_id)
     
     if not greeting:
         greeting = _pick_greeting(influencer_id, "random")
@@ -1558,7 +1491,7 @@ async def get_conversation_token(
         "agent_id": agent_id, 
         "credits_remainder_secs": credits_remainder_secs, 
         "greeting_used": greeting,
-        "prompt": prompt.format(input="", history=[]),
+        "prompt": prompt.format(input=""),
         "voice_id": influencer.voice_id or DEFAULT_ELEVENLABS_VOICE_ID,
         "native_language": influencer.native_language if influencer else "en",
     }
@@ -1836,14 +1769,6 @@ async def finalize_conversation(
             "finalize.update_call_record_failed conv=%s err=%s", conversation_id, exc
         )
 
-    # ── fetch latest relationship stats to send to frontend ──
-    rel_payload = None
-    if resolved_influencer_id:
-        try:
-            rel_payload = await _get_relationship_payload(db, body.user_id, resolved_influencer_id)
-        except Exception as exc:
-            log.warning("finalize.relationship_fetch_failed conv=%s err=%s", conversation_id, exc)
-
     if status == "failed":
         log.warning("Conversation %s ended as FAILED; skipping charge.", conversation_id)
         return {
@@ -1855,7 +1780,6 @@ async def finalize_conversation(
             "meta": meta,
             "transcript_synced": transcript_synced,
             "refresh_required": transcript_synced,
-            "relationship": rel_payload,
         }
 
     if status != "done":
@@ -1869,7 +1793,6 @@ async def finalize_conversation(
             "note": "Conversation not done yet; waiting for webhook or try again later.",
             "transcript_synced": transcript_synced,
             "refresh_required": transcript_synced,
-            "relationship": rel_payload,
         }
 
     if body.charge_if_not_billed and not await was_already_billed(db, conversation_id):
@@ -1897,7 +1820,6 @@ async def finalize_conversation(
             "meta": meta,
             "transcript_synced": transcript_synced,
             "refresh_required": transcript_synced,
-            "relationship": rel_payload,
         }
 
     return {
@@ -1909,7 +1831,6 @@ async def finalize_conversation(
         "meta": meta,
         "transcript_synced": transcript_synced,
         "refresh_required": transcript_synced,
-        "relationship": rel_payload,
     }
 
 
