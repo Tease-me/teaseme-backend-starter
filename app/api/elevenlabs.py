@@ -1416,7 +1416,8 @@ async def get_conversation_token(
 
 
     pref_activity = build_preference_time_activity(pref_keys, user_timezone)
-    mood = f"Right now you're {pref_activity}" if pref_activity else ""
+    # Mood injection deferred until after rel is fetched (stage-gated)
+    mood = ""
 
     daily_topic = build_preference_daily_topic(pref_keys, chat_id)
 
@@ -1442,6 +1443,11 @@ async def get_conversation_token(
     now = datetime.now(timezone.utc)
     rel = await get_or_create_relationship(db, int(user_id), influencer_id)
     days_idle = apply_inactivity_decay(rel, now)
+
+    # Gate activity context on relationship stage (TALKING+)
+    _early_stages = {"HATE", "DISLIKE", "STRANGER", "STRANGERS"}
+    if pref_activity and getattr(rel, "state", "STRANGERS").upper() not in _early_stages:
+        mood = f"Right now you're {pref_activity}"
 
     can_ask = (
         rel.state == "DATING"

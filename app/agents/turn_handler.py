@@ -176,8 +176,11 @@ async def handle_turn(
     personality_rules = bio.get("personality_rules", "")
     tone = bio.get("tone", "")
 
+    rel_state = getattr(rel, "state", "STRANGERS").upper()
+    _early_stages = {"HATE", "DISLIKE", "STRANGER", "STRANGERS"}
+
     pref_activity = build_preference_time_activity(pref_keys, user_timezone)
-    if pref_activity:
+    if pref_activity and rel_state not in _early_stages:
         mood = f"{mood}. Right now you're {pref_activity}" if mood else f"Right now you're {pref_activity}"
 
     daily_topic = build_preference_daily_topic(pref_keys, chat_id) if not history.messages else ""
