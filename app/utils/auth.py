@@ -1,10 +1,10 @@
-from datetime import datetime, timedelta, timezone
-from jose import jwt
-from app.core.config import settings
+"""
+Backward compatibility shim for app.utils.auth imports.
+This file maintains compatibility with existing imports like:
+    from app.utils.auth import create_token
 
-def create_token(data: dict, secret: str, expires_delta: timedelta):
-    to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + expires_delta
-    to_encode.update({"exp": expire})
-    
-    return jwt.encode(to_encode, secret, algorithm=settings.ALGORITHM)
+New code should use:
+    from app.utils.auth.tokens import create_token
+"""
+
+from .auth.tokens import *  # noqa: F401, F403
