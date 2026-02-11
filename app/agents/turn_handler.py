@@ -182,11 +182,14 @@ async def handle_turn(
 
     daily_topic = build_preference_daily_topic(pref_keys, chat_id) if not history.messages else ""
 
-    from datetime import date
+    from app.agents.prompt_utils import pick_daily_script, build_inner_state
     today_script = ""
-    if influencer.daily_scripts:
-        idx = date.today().timetuple().tm_yday % len(influencer.daily_scripts)
-        today_script = influencer.daily_scripts[idx]
+    if not history.messages and influencer.daily_scripts:
+        today_script = pick_daily_script(
+            influencer.daily_scripts,
+            rel_state=getattr(rel, "state", "STRANGERS"),
+            chat_id=chat_id,
+        )
 
     pref_ctx = ""
     if user_id:
@@ -194,13 +197,19 @@ async def handle_turn(
 
     try:
         from app.services.brave_search import fetch_trending_context
-        live_ctx = await fetch_trending_context(pref_keys, influencer_id, user_timezone)
+        live_ctx = await fetch_trending_context(
+            pref_keys, influencer_id, user_timezone, mood_hint=today_script,
+        )
     except Exception as exc:
         log.warning("[%s] Brave search failed (non-fatal): %s", cid, exc)
         live_ctx = ""
 
-    ctx_parts = [p for p in [today_script, daily_topic, pref_ctx, live_ctx] if p]
-    daily_context = " ".join(ctx_parts)
+    daily_context = build_inner_state(
+        mood=today_script,
+        daily_topic=daily_topic,
+        trending=live_ctx,
+        pref_ctx=pref_ctx,
+    )
 
     prompt = build_relationship_prompt(
         prompt_template,

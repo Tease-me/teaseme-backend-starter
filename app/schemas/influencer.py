@@ -7,7 +7,7 @@ class InfluencerBase(BaseModel):
     display_name: str
     voice_id: Optional[str] = None
     prompt_template: Optional[str] = None
-    daily_scripts: Optional[List[str]] = None
+    daily_scripts: Optional[Dict[str, List[str]] | List[str]] = None
     bio_json: Optional[Dict[str, Any]] = None
 
     influencer_agent_id_third_part: Optional[str] = None
@@ -31,7 +31,7 @@ class InfluencerUpdate(BaseModel):
     display_name: Optional[str] = None
     voice_id: Optional[str] = None
     prompt_template: Optional[str] = None
-    daily_scripts: Optional[List[str]] = None
+    daily_scripts: Optional[Dict[str, List[str]] | List[str]] = None
     bio_json: Optional[Dict[str, Any]] = None
     influencer_agent_id_third_part: Optional[str] = None
     native_language: Optional[str] = None

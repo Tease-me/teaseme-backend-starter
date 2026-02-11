@@ -110,6 +110,7 @@ async def update_system_prompt(
             row.name = name
         if prompt_type is not None:
             row.type = prompt_type
+        row.version = (row.version or 0) + 1
         row.updated_at = now
     else:
         row = SystemPrompt(

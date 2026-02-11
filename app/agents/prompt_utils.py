@@ -261,9 +261,64 @@ def build_relationship_prompt(
     filtered = {k: v for k, v in partial_vars.items() if k in expected}
     return prompt_template.partial(**filtered)
 
+# ── stage-aware daily-script selection ────────────────────────────
+_ALL_TIERS = ["universal", "talking", "flirting", "dating"]
+
+_STAGE_UNLOCK: dict[str, list[str]] = {
+    "HATE": [],
+    "DISLIKE": [],
+    "STRANGER": ["universal"],
+    "STRANGERS": ["universal"],
+    "TALKING": ["universal", "talking"],
+    "FRIENDS": ["universal", "talking"],
+    "FLIRTING": ["universal", "talking", "flirting"],
+    "DATING": _ALL_TIERS,
+    "IN LOVE": _ALL_TIERS,
+    "GIRLFRIEND": _ALL_TIERS,
+}
+
+
+def pick_daily_script(
+    daily_scripts,
+    rel_state: str = "STRANGERS",
+    chat_id: str = "",
+) -> str:
+    """Select a stage-appropriate daily script.
+
+    Accepts either new dict format ``{"universal": [...], ...}``
+    or legacy flat ``[...]``.  Returns "" when nothing is eligible.
+    """
+    import hashlib
+
+    if not daily_scripts:
+        return ""
+
+    # ── collect eligible scripts ──────────────────────────────────
+    state_upper = (rel_state or "STRANGERS").strip().upper()
+    allowed_tiers = _STAGE_UNLOCK.get(state_upper, ["universal"])
+
+    if isinstance(daily_scripts, dict):
+        pool: list[str] = []
+        for tier in allowed_tiers:
+            pool.extend(daily_scripts.get(tier, []))
+    elif isinstance(daily_scripts, list):
+        # legacy flat list – treat everything as universal
+        pool = list(daily_scripts)
+    else:
+        return ""
+
+    if not pool:
+        return ""
+
+    # ── deterministic but daily-rotating pick ─────────────────────
+    seed = hashlib.md5(f"{date.today().isoformat()}:{chat_id}".encode()).hexdigest()
+    rng = random.Random(seed)
+    return rng.choice(pool)
+
+
 async def get_today_script(
     db: AsyncSession = Depends(get_db),
-    influencer_id: str = None
+    influencer_id: str = None,
 ) -> str:
     if not influencer_id:
         raise HTTPException(400, "influencer_id is required")
@@ -271,6 +326,50 @@ async def get_today_script(
     scripts = influencer.daily_scripts if influencer and influencer.daily_scripts else []
     if not scripts:
         return ""
-    idx = date.today().timetuple().tm_yday % len(scripts)
-    frase = scripts[idx]
-    return frase
+    return pick_daily_script(scripts)
+
+
+# ── unified inner-state brief ────────────────────────────────────
+
+def build_inner_state(
+    *,
+    mood: str = "",
+    daily_topic: str = "",
+    trending: str = "",
+    pref_ctx: str = "",
+) -> str:
+    """Assemble a structured 'Inner State' brief from separate context pieces.
+
+    Each non-empty piece gets a labeled section.  The overall block includes
+    a "pick at most one" guardrail so the LLM doesn't force all of them
+    into a single reply.
+    """
+    sections: list[str] = []
+
+    if mood:
+        sections.append(f"MOOD: {mood}")
+
+    if daily_topic:
+        sections.append(f"WHAT'S ON YOUR MIND: {daily_topic}")
+
+    if trending:
+        sections.append(f"SOMETHING YOU SAW ON YOUR PHONE: {trending}")
+
+    if pref_ctx:
+        sections.append(f"SHARED INTERESTS WITH THE USER: {pref_ctx}")
+
+    if not sections:
+        return ""
+
+    body = "\n\n".join(sections)
+
+    return (
+        "\u2501\u2501\u2501 YOUR INNER STATE TODAY \u2501\u2501\u2501\n\n"
+        f"{body}\n\n"
+        "RULES: Pick AT MOST ONE of these to weave in naturally. "
+        "Do NOT force any of them. "
+        "If nothing fits the conversation, ignore all of this.\n"
+        "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501"
+    )
+
+

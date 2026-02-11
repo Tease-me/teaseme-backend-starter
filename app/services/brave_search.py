@@ -214,17 +214,80 @@ _PREF_TIME_QUERIES: dict[str, dict[str, list[str]]] = {
 }
 
 
+# ── mood-hint → preference key boost mapping ─────────────────────
+_MOOD_BOOST: dict[str, list[str]] = {
+    "adventurous":  ["hobby_traveling", "social_roadtrips"],
+    "spontaneous":  ["hobby_traveling", "social_roadtrips"],
+    "cozy":         ["social_cozy_nights", "ent_reality_tv"],
+    "lazy":         ["social_cozy_nights", "ent_reality_tv"],
+    "blanket":      ["social_cozy_nights"],
+    "music":        ["ent_pop", "ent_hiphop", "ent_concerts"],
+    "song":         ["ent_pop", "ent_concerts"],
+    "humming":      ["ent_pop", "ent_concerts"],
+    "creative":     ["hobby_art", "hobby_photography"],
+    "artsy":        ["hobby_art", "hobby_photography"],
+    "competitive":  ["ent_gaming"],
+    "game":         ["ent_gaming"],
+    "horror":       ["ent_horror"],
+    "scary":        ["ent_horror"],
+    "dream":        ["culture_astrology"],
+    "cosmic":       ["culture_astrology"],
+    "workout":      ["hobby_gym"],
+    "gym":          ["hobby_gym"],
+    "beach":        ["social_beach", "vibe_beach"],
+    "ocean":        ["social_beach", "vibe_beach"],
+    "sushi":        ["food_sushi"],
+    "coffee":       ["food_coffee"],
+    "wine":         ["food_wine"],
+    "cooking":      ["food_cooking"],
+    "party":        ["social_partying"],
+    "fashion":      ["style_designer", "style_streetwear"],
+    "outfit":       ["style_streetwear", "style_designer"],
+    "skincare":     ["hobby_skincare"],
+    "yoga":         ["hobby_yoga"],
+    "zen":          ["hobby_yoga"],
+    "true crime":   ["culture_true_crime"],
+    "podcast":      ["culture_podcasts"],
+    "tiktok":       ["culture_tiktok"],
+    "meme":         ["culture_memes"],
+}
+
+
+def _extract_mood_pref_keys(mood_hint: str) -> list[str]:
+    """Scan mood text for keywords and return boosted preference keys."""
+    if not mood_hint:
+        return []
+    mood_lower = mood_hint.lower()
+    boosted: list[str] = []
+    for keyword, pref_keys in _MOOD_BOOST.items():
+        if keyword in mood_lower:
+            boosted.extend(pref_keys)
+    # deduplicate while preserving order
+    seen: set[str] = set()
+    return [k for k in boosted if not (k in seen or seen.add(k))]
+
+
 def _build_search_queries(
     persona_like_keys: list[str],
     time_bucket: str,
     is_weekend: bool,
     max_queries: int = 2,
+    mood_hint: str = "",
 ) -> list[str]:
-    """Pick search queries relevant to the persona's liked preferences."""
+    """Pick search queries relevant to the persona's liked preferences.
+
+    When *mood_hint* is provided, preference keys matching mood keywords
+    are boosted to the front of the candidate pool so Brave results
+    align with the persona's current vibe.
+    """
     available: list[str] = []
     day_key = "weekend" if is_weekend else "weekday"
 
-    for key in persona_like_keys:
+    # Boost mood-aligned pref keys to the front
+    mood_keys = _extract_mood_pref_keys(mood_hint)
+    ordered_keys = mood_keys + [k for k in persona_like_keys if k not in mood_keys]
+
+    for key in ordered_keys:
         time_map = _PREF_TIME_QUERIES.get(key)
         if not time_map:
             continue
@@ -355,8 +418,13 @@ async def fetch_trending_context(
     persona_like_keys: list[str],
     influencer_id: str,
     user_timezone: str | None = None,
+    mood_hint: str = "",
 ) -> str:
-    """Main entry point — returns a formatted live context string for the persona."""
+    """Main entry point — returns a formatted live context string for the persona.
+
+    When *mood_hint* is provided, Brave queries are biased toward topics
+    that match the persona's current mood.
+    """
     if not settings.BRAVE_SEARCH_API_KEY:
         return ""
 
@@ -374,7 +442,9 @@ async def fetch_trending_context(
     except Exception as exc:
         log.warning("brave_search.cache_read_error err=%s", exc)
 
-    queries = _build_search_queries(persona_like_keys, time_bucket, is_weekend)
+    queries = _build_search_queries(
+        persona_like_keys, time_bucket, is_weekend, mood_hint=mood_hint,
+    )
     log.info(
         "brave_search.fetching influencer=%s bucket=%s day=%s queries=%s",
         influencer_id, time_bucket, day_type, queries,
