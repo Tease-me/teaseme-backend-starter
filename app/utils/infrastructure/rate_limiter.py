@@ -7,7 +7,7 @@ from fastapi import HTTPException, Request, Response
 from starlette.status import HTTP_429_TOO_MANY_REQUESTS
 
 from app.core.config import settings
-from app.utils.redis_pool import get_redis
+from app.utils.infrastructure.redis_pool import get_redis
 
 log = logging.getLogger(__name__)
 

@@ -40,7 +40,7 @@ origins_str = os.getenv("CORS_ORIGINS", "")
 origins = [origin.strip() for origin in origins_str.split(",") if origin.strip()]
 
 
-from app.utils.redis_pool import close_redis
+from app.utils.infrastructure.redis_pool import close_redis
 from app.api.elevenlabs import close_elevenlabs_client
 
 

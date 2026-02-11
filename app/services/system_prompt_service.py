@@ -8,7 +8,7 @@ import logging
 
 from app.db.models import SystemPrompt
 from app.db.session import SessionLocal
-from app.utils.redis_pool import get_redis
+from app.utils.infrastructure.redis_pool import get_redis
 
 log = logging.getLogger(__name__)
 

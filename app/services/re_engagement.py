@@ -14,7 +14,7 @@ from app.db.models import (
     Subscription,
     Message,
 )
-from app.utils.push import send_push_rich
+from app.utils.messaging.push import send_push_rich
 from app.agents.turn_handler import handle_turn
 from app.services.chat_service import get_or_create_chat
 from app.services.system_prompt_service import get_system_prompt

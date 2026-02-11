@@ -11,18 +11,18 @@ from app.agents.turn_handler_18 import handle_turn_18
 from app.db.session import get_db
 from app.db.models import Message18, Chat18
 from jose import jwt
-from app.api.utils import get_embedding
+from app.services.embeddings import get_embedding
 from starlette.websockets import WebSocketDisconnect
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.chat_service import get_or_create_chat18
 from app.schemas.chat import ChatCreateRequest,PaginatedMessages
 from app.db.models import User
-from app.utils.deps import get_current_user
+from app.utils.auth.dependencies import get_current_user
 
 from app.core.config import settings
-from app.utils.chat import transcribe_audio, synthesize_audio_with_elevenlabs_V3
-from app.utils.s3 import save_audio_to_s3, save_ia_audio_to_s3, generate_presigned_url, message18_to_schema_with_presigned
+from app.utils.messaging.chat import transcribe_audio, synthesize_audio_with_elevenlabs_V3
+from app.utils.storage.s3 import save_audio_to_s3, save_ia_audio_to_s3, generate_presigned_url, message18_to_schema_with_presigned
 from app.services.billing import charge_feature, get_duration_seconds, can_afford
 from app.services.influencer_subscriptions import get_valid_subscription
 from app.moderation import moderate_message, handle_violation

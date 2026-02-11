@@ -39,14 +39,14 @@ from app.schemas.pre_influencer import (
     SurveyPromptResponse,
 )
 from app.core.config import settings
-from app.utils.email import (
+from app.utils.messaging.email import (
     send_new_influencer_email_with_picture,
     send_profile_survey_email,
     send_influencer_survey_completed_email_to_promoter,
 )
 import mimetypes
 from app.api.elevenlabs import _elevenlabs_create_voice, _push_prompt_to_elevenlabs, _validate_voice_exists
-from app.utils.s3 import s3,save_influencer_photo_to_s3, generate_presigned_url, delete_file_from_s3, get_s3_object_bytes,list_influencer_audio_keys
+from app.utils.storage.s3 import s3,save_influencer_photo_to_s3, generate_presigned_url, delete_file_from_s3, get_s3_object_bytes,list_influencer_audio_keys
 from app.services.firstpromoter import (
     fp_create_promoter,
     fp_find_promoter_id_by_ref_token,

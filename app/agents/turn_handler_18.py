@@ -8,8 +8,8 @@ from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from app.agents.prompt_utils import pick_time_mood
 from app.db.models import Influencer, Message18, User
 from app.agents.prompts import XAI_MODEL
-from app.utils.tts_sanitizer import sanitize_tts_text
-from app.utils.prompt_logging import log_prompt
+from app.utils.messaging.tts_sanitizer import sanitize_tts_text
+from app.utils.logging.prompt_logging import log_prompt
 from app.services.system_prompt_service import get_system_prompt
 from app.constants import prompt_keys
 from langchain_core.prompts import ChatPromptTemplate

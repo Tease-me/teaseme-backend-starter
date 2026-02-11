@@ -1,4 +1,4 @@
-from app.api.utils import get_embedding, get_embeddings_batch, search_similar_memories, search_similar_messages, upsert_memory
+from app.services.embeddings import get_embedding, get_embeddings_batch, search_similar_memories, search_similar_messages, upsert_memory
 from sqlalchemy import select
 from sqlalchemy.sql import func
 from app.db.models import Memory

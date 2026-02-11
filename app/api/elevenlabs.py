@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 from app.core.config import settings
 from app.db.models import Influencer, Chat, Message, CallRecord, User, PreInfluencer
 from app.db.session import get_db
-from app.utils.deps import get_current_user
+from app.utils.auth.dependencies import get_current_user
 from app.schemas.elevenlabs import FinalizeConversationBody, RegisterConversationBody, UpdatePromptBody
 from app.services.billing import charge_feature,_get_influencer_id_from_chat
 from sqlalchemy import select
@@ -28,11 +28,11 @@ from app.services.chat_service import get_or_create_chat
 from app.agents.turn_handler import _norm, redis_history
 from langchain_core.prompts import ChatPromptTemplate
 from app.db.session import SessionLocal
-from app.api.utils import get_embedding
+from app.services.embeddings import get_embedding
 from app.services.system_prompt_service import get_system_prompt
 from app.constants import prompt_keys
 from app.agents.prompts import GREETING_GENERATOR
-from app.utils.prompt_logging import log_prompt
+from app.utils.logging.prompt_logging import log_prompt
 
 router = APIRouter(prefix="/elevenlabs", tags=["elevenlabs"])
 log = logging.getLogger(__name__)
@@ -1260,7 +1260,7 @@ async def _persist_transcript_to_chat(
     texts_to_embed = [e["text"] for e in pending_entries]
     embeddings: List[Optional[List[float]]] = []
     try:
-        from app.api.utils import get_embeddings_batch
+        from app.services.embeddings import get_embeddings_batch
         embeddings = await get_embeddings_batch(texts_to_embed)
     except Exception as exc:
         log.warning("persist_transcript.batch_embed_failed chat=%s err=%s", chat_id, exc)
