@@ -5,15 +5,14 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 
-from app.agents.prompt_utils import pick_time_mood
 from app.db.models import Influencer, Message18, User
 from app.agents.prompts import XAI_MODEL
+from app.agents.prompt_utils import get_time_context
 from app.utils.messaging.tts_sanitizer import sanitize_tts_text
 from app.utils.logging.prompt_logging import log_prompt
 from app.services.system_prompt_service import get_system_prompt
 from app.constants import prompt_keys
 from langchain_core.prompts import ChatPromptTemplate
-from app.agents.prompt_utils import pick_time_mood
 log = logging.getLogger("teaseme-turn-18")
 
 
@@ -61,11 +60,9 @@ async def handle_turn_18(
     log.info("[%s] START(18) persona=%s chat=%s user=%s", cid, influencer_id, chat_id, user_id)
 
     # Phase 1: Fetch cached system prompts in parallel (Redis cache, no DB contention)
-    base_adult_prompt, base_audio_prompt, weekday_prompt, weekend_prompt = await asyncio.gather(
+    base_adult_prompt, base_audio_prompt = await asyncio.gather(
         get_system_prompt(db, prompt_keys.BASE_ADULT_PROMPT),
         get_system_prompt(db, prompt_keys.BASE_ADULT_AUDIO_PROMPT),
-        get_system_prompt(db, prompt_keys.WEEKDAY_TIME_PROMPT_ADULT),
-        get_system_prompt(db, prompt_keys.WEEKEND_TIME_PROMPT_ADULT),
     )
     
     # Phase 2: DB operations sequentially (AsyncSession doesn't allow concurrent access)
@@ -87,10 +84,16 @@ async def handle_turn_18(
             ("user", "{input}"),
         ]
     )
-    mood = pick_time_mood(weekday_prompt, weekend_prompt, user_timezone)
+    
+    # Generate simple time context instead of picking from mood arrays
+    time_context = get_time_context(user_timezone)
 
     user_adult_prompt = user.custom_adult_prompt if user else None
-    prompt = prompt.partial(user_prompt=user_adult_prompt, history=recent_ctx, mood=mood)
+    prompt = prompt.partial(
+        user_prompt=user_adult_prompt or "", 
+        history=recent_ctx, 
+        time_context=time_context
+    )
     chain = prompt | XAI_MODEL
 
     try:
