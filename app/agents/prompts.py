@@ -53,6 +53,7 @@ OPENAI_ASSISTANT_LLM = ChatOpenAI(
     model=DEFAULT_AGENT_MODEL,
     temperature=0.7,
     max_tokens=400,
+    store=False
 )
 
 try:
@@ -61,6 +62,7 @@ try:
         model="gpt-4.1",
         temperature=0.7,
         max_tokens=120,
+        store=False
     )
 except Exception as exc:
     GREETING_GENERATOR = None
