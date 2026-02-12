@@ -1,4 +1,5 @@
 import json
+import time
 from app.services.system_prompt_service import get_system_prompt
 from app.constants import prompt_keys
 
@@ -40,8 +41,21 @@ async def classify_signals(
         message=message
     )
     try:
+        t0 = time.perf_counter()
         r = await llm.ainvoke(prompt)
+        sig_ms = int((time.perf_counter() - t0) * 1000)
         data = json.loads((r.content or "").strip())
+
+        # Track convo analysis usage
+        from app.services.token_tracker import track_usage_bg
+        usage = getattr(r, "usage_metadata", None) or {}
+        track_usage_bg(
+            "system", "openai", "gpt-4o-mini", "convo_analysis",
+            input_tokens=usage.get("input_tokens"),
+            output_tokens=usage.get("output_tokens"),
+            total_tokens=usage.get("total_tokens"),
+            latency_ms=sig_ms,
+        )
     except Exception:
         data = {}
 

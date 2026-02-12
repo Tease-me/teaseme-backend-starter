@@ -535,3 +535,390 @@ async def get_moderation_dashboard(
             ]
         }
     }
+
+
+# ── API Usage Analytics ──────────────────────────────────────────
+from app.db.models.api_usage import ApiUsageLog
+from datetime import timedelta
+
+
+@router.get("/api-usage/summary")
+async def get_api_usage_summary(
+    period: str = "24h",
+    group_by: str = "category",
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Aggregated API usage analytics.
+
+    Query params:
+        period: "1h" | "24h" | "7d" | "30d" | "90d"
+        group_by: "category" | "model" | "provider" | "purpose" | "user" | "influencer"
+    """
+    if current_user.id != 1:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    period_map = {
+        "1h": timedelta(hours=1),
+        "24h": timedelta(hours=24),
+        "7d": timedelta(days=7),
+        "30d": timedelta(days=30),
+        "90d": timedelta(days=90),
+    }
+    delta = period_map.get(period)
+    if not delta:
+        raise HTTPException(400, f"Invalid period. Use: {', '.join(period_map.keys())}")
+
+    cutoff = datetime.now(timezone.utc) - delta
+
+    group_col_map = {
+        "category": ApiUsageLog.category,
+        "model": ApiUsageLog.model,
+        "provider": ApiUsageLog.provider,
+        "purpose": ApiUsageLog.purpose,
+        "user": ApiUsageLog.user_id,
+        "influencer": ApiUsageLog.influencer_id,
+    }
+    group_col = group_col_map.get(group_by)
+    if not group_col:
+        raise HTTPException(400, f"Invalid group_by. Use: {', '.join(group_col_map.keys())}")
+
+    stmt = (
+        select(
+            group_col.label("group_key"),
+            func.count().label("total_calls"),
+            func.sum(ApiUsageLog.input_tokens).label("total_input_tokens"),
+            func.sum(ApiUsageLog.output_tokens).label("total_output_tokens"),
+            func.sum(ApiUsageLog.total_tokens).label("total_tokens"),
+            func.sum(ApiUsageLog.estimated_cost_micros).label("total_cost_micros"),
+            func.avg(ApiUsageLog.latency_ms).label("avg_latency_ms"),
+            func.max(ApiUsageLog.latency_ms).label("max_latency_ms"),
+            func.sum(ApiUsageLog.duration_secs).label("total_duration_secs"),
+            func.count().filter(ApiUsageLog.success == False).label("error_count"),
+        )
+        .where(ApiUsageLog.created_at >= cutoff)
+        .group_by(group_col)
+        .order_by(func.count().desc())
+    )
+
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    return {
+        "period": period,
+        "group_by": group_by,
+        "cutoff": cutoff.isoformat(),
+        "groups": [
+            {
+                "key": str(r.group_key) if r.group_key is not None else "unknown",
+                "total_calls": r.total_calls,
+                "total_input_tokens": r.total_input_tokens or 0,
+                "total_output_tokens": r.total_output_tokens or 0,
+                "total_tokens": r.total_tokens or 0,
+                "total_cost_micros": r.total_cost_micros or 0,
+                "estimated_cost_usd": round((r.total_cost_micros or 0) / 1_000_000, 4),
+                "avg_latency_ms": round(r.avg_latency_ms, 1) if r.avg_latency_ms else None,
+                "max_latency_ms": r.max_latency_ms,
+                "total_duration_secs": round(r.total_duration_secs, 1) if r.total_duration_secs else None,
+                "error_count": r.error_count or 0,
+                "error_rate": round((r.error_count or 0) / r.total_calls * 100, 2) if r.total_calls > 0 else 0,
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.get("/api-usage/top-users")
+async def get_top_api_users(
+    period: str = "24h",
+    limit: int = 20,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Top users by API consumption."""
+    if current_user.id != 1:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    period_map = {"1h": 1, "24h": 24, "7d": 168, "30d": 720, "90d": 2160}
+    hours = period_map.get(period, 24)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+    stmt = (
+        select(
+            ApiUsageLog.user_id,
+            func.count().label("total_calls"),
+            func.sum(ApiUsageLog.total_tokens).label("total_tokens"),
+            func.sum(ApiUsageLog.estimated_cost_micros).label("total_cost_micros"),
+        )
+        .where(ApiUsageLog.created_at >= cutoff, ApiUsageLog.user_id.isnot(None))
+        .group_by(ApiUsageLog.user_id)
+        .order_by(func.sum(ApiUsageLog.estimated_cost_micros).desc())
+        .limit(limit)
+    )
+
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    return {
+        "period": period,
+        "users": [
+            {
+                "user_id": r.user_id,
+                "total_calls": r.total_calls,
+                "total_tokens": r.total_tokens or 0,
+                "total_cost_micros": r.total_cost_micros or 0,
+                "estimated_cost_usd": round((r.total_cost_micros or 0) / 1_000_000, 4),
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.get("/api-usage/top-influencers")
+async def get_top_api_influencers(
+    period: str = "24h",
+    limit: int = 20,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Top influencers by API usage they drive."""
+    if current_user.id != 1:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    period_map = {"1h": 1, "24h": 24, "7d": 168, "30d": 720, "90d": 2160}
+    hours = period_map.get(period, 24)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+    stmt = (
+        select(
+            ApiUsageLog.influencer_id,
+            func.count().label("total_calls"),
+            func.sum(ApiUsageLog.total_tokens).label("total_tokens"),
+            func.sum(ApiUsageLog.estimated_cost_micros).label("total_cost_micros"),
+            func.sum(ApiUsageLog.duration_secs).label("total_call_secs"),
+        )
+        .where(ApiUsageLog.created_at >= cutoff, ApiUsageLog.influencer_id.isnot(None))
+        .group_by(ApiUsageLog.influencer_id)
+        .order_by(func.sum(ApiUsageLog.estimated_cost_micros).desc())
+        .limit(limit)
+    )
+
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    return {
+        "period": period,
+        "influencers": [
+            {
+                "influencer_id": r.influencer_id,
+                "total_calls": r.total_calls,
+                "total_tokens": r.total_tokens or 0,
+                "total_cost_micros": r.total_cost_micros or 0,
+                "estimated_cost_usd": round((r.total_cost_micros or 0) / 1_000_000, 4),
+                "total_call_secs": round(r.total_call_secs, 1) if r.total_call_secs else 0,
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.get("/api-usage/errors")
+async def get_api_errors(
+    period: str = "24h",
+    limit: int = 50,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recent API errors for debugging."""
+    if current_user.id != 1:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    period_map = {"1h": 1, "24h": 24, "7d": 168, "30d": 720, "90d": 2160}
+    hours = period_map.get(period, 24)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+    stmt = (
+        select(ApiUsageLog)
+        .where(ApiUsageLog.created_at >= cutoff, ApiUsageLog.success == False)
+        .order_by(ApiUsageLog.created_at.desc())
+        .limit(limit)
+    )
+
+    result = await db.execute(stmt)
+    errors = result.scalars().all()
+
+    return {
+        "period": period,
+        "total_errors": len(errors),
+        "errors": [
+            {
+                "id": e.id,
+                "created_at": e.created_at.isoformat(),
+                "category": e.category,
+                "provider": e.provider,
+                "model": e.model,
+                "purpose": e.purpose,
+                "user_id": e.user_id,
+                "influencer_id": e.influencer_id,
+                "error_message": e.error_message,
+            }
+            for e in errors
+        ],
+    }
+
+
+from app.db.models.api_usage import ApiUsageMonthly
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+
+@router.post("/api-usage/rollup")
+async def trigger_monthly_rollup(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Aggregate raw api_usage_logs into 30-day monthly summaries.
+    Safe to run repeatedly — uses upsert (ON CONFLICT DO UPDATE).
+    Call this on a schedule (e.g. daily cron) or manually.
+    """
+    if current_user.id != 1:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    # Fetch all raw logs grouped by 30-day period + keys
+    stmt = (
+        select(
+            func.date_trunc('month', ApiUsageLog.created_at).label("period_start"),
+            ApiUsageLog.category,
+            ApiUsageLog.provider,
+            ApiUsageLog.model,
+            ApiUsageLog.purpose,
+            func.count().label("total_calls"),
+            func.coalesce(func.sum(ApiUsageLog.input_tokens), 0).label("total_input_tokens"),
+            func.coalesce(func.sum(ApiUsageLog.output_tokens), 0).label("total_output_tokens"),
+            func.coalesce(func.sum(ApiUsageLog.total_tokens), 0).label("total_tokens"),
+            func.coalesce(func.sum(ApiUsageLog.estimated_cost_micros), 0).label("total_cost_micros"),
+            func.coalesce(func.sum(ApiUsageLog.duration_secs), 0).label("total_duration_secs"),
+            func.avg(ApiUsageLog.latency_ms).label("avg_latency_ms"),
+            func.max(ApiUsageLog.latency_ms).label("max_latency_ms"),
+            func.count().filter(ApiUsageLog.success == False).label("error_count"),
+        )
+        .group_by(
+            func.date_trunc('month', ApiUsageLog.created_at),
+            ApiUsageLog.category,
+            ApiUsageLog.provider,
+            ApiUsageLog.model,
+            ApiUsageLog.purpose,
+        )
+    )
+
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    upserted = 0
+    for r in rows:
+        values = {
+            "period_start": r.period_start,
+            "category": r.category,
+            "provider": r.provider,
+            "model": r.model,
+            "purpose": r.purpose,
+            "total_calls": r.total_calls,
+            "total_input_tokens": r.total_input_tokens,
+            "total_output_tokens": r.total_output_tokens,
+            "total_tokens": r.total_tokens,
+            "total_cost_micros": r.total_cost_micros,
+            "total_duration_secs": float(r.total_duration_secs or 0),
+            "avg_latency_ms": float(r.avg_latency_ms) if r.avg_latency_ms else None,
+            "max_latency_ms": r.max_latency_ms,
+            "error_count": r.error_count or 0,
+        }
+        insert_stmt = pg_insert(ApiUsageMonthly).values(**values)
+        upsert_stmt = insert_stmt.on_conflict_do_update(
+            index_elements=["period_start", "category", "provider", "model", "purpose"],
+            set_={
+                "total_calls": insert_stmt.excluded.total_calls,
+                "total_input_tokens": insert_stmt.excluded.total_input_tokens,
+                "total_output_tokens": insert_stmt.excluded.total_output_tokens,
+                "total_tokens": insert_stmt.excluded.total_tokens,
+                "total_cost_micros": insert_stmt.excluded.total_cost_micros,
+                "total_duration_secs": insert_stmt.excluded.total_duration_secs,
+                "avg_latency_ms": insert_stmt.excluded.avg_latency_ms,
+                "max_latency_ms": insert_stmt.excluded.max_latency_ms,
+                "error_count": insert_stmt.excluded.error_count,
+            },
+        )
+        await db.execute(upsert_stmt)
+        upserted += 1
+
+    await db.commit()
+
+    return {"status": "ok", "periods_upserted": upserted}
+
+
+@router.get("/api-usage/monthly")
+async def get_monthly_usage(
+    months: int = 12,
+    group_by: str = "category",
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Historical monthly usage from pre-aggregated rollup table.
+    Kept forever — fast queries over any time range.
+
+    Query params:
+        months: How many months back to show (default 12)
+        group_by: "category" | "model" | "provider" | "purpose"
+    """
+    if current_user.id != 1:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    group_col_map = {
+        "category": ApiUsageMonthly.category,
+        "model": ApiUsageMonthly.model,
+        "provider": ApiUsageMonthly.provider,
+        "purpose": ApiUsageMonthly.purpose,
+    }
+    group_col = group_col_map.get(group_by)
+    if not group_col:
+        raise HTTPException(400, f"Invalid group_by. Use: {', '.join(group_col_map.keys())}")
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=months * 30)
+
+    stmt = (
+        select(
+            ApiUsageMonthly.period_start,
+            group_col.label("group_key"),
+            func.sum(ApiUsageMonthly.total_calls).label("total_calls"),
+            func.sum(ApiUsageMonthly.total_tokens).label("total_tokens"),
+            func.sum(ApiUsageMonthly.total_cost_micros).label("total_cost_micros"),
+            func.sum(ApiUsageMonthly.total_duration_secs).label("total_duration_secs"),
+            func.sum(ApiUsageMonthly.error_count).label("error_count"),
+        )
+        .where(ApiUsageMonthly.period_start >= cutoff)
+        .group_by(ApiUsageMonthly.period_start, group_col)
+        .order_by(ApiUsageMonthly.period_start.desc())
+    )
+
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    return {
+        "months": months,
+        "group_by": group_by,
+        "periods": [
+            {
+                "period_start": r.period_start.isoformat() if r.period_start else None,
+                "key": str(r.group_key),
+                "total_calls": r.total_calls,
+                "total_tokens": r.total_tokens or 0,
+                "total_cost_micros": r.total_cost_micros or 0,
+                "estimated_cost_usd": round((r.total_cost_micros or 0) / 1_000_000, 4),
+                "total_duration_secs": round(r.total_duration_secs, 1) if r.total_duration_secs else 0,
+                "error_count": r.error_count or 0,
+            }
+            for r in rows
+        ],
+    }
+

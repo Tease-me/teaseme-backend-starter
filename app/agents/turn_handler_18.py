@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from uuid import uuid4
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -14,6 +15,8 @@ from app.services.system_prompt_service import get_system_prompt
 from app.constants import prompt_keys
 from langchain_core.prompts import ChatPromptTemplate
 from app.agents.prompt_utils import pick_time_mood
+from app.services.token_tracker import track_usage_bg
+
 log = logging.getLogger("teaseme-turn-18")
 
 
@@ -94,7 +97,10 @@ async def handle_turn_18(
     chain = prompt | XAI_MODEL
 
     try:
+        t0 = time.perf_counter()
         result = await chain.ainvoke({"input": message})
+        main_ms = int((time.perf_counter() - t0) * 1000)
+
         log_prompt(
             log,
             prompt,
@@ -105,10 +111,31 @@ async def handle_turn_18(
         )
         reply = getattr(result, "content", None) or str(result)
 
+        # Track 18+ LLM usage
+        usage = getattr(result, "usage_metadata", None) or {}
+        track_usage_bg(
+            "18_chat", "xai", "grok-4-1-fast-reasoning", "main_reply",
+            input_tokens=usage.get("input_tokens"),
+            output_tokens=usage.get("output_tokens"),
+            total_tokens=usage.get("total_tokens"),
+            latency_ms=main_ms,
+            user_id=user_id,
+            influencer_id=influencer_id,
+            chat_id=chat_id,
+        )
+
         if is_audio:
             return sanitize_tts_text(reply)
 
         return reply
     except Exception as e:
         log.error("[%s] LLM error: %s", cid, e, exc_info=True)
+        track_usage_bg(
+            "18_chat", "xai", "grok-4-1-fast-reasoning", "main_reply",
+            user_id=user_id,
+            influencer_id=influencer_id,
+            chat_id=chat_id,
+            success=False,
+            error_message=str(e)[:400],
+        )
         return "Sorry, something went wrong. 😔"

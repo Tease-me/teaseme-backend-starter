@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import time
 from uuid import uuid4
 from fastapi import HTTPException
 
@@ -24,6 +25,7 @@ from app.constants import prompt_keys
 from app.utils.logging.prompt_logging import log_prompt
 
 from app.relationship.processor import process_relationship_turn
+from app.services.token_tracker import track_usage_bg, UsageTimer
 
 log = logging.getLogger("teaseme-turn")
 
@@ -67,13 +69,26 @@ async def extract_and_store_facts_for_turn(
         try:
             fact_prompt = await get_fact_prompt(db)
 
+            t = time.perf_counter()
             facts_resp = await FACT_EXTRACTOR.ainvoke(
                 fact_prompt.format(msg=message, ctx=recent_ctx)
             )
+            fact_ms = int((time.perf_counter() - t) * 1000)
 
             facts_txt = facts_resp.content or ""
             lines = [ln.strip("- ").strip() for ln in facts_txt.split("\n") if ln.strip()]
             
+            # Track fact extraction usage
+            usage = getattr(facts_resp, "usage_metadata", None) or {}
+            track_usage_bg(
+                "text", "openai", "gpt-4o-mini", "fact_extraction",
+                input_tokens=usage.get("input_tokens"),
+                output_tokens=usage.get("output_tokens"),
+                total_tokens=usage.get("total_tokens"),
+                latency_ms=fact_ms,
+                chat_id=chat_id,
+            )
+
             # Filter out empty/skip lines
             valid_facts = [line for line in lines[:5] if line.lower() != "no new memories."]
             
@@ -200,13 +215,36 @@ async def handle_turn(
     )
 
     try:
+        t0 = time.perf_counter()
         result = await runnable.ainvoke(
             {"input": message},
             config={"configurable": {"session_id": chat_id}},
         )
+        main_ms = int((time.perf_counter() - t0) * 1000)
         reply = result.content
+
+        # Track main reply usage
+        usage = getattr(result, "usage_metadata", None) or {}
+        track_usage_bg(
+            "text", "openai", "gpt-5.2", "main_reply",
+            input_tokens=usage.get("input_tokens"),
+            output_tokens=usage.get("output_tokens"),
+            total_tokens=usage.get("total_tokens"),
+            latency_ms=main_ms,
+            user_id=int(user_id) if user_id else None,
+            influencer_id=influencer_id,
+            chat_id=chat_id,
+        )
     except Exception as e:
         log.error("[%s] LLM error: %s", cid, e, exc_info=True)
+        track_usage_bg(
+            "text", "openai", "gpt-5.2", "main_reply",
+            user_id=int(user_id) if user_id else None,
+            influencer_id=influencer_id,
+            chat_id=chat_id,
+            success=False,
+            error_message=str(e)[:400],
+        )
         return "Sorry, something went wrong. 😔"
 
     try:

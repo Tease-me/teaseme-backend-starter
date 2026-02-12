@@ -6,6 +6,7 @@ import tempfile
 import httpx
 import logging
 import re
+import time
 
 from fastapi import HTTPException
 from app.core.config import settings
@@ -43,12 +44,22 @@ async def transcribe_audio(file_or_bytesio, filename=None, content_type=None):
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(content)
         tmp_path = tmp.name
+    t0 = time.perf_counter()
     with open(tmp_path, "rb") as f:
         transcript = openai.audio.transcriptions.create(
             file=f,
             model="whisper-1"
         )
+    whisper_ms = int((time.perf_counter() - t0) * 1000)
     os.remove(tmp_path)
+
+    # Track transcription usage
+    from app.services.token_tracker import track_usage_bg
+    track_usage_bg(
+        "system", "openai", "whisper-1", "transcription",
+        latency_ms=whisper_ms,
+    )
+
     logger.info(f"Transcription successful: {transcript.text[:50]}...")
     return {"text": transcript.text}
 
@@ -291,10 +302,30 @@ async def synthesize_audio_with_elevenlabs_V3(text: str, db, influencer_id: str 
     logger.debug(f"[ELEVENLABS V3] Voice settings: stability={data['voice_settings']['stability']}, similarity_boost={data['voice_settings']['similarity_boost']}, style={data['voice_settings']['style']}")
     
     async with httpx.AsyncClient(timeout=120) as client:
+        t0 = time.perf_counter()
         resp = await client.post(url, headers=headers, json=data)
+        tts_ms = int((time.perf_counter() - t0) * 1000)
+
+        from app.services.token_tracker import track_usage_bg
         if resp.status_code != 200:
             logger.error(f"ElevenLabs error: {resp.status_code} - {resp.text}")
+            track_usage_bg(
+                "18_voice", "elevenlabs", "eleven_v3", "tts",
+                latency_ms=tts_ms,
+                influencer_id=influencer_id,
+                success=False,
+                error_message=resp.text[:400],
+            )
             return None, None
+
+        # Estimate duration from audio length (128kbps mp3 = 16000 bytes/sec)
+        duration_estimate = len(resp.content) / 16000
+        track_usage_bg(
+            "18_voice", "elevenlabs", "eleven_v3", "tts",
+            latency_ms=tts_ms,
+            duration_secs=duration_estimate,
+            influencer_id=influencer_id,
+        )
         return resp.content, "audio/mpeg"
 
 def pcm_bytes_to_wav_bytes(pcm_bytes, sample_rate=44100):

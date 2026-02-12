@@ -8,6 +8,7 @@ This module provides:
 """
 
 import logging
+import time
 from datetime import datetime, timezone
 
 from openai import AsyncOpenAI
@@ -20,20 +21,32 @@ log = logging.getLogger(__name__)
 client = AsyncOpenAI()
 
 
-async def get_embedding(text: str) -> list[float]:
+async def get_embedding(text_input: str) -> list[float]:
     """
     Get embedding for a single text (non-blocking).
     
     Args:
-        text: Text to embed
+        text_input: Text to embed
         
     Returns:
         Embedding vector as list of floats
     """
+    from app.services.token_tracker import track_usage_bg
+
+    t0 = time.perf_counter()
     response = await client.embeddings.create(
-        input=text,
+        input=text_input,
         model="text-embedding-3-small"
     )
+    emb_ms = int((time.perf_counter() - t0) * 1000)
+
+    usage = response.usage
+    track_usage_bg(
+        "system", "openai", "text-embedding-3-small", "embedding",
+        input_tokens=getattr(usage, "total_tokens", None),
+        latency_ms=emb_ms,
+    )
+
     return response.data[0].embedding
 
 
@@ -60,10 +73,22 @@ async def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
         return [await get_embedding(texts[0])]
     
     try:
+        t0 = time.perf_counter()
         response = await client.embeddings.create(
             input=texts,
             model="text-embedding-3-small"
         )
+        emb_ms = int((time.perf_counter() - t0) * 1000)
+
+        # Track batch embedding usage
+        from app.services.token_tracker import track_usage_bg
+        usage = response.usage
+        track_usage_bg(
+            "system", "openai", "text-embedding-3-small", "embedding_batch",
+            input_tokens=getattr(usage, "total_tokens", None),
+            latency_ms=emb_ms,
+        )
+
         # API returns embeddings in order, but let's be safe
         # Sort by index to ensure order matches input
         sorted_data = sorted(response.data, key=lambda x: x.index)
