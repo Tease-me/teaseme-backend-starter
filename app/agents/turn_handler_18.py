@@ -92,7 +92,7 @@ async def handle_turn_18(
     prompt = prompt.partial(
         user_prompt=user_adult_prompt or "", 
         history=recent_ctx, 
-        time_context=time_context
+        mood=time_context
     )
     chain = prompt | XAI_MODEL
 
