@@ -23,7 +23,7 @@ from sqlalchemy import desc
 
 from app.db.session import get_db
 from app.db.models import User, IdentityVerification
-from app.utils.deps import get_current_user
+from app.utils.auth.dependencies import get_current_user
 from app.services.didit import didit_service
 from app.schemas.verification import (
     VerificationSessionCreateRequest,

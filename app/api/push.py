@@ -4,8 +4,8 @@ from sqlalchemy.future import select
 
 from app.db.session import get_db
 from app.db.models import User, Subscription
-from app.utils.deps import get_current_user
-from app.utils.push import send_push
+from app.utils.auth.dependencies import get_current_user
+from app.utils.messaging.push import send_push
 from app.schemas.push import SubscriptionRequest, SubscriptionResponse
 
 router = APIRouter(prefix="/push", tags=["push"])

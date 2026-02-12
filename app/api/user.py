@@ -9,8 +9,8 @@ from app.core.config import settings
 from app.db.models import User, InfluencerWallet, DailyUsage, Pricing
 from app.db.session import get_db
 from app.schemas.user import UserOut, UserUpdate, UserAdultPromptUpdate, UserAdultPromptOut
-from app.utils.deps import get_current_user
-from app.utils.s3 import (
+from app.utils.auth.dependencies import get_current_user
+from app.utils.storage.s3 import (
     generate_user_presigned_url,
     delete_file_from_s3,
     save_user_photo_to_s3,

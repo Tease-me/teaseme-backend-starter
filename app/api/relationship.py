@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.db.session import get_db
-from app.utils.deps import get_current_user
+from app.utils.auth.dependencies import get_current_user
 from app.db.models import RelationshipState, Influencer
 from app.services.relationship_dimension_service import (
     get_dimension_descriptions,

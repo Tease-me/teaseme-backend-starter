@@ -6,22 +6,9 @@ from contextlib import asynccontextmanager
 import redis.asyncio as redis
 from fastapi import HTTPException
 
-from app.core.config import settings
+from app.utils.infrastructure.redis_pool import get_redis
 
 log = logging.getLogger(__name__)
-
-_redis_pool: Optional[redis.Redis] = None
-
-
-async def get_redis() -> redis.Redis:
-    global _redis_pool
-    if _redis_pool is None:
-        _redis_pool = redis.from_url(
-            settings.REDIS_URL,
-            encoding="utf-8",
-            decode_responses=True,
-        )
-    return _redis_pool
 
 
 LOCK_PREFIX = "lock"

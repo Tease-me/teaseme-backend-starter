@@ -9,7 +9,7 @@ import io
 import uuid
 import urllib.request
 from PIL import Image
-from app.utils.s3 import generate_user_presigned_url, s3
+from app.utils.storage.s3 import generate_user_presigned_url, s3
 from app.core.config import settings
 
 

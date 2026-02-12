@@ -6,7 +6,7 @@ from pydantic import BaseModel
 import uuid
 
 from app.db.session import get_db
-from app.utils.deps import get_current_user, require_age_verification
+from app.utils.auth.dependencies import get_current_user, require_age_verification
 from app.db.models import (
     InfluencerSubscription,
     InfluencerSubscriptionPayment,
@@ -16,9 +16,9 @@ from app.db.models import (
     User
 )
 from app.services.influencer_subscriptions import get_valid_subscription
-from app.utils.rate_limiter import rate_limit
-from app.utils.idempotency import idempotent
-from app.utils.concurrency import advisory_lock
+from app.utils.infrastructure.rate_limiter import rate_limit
+from app.utils.infrastructure.idempotency import idempotent
+from app.utils.infrastructure.concurrency import advisory_lock
 from app.core.config import settings
 
 

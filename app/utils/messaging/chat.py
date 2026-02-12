@@ -8,7 +8,6 @@ import logging
 import re
 
 from fastapi import HTTPException
-from app.agents.turn_handler import handle_turn
 from app.core.config import settings
 from app.db.models import Influencer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -64,6 +63,9 @@ async def get_ai_reply_via_websocket(
     Get AI reply using handle_turn function.
     This function should be called with a validated user_id from the token.
     """
+    # Import here to avoid circular dependency
+    from app.agents.turn_handler import handle_turn
+    
     if not user_id:
         raise HTTPException(status_code=401, detail="User ID is required")
     

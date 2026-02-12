@@ -5,7 +5,7 @@ from app.services.billing import topup_wallet
 from app.db.models import InfluencerWallet
 from app.schemas.billing import TopUpRequest
 from app.db.session import get_db
-from app.utils.deps import get_current_user
+from app.utils.auth.dependencies import get_current_user
 
 import httpx
 from decimal import Decimal
@@ -19,8 +19,8 @@ from datetime import date
 from sqlalchemy import and_
 import traceback
 from fastapi.responses import JSONResponse
-from app.utils.rate_limiter import rate_limit
-from app.utils.idempotency import idempotent
+from app.utils.infrastructure.rate_limiter import rate_limit
+from app.utils.infrastructure.idempotency import idempotent
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
