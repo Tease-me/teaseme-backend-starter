@@ -13,6 +13,7 @@ MODEL = ChatOpenAI(
     model_name="gpt-5.2",
     temperature=0.8,
     max_tokens=512,
+    store=False
 )
 
 FACT_EXTRACTOR = ChatOpenAI(
@@ -20,6 +21,7 @@ FACT_EXTRACTOR = ChatOpenAI(
     model="gpt-4o-mini",
     temperature=0.5,
     max_tokens=512,
+    store=False
 )
 
 CONVO_ANALYZER = ChatOpenAI(
@@ -27,6 +29,7 @@ CONVO_ANALYZER = ChatOpenAI(
     model="gpt-4o-mini",
     temperature=0.2,
     max_tokens=256,
+    store=False
 )
 
 XAI_MODEL = ChatXAI(
@@ -34,12 +37,14 @@ XAI_MODEL = ChatXAI(
     model="grok-4-1-fast-reasoning",
     temperature=0.7,
     max_tokens=512,
+    store=False
 )
 
 SURVEY_SUMMARIZER = ChatOpenAI(
     api_key=settings.OPENAI_API_KEY,
     model="gpt-4o",
     temperature=1,
+    store=False
 )
 
 DEFAULT_AGENT_MODEL = "gpt-4.1"
