@@ -12,26 +12,28 @@ async def find_similar_messages(
     chat_id: str,
     message: str,
     influencer_id: str = None,
-    top_k: int = 7,
+    top_k: int = 10,
     embedding: list[float] | None = None,
+    max_distance: float | None = None,
 ):
     """
-    Find similar messages from both chat-specific and influencer knowledge base.
+    Find similar messages from chat history using semantic search.
     
     Args:
         db: Database session
         chat_id: ID of the chat
         message: User message to find similar messages for
         influencer_id: ID of the influencer (optional, for knowledge base search)
-        top_k: Number of messages to return
+        top_k: Number of messages to return (default: 10)
         embedding: Optional precomputed embedding for the message (reuse to avoid duplicate calls)
+        max_distance: Optional maximum cosine distance for relevance (default: None = no filtering)
     
     Returns:
-        Tuple of (chat_memories, knowledge_base_content) - both are lists of strings
+        List of similar message content strings
     """
     emb = embedding or await get_embedding(message)
     
-    chat_memories = await search_similar_messages(db, chat_id, emb, top_k=top_k)
+    chat_memories = await search_similar_messages(db, chat_id, emb, top_k=top_k, max_distance=max_distance)
     
     return chat_memories
 
@@ -41,12 +43,29 @@ async def find_similar_memories(
     chat_id: str,
     message: str,
     influencer_id: str = None,
-    top_k: int = 7,
+    top_k: int = 10,
     embedding: list[float] | None = None,
+    max_distance: float | None = None,
 ):
+    """
+    Find similar memories using semantic search with improved accuracy.
+    
+    Args:
+        db: Database session
+        chat_id: ID of the chat
+        message: User message to search memories for
+        influencer_id: ID of the influencer (optional, for future use)
+        top_k: Number of memories to return (default: 10)
+        embedding: Optional precomputed embedding for the message (reuse to avoid duplicate calls)
+        max_distance: Optional maximum cosine distance for relevance (default: None = no filtering)
+                     Lower = stricter matching. Recommended: 0.3-0.7 if filtering
+    
+    Returns:
+        List of similar memory content strings
+    """
     emb = embedding or await get_embedding(message)
     
-    chat_memories = await search_similar_memories(db, chat_id, emb, top_k=top_k)
+    chat_memories = await search_similar_memories(db, chat_id, emb, top_k=top_k, max_distance=max_distance)
 
     return chat_memories
 
