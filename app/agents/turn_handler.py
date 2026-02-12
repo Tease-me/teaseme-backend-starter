@@ -181,7 +181,7 @@ async def handle_turn(
         mbti_rules=mbti_rules,
         memories=mem_block,
         daily_context=daily_context,
-        last_user_message=message,
+        last_user_message=recent_ctx,
         mood=mood,
         tone=tone,
         influencer_name=influencer.display_name,

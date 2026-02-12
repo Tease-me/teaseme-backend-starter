@@ -82,64 +82,108 @@ async def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
         return embeddings
 
 
-async def search_similar_memories(db, chat_id: str, embedding: list[float], top_k: int = 5) -> list[str]:
+async def search_similar_memories(db, chat_id: str, embedding: list[float], top_k: int = 10, max_distance: float | None = None) -> list[str]:
     """
-    Search for similar memories using vector similarity.
+    Search for similar memories using vector similarity with cosine distance.
+    
+    Orders by similarity first (most relevant), then by recency (created_at DESC) as a tiebreaker.
     
     Args:
         db: Database session
         chat_id: Chat ID to search within
         embedding: Query embedding vector
-        top_k: Number of results to return
+        top_k: Number of results to return (default: 10)
+        max_distance: Optional maximum cosine distance threshold (default: None = no filtering)
+                     Lower = more similar (0=identical, 1=orthogonal)
+                     Recommended: 0.3-0.7 for filtering
         
     Returns:
-        List of memory content strings ordered by similarity
+        List of memory content strings ordered by similarity, then recency
     """
-    sql = text("""
-        SELECT content
-        FROM memories
-        WHERE chat_id = :chat_id
-          AND embedding IS NOT NULL
-        ORDER BY embedding <-> :embedding
-        LIMIT :top_k
-    """)
-    embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
-    params = {
-        "chat_id": chat_id,
-        "embedding": embedding_str,
-        "top_k": top_k
-    }
+    if max_distance is not None:
+        sql = text("""
+            SELECT content, embedding <=> :embedding AS distance
+            FROM memories
+            WHERE chat_id = :chat_id
+              AND embedding IS NOT NULL
+              AND embedding <=> :embedding <= :max_distance
+            ORDER BY distance ASC, created_at DESC
+            LIMIT :top_k
+        """)
+        params = {
+            "chat_id": chat_id,
+            "embedding": "[" + ",".join(str(x) for x in embedding) + "]",
+            "top_k": top_k,
+            "max_distance": max_distance
+        }
+    else:
+        sql = text("""
+            SELECT content
+            FROM memories
+            WHERE chat_id = :chat_id
+              AND embedding IS NOT NULL
+            ORDER BY embedding <=> :embedding, created_at DESC
+            LIMIT :top_k
+        """)
+        params = {
+            "chat_id": chat_id,
+            "embedding": "[" + ",".join(str(x) for x in embedding) + "]",
+            "top_k": top_k
+        }
+    
     result = await db.execute(sql, params)
     return [row[0] for row in result.fetchall()]
 
 
-async def search_similar_messages(db, chat_id: str, embedding: list[float], top_k: int = 5) -> list[str]:
+async def search_similar_messages(db, chat_id: str, embedding: list[float], top_k: int = 10, max_distance: float | None = None) -> list[str]:
     """
-    Search for similar messages using vector similarity.
+    Search for similar messages using vector similarity with cosine distance.
+    
+    Orders by similarity first (most relevant), then by recency (created_at DESC) as a tiebreaker.
     
     Args:
         db: Database session
         chat_id: Chat ID to search within
         embedding: Query embedding vector
-        top_k: Number of results to return
+        top_k: Number of results to return (default: 10)
+        max_distance: Optional maximum cosine distance threshold (default: None = no filtering)
+                     Lower = more similar (0=identical, 1=orthogonal)
+                     Recommended: 0.3-0.7 for filtering
         
     Returns:
-        List of message content strings ordered by similarity
+        List of message content strings ordered by similarity, then recency
     """
-    sql = text("""
-        SELECT content
-        FROM messages
-        WHERE chat_id = :chat_id
-          AND embedding IS NOT NULL
-        ORDER BY embedding <-> :embedding
-        LIMIT :top_k
-    """)
-    embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
-    params = {
-        "chat_id": chat_id,
-        "embedding": embedding_str,
-        "top_k": top_k
-    }
+    if max_distance is not None:
+        sql = text("""
+            SELECT content, embedding <=> :embedding AS distance
+            FROM messages
+            WHERE chat_id = :chat_id
+              AND embedding IS NOT NULL
+              AND embedding <=> :embedding <= :max_distance
+            ORDER BY distance ASC, created_at DESC
+            LIMIT :top_k
+        """)
+        params = {
+            "chat_id": chat_id,
+            "embedding": "[" + ",".join(str(x) for x in embedding) + "]",
+            "top_k": top_k,
+            "max_distance": max_distance
+        }
+    else:
+        sql = text("""
+            SELECT content
+            FROM messages
+            WHERE chat_id = :chat_id
+              AND embedding IS NOT NULL
+            ORDER BY embedding <=> :embedding, created_at DESC
+            LIMIT :top_k
+        """)
+        params = {
+            "chat_id": chat_id,
+            "embedding": "[" + ",".join(str(x) for x in embedding) + "]",
+            "top_k": top_k
+        }
+    
     result = await db.execute(sql, params)
     return [row[0] for row in result.fetchall()]
 
@@ -150,10 +194,10 @@ async def upsert_memory(
     content: str,
     embedding: list[float],
     sender: str = "fact",
-    similarity_threshold: float = 0.1,
+    similarity_threshold: float = 0.15,
 ) -> str | None:
     """
-    Insert or update a memory based on semantic similarity.
+    Insert or update a memory based on semantic similarity using cosine distance.
     
     If a similar memory already exists (within similarity_threshold), it will be updated.
     Otherwise, a new memory is inserted.
@@ -164,7 +208,8 @@ async def upsert_memory(
         content: Memory content
         embedding: Content embedding vector
         sender: Sender identifier (default: "fact")
-        similarity_threshold: Maximum distance for considering memories similar (default: 0.1)
+        similarity_threshold: Maximum cosine distance for considering memories similar (default: 0.15)
+                             Lower = stricter matching (0=identical, 1=orthogonal)
         
     Returns:
         "update" if existing memory was updated, "insert" if new memory created, None on error
@@ -172,13 +217,13 @@ async def upsert_memory(
     try:
         embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
 
-        # 1. Search for similar memory
+        # 1. Search for similar memory (prefer most similar, then most recent)
         sql_find = text("""
-            SELECT id, embedding <-> :embedding AS similarity
+            SELECT id, embedding <=> :embedding AS similarity
             FROM memories
             WHERE chat_id = :chat_id
               AND embedding IS NOT NULL
-            ORDER BY similarity ASC
+            ORDER BY similarity ASC, created_at DESC
             LIMIT 1
         """)
         params_find = {
