@@ -5,28 +5,25 @@ from pathlib import Path
 from app.constants import prompt_keys
 
 # Relationship signal extraction
-RELATIONSHIP_SIGNAL_PROMPT = """
-        Return ONLY valid JSON with keys:
-        support, affection, flirt, respect, apology, commitment_talk,
-        rude, boundary_push, dislike, hate,
-        accepted_exclusive, accepted_girlfriend.
+RELATIONSHIP_SIGNAL_PROMPT = """Return ONLY valid JSON with keys:
+support, affection, flirt, respect, apology, commitment_talk,
+rude, boundary_push, dislike, hate,
+accepted_exclusive, accepted_girlfriend.
 
-        Influencer preferences:
-        Likes: {persona_likes}
-        Dislikes: {persona_dislikes}
+Influencer preferences:
+Likes: {persona_likes}
+Dislikes: {persona_dislikes}
 
-        Guidance:
-        - If the user message aligns with Likes -> raise affection/support/respect.
-        - If the user message aligns with Dislikes -> raise dislike (mild), not hate.
-        - Use hate only for strong hostility ("I hate you", slurs, wishing harm).
+Guidance:
+- If the user message aligns with Likes -> raise affection/support/respect.
+- If the user message aligns with Dislikes -> raise dislike (mild), not hate.
+- Use hate only for strong hostility ("I hate you", slurs, wishing harm).
 
-        Context:
-        {recent_ctx}
+Context:
+{recent_ctx}
 
-        User message:
-        {message}
-        
-""".strip()
+User message:
+{message}""".strip()
 
 # Load relationship stage prompts from JSON config
 _CONFIGS_DIR = Path(__file__).resolve().parent.parent / "configs"
