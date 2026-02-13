@@ -1374,7 +1374,6 @@ async def get_signed_url(
 @router.get("/conversation-token")
 async def get_conversation_token(
     influencer_id: str,
-    chat_id: str,
     user_timezone: str = Query("UTC"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -1393,14 +1392,6 @@ async def get_conversation_token(
                 "free_left": free_left,
             },
         )
-    history = redis_history(chat_id)
-
-    if len(history.messages) > settings.MAX_HISTORY_WINDOW:
-        trimmed = history.messages[-settings.MAX_HISTORY_WINDOW:]
-        history.clear()
-        history.add_messages(trimmed)
-
-    recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
     
     agent_id = await get_agent_id_from_influencer(db, influencer_id)
     # Sequential to avoid SQLAlchemy AsyncSession concurrent access issue
@@ -1439,6 +1430,8 @@ async def get_conversation_token(
         trimmed = history.messages[-settings.MAX_HISTORY_WINDOW:]
         history.clear()
         history.add_messages(trimmed)
+
+    recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
 
     now = datetime.now(timezone.utc)
     rel = await get_or_create_relationship(db, int(user_id), influencer_id)
