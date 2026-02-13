@@ -13,7 +13,7 @@ from app.db.session import SessionLocal
 from app.agents.prompt_utils import (
     get_global_prompt,
     build_relationship_prompt,
-    pick_time_mood,
+    get_time_context,
     get_mbti_rules_for_archetype,
     get_relationship_stage_prompts,
 )
@@ -108,16 +108,13 @@ async def handle_turn(
     recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
 
     # Phase 1: Fetch cached prompts in parallel (Redis cache, no DB contention)
-    prompt_template, weekday_prompt, weekend_prompt = await asyncio.gather(
-        get_global_prompt(db, is_audio),
-        get_system_prompt(db, prompt_keys.WEEKDAY_TIME_PROMPT),
-        get_system_prompt(db, prompt_keys.WEEKEND_TIME_PROMPT),
-    )
+    prompt_template = await get_global_prompt(db, is_audio)
     
     # Phase 2: DB operation sequentially (AsyncSession doesn't allow concurrent access)
     influencer = await db.get(Influencer, influencer_id)
     
-    mood = pick_time_mood(weekday_prompt, weekend_prompt, user_timezone)
+    # Generate simple time context instead of picking from mood arrays
+    time_context = get_time_context(user_timezone)
 
     if not influencer:
         raise HTTPException(404, "Influencer not found")
@@ -182,7 +179,7 @@ async def handle_turn(
         memories=mem_block,
         daily_context=daily_context,
         last_user_message=recent_ctx,
-        mood=mood,
+        mood=time_context,
         tone=tone,
         influencer_name=influencer.display_name,
     )

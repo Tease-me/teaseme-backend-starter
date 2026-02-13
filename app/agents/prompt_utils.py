@@ -66,43 +66,93 @@ def _parse_time_range(label: str):
     return (start, end)
 
 
+def get_time_context(user_timezone: str | None) -> str:
+    """
+    Generate simple time context for AI to naturally incorporate.
+    Returns a concise time description instead of pre-written mood scripts.
+    """
+    tz = _resolve_tz(user_timezone)
+    now = datetime.now(tz)
+    
+    hour = now.hour
+    day_name = now.strftime("%A")
+    is_weekend = _is_weekend(user_timezone)
+    
+    # Multiple variations for each time period - randomly selected for variety
+    if 0 <= hour < 6:
+        vibes = [
+            "late night hours",
+            "deep night, most people asleep",
+            "quiet hours",
+            "very late, winding down",
+            "after-hours calm"
+        ]
+    elif 6 <= hour < 9:
+        vibes = [
+            "early morning, just waking up",
+            "morning starting",
+            "beginning of the day",
+            "fresh morning energy",
+            "sunrise hours"
+        ]
+    elif 9 <= hour < 12:
+        vibes = [
+            "mid-morning",
+            "morning in full swing",
+            "active morning hours",
+            "getting things done",
+            "busy morning time"
+        ]
+    elif 12 <= hour < 15:
+        vibes = [
+            "midday",
+            "afternoon starting",
+            "middle of the day",
+            "lunch time hours",
+            "afternoon energy"
+        ]
+    elif 15 <= hour < 18:
+        vibes = [
+            "late afternoon",
+            "afternoon winding down",
+            "transitioning to evening",
+            "end of afternoon",
+            "golden hour time"
+        ]
+    elif 18 <= hour < 21:
+        vibes = [
+            "evening",
+            "night beginning",
+            "relaxed evening hours",
+            "dinner time vibe",
+            "early night"
+        ]
+    else:
+        vibes = [
+            "night time",
+            "late evening hours",
+            "late night vibe",
+            "nighttime energy",
+            "after dark"
+        ]
+    
+    weekend_type = "weekend" if is_weekend else "weekday"
+    selected_vibe = random.choice(vibes)
+    
+    return f"{now.strftime('%I:%M %p')}, {day_name} {weekend_type} - {selected_vibe}"
+
+
+# Keep old function for backward compatibility during transition
 def pick_time_mood(
     weekday_prompt: str | None,
     weekend_prompt: str | None,
     user_timezone: str | None,
 ) -> str:
-    is_weekend = _is_weekend(user_timezone)
-    time_prompt = weekend_prompt if is_weekend else weekday_prompt
-
-    if not time_prompt:
-        return ""
-    try:
-        mood_map = json.loads(time_prompt)
-    except json.JSONDecodeError:
-        log.warning("Invalid TIME_PROMPT JSON; using empty mood")
-        return ""
-    if not isinstance(mood_map, dict):
-        return ""
-
-    hour = datetime.now(_resolve_tz(user_timezone)).hour
-
-    matches: list[tuple[int, list[str]]] = []
-    for label, options in mood_map.items():
-        if not isinstance(options, list) or not options:
-            continue
-        parsed = _parse_time_range(label)
-        if not parsed:
-            continue
-        start, end = parsed
-        if _hour_in_range(hour, start, end):
-            matches.append((_range_span(start, end), options))
-
-    if matches:
-        matches.sort(key=lambda item: item[0])
-        return random.choice(matches[0][1])
-
-    flat = [m for opts in mood_map.values() if isinstance(opts, list) for m in opts]
-    return random.choice(flat) if flat else ""
+    """
+    DEPRECATED: Use get_time_context() instead.
+    This function is kept for backward compatibility.
+    """
+    return get_time_context(user_timezone)
  
 
 _mbti_cache: Optional[dict] = None
