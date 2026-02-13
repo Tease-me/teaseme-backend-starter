@@ -4,7 +4,7 @@ import math
 import random
 import json
 from uuid import uuid4
-from app.agents.prompt_utils import build_relationship_prompt, get_global_prompt, get_mbti_rules_for_archetype, get_relationship_stage_prompts
+from app.agents.prompt_utils import build_relationship_prompt, get_global_prompt, get_mbti_rules_for_archetype, get_relationship_stage_prompts, get_time_context
 from app.relationship.dtr import plan_dtr_goal
 from app.relationship.inactivity import apply_inactivity_decay
 from app.relationship.repo import get_or_create_relationship
@@ -25,7 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.services.billing import can_afford, get_remaining_units
 from app.services.chat_service import get_or_create_chat
-from app.agents.turn_handler import _norm, redis_history
+from app.agents.turn_handler import _norm, _build_user_name_block, redis_history
 from langchain_core.prompts import ChatPromptTemplate
 from app.db.session import SessionLocal
 from app.services.embeddings import get_embedding
@@ -425,16 +425,24 @@ async def _generate_contextual_greeting(
         log.warning("contextual_greeting.parallel_fetch_failed chat=%s err=%s", chat_id, exc)
         db_messages, chat, influencer = [], None, None
 
-    # Second wave: last call (depends on user_id from chat)
+    # Second wave: last call + user (depends on user_id from chat)
     user_id = chat.user_id if chat else None
     last_call: Optional[CallRecord] = None
+    user_obj = None
     
     if user_id:
+        async def _fetch_user_standalone() -> Optional[User]:
+            async with SessionLocal() as session:
+                return await session.get(User, user_id)
+        
         try:
-            last_call = await _fetch_last_call_standalone(user_id)
+            last_call, user_obj = await asyncio.gather(
+                _fetch_last_call_standalone(user_id),
+                _fetch_user_standalone(),
+            )
         except Exception as exc:
             log.warning(
-                "contextual_greeting.call_fetch_failed chat=%s user=%s infl=%s err=%s",
+                "contextual_greeting.call_user_fetch_failed chat=%s user=%s infl=%s err=%s",
                 chat_id, user_id, influencer_id, exc,
             )
 
@@ -497,9 +505,12 @@ async def _generate_contextual_greeting(
         return _pick_random_first_greeting(persona_name)
 
     try:
+        async with SessionLocal() as session:
+            users_name = await _build_user_name_block(session, user_id)
         prompt = await _get_contextual_first_message_prompt(db)
         chain = prompt.partial(
             influencer_name=persona_name,
+            users_name=users_name,
             gap_category=gap_category,
             gap_minutes=str(round(gap_minutes, 1)),
             call_ending_type=call_ending_type,
@@ -1363,6 +1374,7 @@ async def get_signed_url(
 @router.get("/conversation-token")
 async def get_conversation_token(
     influencer_id: str,
+    user_timezone: str = Query("UTC"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1419,6 +1431,8 @@ async def get_conversation_token(
         history.clear()
         history.add_messages(trimmed)
 
+    recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
+
     now = datetime.now(timezone.utc)
     rel = await get_or_create_relationship(db, int(user_id), influencer_id)
     days_idle = apply_inactivity_decay(rel, now)
@@ -1432,6 +1446,9 @@ async def get_conversation_token(
     )
 
     dtr_goal = plan_dtr_goal(rel, can_ask)
+    time_context = get_time_context(user_timezone)
+
+    users_name = await _build_user_name_block(db, user_id)
 
     prompt = build_relationship_prompt(
         prompt_template,
@@ -1443,12 +1460,13 @@ async def get_conversation_token(
         persona_likes=persona_likes,
         persona_dislikes=persona_dislikes,
         mbti_rules=mbti_rules,
-        memories="",
+        memories="None",
         daily_context=daily_context,
-        last_user_message="",
+        last_user_message=recent_ctx,
+        mood=time_context,
         tone=tone,
-        analysis="",
         influencer_name=influencer.display_name,
+        users_name=users_name,
     )
     
     log_prompt(log, prompt, cid="", input="")

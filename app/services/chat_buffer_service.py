@@ -336,6 +336,7 @@ async def save_user_message(
     chat_id: str,
     text: str,
     message_model: type,
+    embedding: Optional[List[float]] = None,
 ) -> None:
     """
     Save user message to database with embedding.
@@ -345,9 +346,10 @@ async def save_user_message(
         chat_id: Chat identifier
         text: Message text
         message_model: Message or Message18 class
+        embedding: Optional precomputed embedding (avoids duplicate API call)
     """
     try:
-        emb = await get_embedding(text)
+        emb = embedding if embedding is not None else await get_embedding(text)
         db.add(message_model(chat_id=chat_id, sender="user", content=text, embedding=emb))
         await db.commit()
     except Exception:

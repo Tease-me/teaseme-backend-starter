@@ -84,16 +84,16 @@ def _verify_hmac(raw_body: bytes, signature_header: Optional[str]) -> None:
 
 async def _resolve_user_for_conversation(db, conversation_id: str):
     log.info("resolver.called conversation_id=%s", conversation_id)
-    q = select(CallRecord.user_id, CallRecord.influencer_id, CallRecord.sid)\
+    q = select(CallRecord.user_id, CallRecord.influencer_id, CallRecord.sid, CallRecord.chat_id)\
         .where(CallRecord.conversation_id == conversation_id)
     res = await db.execute(q)
     row = res.first()
     if not row:
         log.info("resolver.miss conversation_id=%s", conversation_id)
-        return {"user_id": None, "influencer_id": None, "sid": conversation_id}
-    user_id, influencer_id, sid = row
-    log.info("resolver.hit conversation_id=%s user_id=%s", conversation_id, user_id)
-    return {"user_id": user_id, "influencer_id": influencer_id, "sid": sid or conversation_id}
+        return {"user_id": None, "influencer_id": None, "sid": conversation_id, "chat_id": None}
+    user_id, influencer_id, sid, chat_id = row
+    log.info("resolver.hit conversation_id=%s user_id=%s chat_id=%s", conversation_id, user_id, chat_id)
+    return {"user_id": user_id, "influencer_id": influencer_id, "sid": sid or conversation_id, "chat_id": chat_id}
 
 
 @router.post("/elevenlabs")
@@ -147,6 +147,7 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
     meta_map = await _resolve_user_for_conversation(db, conversation_id)
     user_id = meta_map.get("user_id") or data.get("user_id") 
     sid = meta_map.get("sid") or conversation_id
+    chat_id = meta_map.get("chat_id")
 
     if status == "done" and user_id:
         meta = {
@@ -298,6 +299,7 @@ async def update_relationship_api(
         f"- safety: {rel.safety}/100\n"
         f"- exclusive_agreed: {rel.exclusive_agreed}\n"
         f"- girlfriend_confirmed: {rel.girlfriend_confirmed}\n"
+        f"- sentiment_delta: {rel.sentiment_delta}\n"
         f"- days_idle_before_message: {days_idle}\n"
         f"- dtr_goal: {dtr_goal}\n"
     )
