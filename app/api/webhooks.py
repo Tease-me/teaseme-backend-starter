@@ -299,6 +299,7 @@ async def update_relationship_api(
         f"- safety: {rel.safety}/100\n"
         f"- exclusive_agreed: {rel.exclusive_agreed}\n"
         f"- girlfriend_confirmed: {rel.girlfriend_confirmed}\n"
+        f"- sentiment_delta: {rel.sentiment_delta}\n"
         f"- days_idle_before_message: {days_idle}\n"
         f"- dtr_goal: {dtr_goal}\n"
     )

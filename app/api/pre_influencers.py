@@ -830,6 +830,8 @@ async def approve_pre_influencer(pre_id: int, db: AsyncSession = Depends(get_db)
 
     reply_text = "/ reply: For every user message, call this tool with the full transcript in the text field before speaking. Do not answer without calling this tool first."
     prompt_for_eleven = f"{prompt}{reply_text}"
+    DEFAULT_VOICE_ID = "YKG78i9n8ybMZ42crVbJ"
+    DEFAULT_PROMPT_TEMPLATE = json.dumps(prompt, ensure_ascii=False)
     
     agent_id = await _push_prompt_to_elevenlabs(
         agent_id=agent_id,
