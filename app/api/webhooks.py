@@ -380,7 +380,7 @@ async def eleven_webhook_get_memories(
         
         # Tighter embedding timeout
         embedding = await asyncio.wait_for(
-            get_embedding(user_text),
+            get_embedding(user_text, source="call"),
             timeout=0.5,
         )
         

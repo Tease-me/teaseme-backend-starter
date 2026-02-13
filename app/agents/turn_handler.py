@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import time
 from uuid import uuid4
 from fastapi import HTTPException
 
@@ -24,6 +25,7 @@ from app.constants import prompt_keys
 from app.utils.logging.prompt_logging import log_prompt
 
 from app.relationship.processor import process_relationship_turn
+from app.services.token_tracker import track_usage_bg, UsageTimer
 
 log = logging.getLogger("teaseme-turn")
 
@@ -101,18 +103,35 @@ async def extract_and_store_facts_for_turn(
     recent_ctx: str,
     chat_id: str,
     cid: str,
+    user_id: str | int | None = None,
+    influencer_id: str | None = None,
 ) -> None:
     async with SessionLocal() as db:
         try:
             fact_prompt = await get_fact_prompt(db)
 
+            t = time.perf_counter()
             facts_resp = await FACT_EXTRACTOR.ainvoke(
                 fact_prompt.format(msg=message, ctx=recent_ctx)
             )
+            fact_ms = int((time.perf_counter() - t) * 1000)
 
             facts_txt = facts_resp.content or ""
             lines = [ln.strip("- ").strip() for ln in facts_txt.split("\n") if ln.strip()]
             
+            # Track fact extraction usage
+            usage = getattr(facts_resp, "usage_metadata", None) or {}
+            track_usage_bg(
+                "extraction", "openai", "gpt-4o-mini", "fact_extraction",
+                input_tokens=usage.get("input_tokens"),
+                output_tokens=usage.get("output_tokens"),
+                total_tokens=usage.get("total_tokens"),
+                latency_ms=fact_ms,
+                user_id=int(user_id) if user_id else None,
+                influencer_id=influencer_id,
+                chat_id=chat_id,
+            )
+
             # Filter out empty/skip lines
             valid_facts = [line for line in lines[:5] if line.lower() != "no new memories."]
             
@@ -163,30 +182,37 @@ async def handle_turn(
     from app.services.embeddings import get_embedding
     message_embedding = await get_embedding(message) if (db and user_id) else None
 
-    rel_pack_task = asyncio.create_task(
-        process_relationship_turn(
-            db=db,
-            user_id=int(user_id),
-            influencer_id=influencer_id,
-            message=message,
-            recent_ctx=recent_ctx,
-            cid=cid,
-            convo_analyzer=CONVO_ANALYZER,
-            influencer=influencer,
-        )
-    )
-    
-    memories_task = asyncio.create_task(
-        find_similar_memories(
-            db, 
-            chat_id, 
-            message, 
-            embedding=message_embedding  # Reuse precomputed embedding
-        ) if (db and user_id) else asyncio.sleep(0, result=[])
-    )
+    # Run in parallel with separate DB sessions for optimal performance
+    # Each task gets its own session to avoid SQLAlchemy concurrency issues
+    async def _rel_pack_with_session():
+        async with SessionLocal() as db_rel:
+            return await process_relationship_turn(
+                db=db_rel,
+                user_id=int(user_id),
+                influencer_id=influencer_id,
+                message=message,
+                recent_ctx=recent_ctx,
+                cid=cid,
+                convo_analyzer=CONVO_ANALYZER,
+                influencer=influencer,
+            )
 
-    # Wait for both to complete in parallel
-    rel_pack, memories_result = await asyncio.gather(rel_pack_task, memories_task)
+    async def _memories_with_session():
+        if not (db and user_id):
+            return []
+        async with SessionLocal() as db_mem:
+            return await find_similar_memories(
+                db_mem,
+                chat_id,
+                message,
+                embedding=message_embedding  # Reuse precomputed embedding
+            )
+
+    # Execute both in parallel - each with independent DB session
+    rel_pack, memories_result = await asyncio.gather(
+        _rel_pack_with_session(),
+        _memories_with_session()
+    )
    
     rel = rel_pack["rel"]
     days_idle = rel_pack["days_idle"]
@@ -257,13 +283,36 @@ async def handle_turn(
     )
 
     try:
+        t0 = time.perf_counter()
         result = await runnable.ainvoke(
             {"input": message},
             config={"configurable": {"session_id": chat_id}},
         )
+        main_ms = int((time.perf_counter() - t0) * 1000)
         reply = result.content
+
+        # Track main reply usage
+        usage = getattr(result, "usage_metadata", None) or {}
+        track_usage_bg(
+            "text", "openai", "gpt-5.2", "main_reply",
+            input_tokens=usage.get("input_tokens"),
+            output_tokens=usage.get("output_tokens"),
+            total_tokens=usage.get("total_tokens"),
+            latency_ms=main_ms,
+            user_id=int(user_id) if user_id else None,
+            influencer_id=influencer_id,
+            chat_id=chat_id,
+        )
     except Exception as e:
         log.error("[%s] LLM error: %s", cid, e, exc_info=True)
+        track_usage_bg(
+            "text", "openai", "gpt-5.2", "main_reply",
+            user_id=int(user_id) if user_id else None,
+            influencer_id=influencer_id,
+            chat_id=chat_id,
+            success=False,
+            error_message=str(e)[:400],
+        )
         return "Sorry, something went wrong. 😔"
 
     # Schedule background fact extraction (fire-and-forget)
@@ -275,6 +324,8 @@ async def handle_turn(
                 recent_ctx=recent_ctx,
                 chat_id=chat_id,
                 cid=cid,
+                user_id=user_id,
+                influencer_id=influencer_id,
             )
         )
         # Add done callback to log any exceptions

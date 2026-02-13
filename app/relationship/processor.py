@@ -146,7 +146,8 @@ async def process_relationship_turn(
         persona_dislikes = []
 
     sig_dict = await classify_signals(
-        db, message, recent_ctx, persona_likes, persona_dislikes, convo_analyzer
+        db, message, recent_ctx, persona_likes, persona_dislikes, convo_analyzer,
+        user_id=user_id, influencer_id=influencer_id
     )
     log.info("[%s] SIG_DICT=%s", cid, sig_dict)
     sig = Signals(**sig_dict)

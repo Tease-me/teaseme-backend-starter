@@ -3,6 +3,7 @@ import logging
 import math
 import random
 import json
+import time
 from uuid import uuid4
 from app.agents.prompt_utils import build_relationship_prompt, get_global_prompt, get_mbti_rules_for_archetype, get_relationship_stage_prompts, get_time_context
 from app.relationship.dtr import plan_dtr_goal
@@ -519,8 +520,24 @@ async def _generate_contextual_greeting(
             history=transcript or "(no recent history)",
         ) | GREETING_GENERATOR
 
+        t0 = time.perf_counter()
         llm_response = await chain.ainvoke({})
+        greet_ms = int((time.perf_counter() - t0) * 1000)
         greeting = _add_natural_pause((llm_response.content or "").strip())
+
+        # Track greeting generation usage
+        from app.services.token_tracker import track_usage_bg
+        usage = getattr(llm_response, "usage_metadata", None) or {}
+        track_usage_bg(
+            "call", "openai", "gpt-4.1", "greeting",
+            input_tokens=usage.get("input_tokens"),
+            output_tokens=usage.get("output_tokens"),
+            total_tokens=usage.get("total_tokens"),
+            latency_ms=greet_ms,
+            user_id=user_id,
+            chat_id=chat_id,
+            influencer_id=influencer_id,
+        )
         
         if greeting.startswith('"') and greeting.endswith('"'):
             greeting = greeting[1:-1]
@@ -891,6 +908,18 @@ async def _poll_and_persist_conversation(
                 call_record.chat_id = chat_id
             db.add(call_record)
             await db.commit()
+
+            # Track ElevenLabs ConvAI call usage with conversation_id for billing cross-ref
+            from app.services.token_tracker import track_usage_bg
+            track_usage_bg(
+                "call", "elevenlabs", "elevenlabs-convai", "call_conversation",
+                duration_secs=total_seconds,
+                user_id=user_id,
+                influencer_id=influencer_id,
+                chat_id=chat_id,
+                conversation_id=conversation_id,
+                success=status in ("done", "completed"),
+            )
         except Exception as exc:  
             log.warning(
                 "background.update_call_record_failed conv=%s err=%s",
@@ -915,6 +944,8 @@ async def _poll_and_persist_conversation(
                             recent_ctx=recent_ctx,
                             chat_id=chat_id,
                             cid=conversation_id,
+                            user_id=user_id,
+                            influencer_id=influencer_id,
                         )
                     )
                     log.info(
@@ -1272,7 +1303,7 @@ async def _persist_transcript_to_chat(
     embeddings: List[Optional[List[float]]] = []
     try:
         from app.services.embeddings import get_embeddings_batch
-        embeddings = await get_embeddings_batch(texts_to_embed)
+        embeddings = await get_embeddings_batch(texts_to_embed, source="call")
     except Exception as exc:
         log.warning("persist_transcript.batch_embed_failed chat=%s err=%s", chat_id, exc)
         embeddings = [None] * len(pending_entries)

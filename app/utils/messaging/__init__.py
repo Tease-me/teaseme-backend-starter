@@ -3,7 +3,7 @@
 from .chat import (
     transcribe_audio,
     get_ai_reply_via_websocket,
-    synthesize_audio_with_elevenlabs,
+    # synthesize_audio_with_elevenlabs,
     format_for_eleven_v3,
     synthesize_audio_with_elevenlabs_V3,
     pcm_bytes_to_wav_bytes,
@@ -26,7 +26,7 @@ __all__ = [
     # Chat
     "transcribe_audio",
     "get_ai_reply_via_websocket",
-    "synthesize_audio_with_elevenlabs",
+    # "synthesize_audio_with_elevenlabs",
     "format_for_eleven_v3",
     "synthesize_audio_with_elevenlabs_V3",
     "pcm_bytes_to_wav_bytes",

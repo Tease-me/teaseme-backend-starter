@@ -1,11 +1,13 @@
 import logging
 import json
+import time
 from dataclasses import dataclass
 from typing import Optional
 
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from app.services.system_prompt_service import get_system_prompt
+from app.services.token_tracker import track_usage_bg
 from app.constants import prompt_keys
 from app.agents.prompts import get_grok_model
 
@@ -95,15 +97,29 @@ async def verify_with_grok(
     
     try:
         grok_model = get_grok_model()
-        
+
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt)
         ]
-        
+
+        # Track timing and usage
+        t0 = time.perf_counter()
         response = await grok_model.ainvoke(messages)
+        mod_ms = int((time.perf_counter() - t0) * 1000)
+
+        # Track moderation API usage
+        usage = getattr(response, "usage_metadata", None) or {}
+        track_usage_bg(
+            "moderation", "xai", "grok-4-1-fast-reasoning", "moderation",
+            input_tokens=usage.get("input_tokens"),
+            output_tokens=usage.get("output_tokens"),
+            total_tokens=usage.get("total_tokens"),
+            latency_ms=mod_ms,
+        )
+
         content = response.content
-        
+
         result = parse_grok_response(content)
         
         if result:

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Tuple
 
 from fastapi import HTTPException
 from app.agents.prompts import OPENAI_ASSISTANT_LLM, DEFAULT_AGENT_MODEL as PROMPTS_DEFAULT_AGENT_MODEL
+from app.services.token_tracker import track_usage_bg
 
 log = logging.getLogger("openai.assistants")
 
@@ -39,7 +41,21 @@ async def send_agent_message(
     messages.append({"role": "user", "content": message})
 
     try:
+        # Track timing and usage
+        t0 = time.perf_counter()
         resp = await OPENAI_ASSISTANT_LLM.ainvoke(messages)
+        assist_ms = int((time.perf_counter() - t0) * 1000)
+
+        # Track OpenAI assistant API usage
+        usage = getattr(resp, "usage_metadata", None) or {}
+        track_usage_bg(
+            "assistant", "openai", "gpt-4.1", "assistant_chat",
+            input_tokens=usage.get("input_tokens"),
+            output_tokens=usage.get("output_tokens"),
+            total_tokens=usage.get("total_tokens"),
+            latency_ms=assist_ms,
+        )
+
         reply_text = getattr(resp, "content", "") or ""
     except Exception as exc:
         log.error("Chat completion failed: %s", exc, exc_info=True)

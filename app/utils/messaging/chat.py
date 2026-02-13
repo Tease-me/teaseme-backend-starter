@@ -6,6 +6,7 @@ import tempfile
 import httpx
 import logging
 import re
+import time
 
 from fastapi import HTTPException
 from app.core.config import settings
@@ -43,12 +44,39 @@ async def transcribe_audio(file_or_bytesio, filename=None, content_type=None):
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(content)
         tmp_path = tmp.name
+
+    # Get audio duration for cost tracking
+    audio_duration_secs = None
+    try:
+        if suffix == ".wav":
+            with wave.open(tmp_path, 'rb') as wav_file:
+                frames = wav_file.getnframes()
+                rate = wav_file.getframerate()
+                audio_duration_secs = frames / float(rate)
+        else:
+            # For webm/mp3, estimate duration from file size
+            # Rough estimate: ~16KB/sec for typical voice audio
+            audio_duration_secs = len(content) / 16000
+    except Exception as e:
+        logger.debug(f"Could not determine audio duration: {e}")
+
+    t0 = time.perf_counter()
     with open(tmp_path, "rb") as f:
         transcript = openai.audio.transcriptions.create(
             file=f,
             model="whisper-1"
         )
+    whisper_ms = int((time.perf_counter() - t0) * 1000)
     os.remove(tmp_path)
+
+    # Track transcription usage
+    from app.services.token_tracker import track_usage_bg
+    track_usage_bg(
+        "transcription", "openai", "whisper-1", "transcription",
+        latency_ms=whisper_ms,
+        duration_secs=audio_duration_secs,
+    )
+
     logger.info(f"Transcription successful: {transcript.text[:50]}...")
     return {"text": transcript.text}
 
@@ -78,39 +106,37 @@ async def get_ai_reply_via_websocket(
         is_audio=True
     )
     return reply
+# async def synthesize_audio_with_elevenlabs(text: str, db, influencer_id: str = None):
+#     influencer = await db.get(Influencer, influencer_id)
+#     if not influencer:
+#         raise HTTPException(404, "Influencer not found")
+#     if not influencer.voice_id:
+#         raise HTTPException(500, f"Voice ID not set for influencer '{influencer_id}'")
 
-async def synthesize_audio_with_elevenlabs(text: str, db, influencer_id: str = None):
-    influencer = await db.get(Influencer, influencer_id)
-    if not influencer:
-        raise HTTPException(404, "Influencer not found")
-    if not influencer.voice_id:
-        raise HTTPException(500, f"Voice ID not set for influencer '{influencer_id}'")
-
-    voice_id = influencer.voice_id
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
-    headers = {
-        "xi-api-key": ELEVENLABS_API_KEY,
-        "Accept": "audio/mpeg",
-        "Content-Type": "application/json",
-    }
-    data = {
-        "text": text, 
-        "model_id": "eleven_multilingual_v2", 
-        "voice_settings": {
-            "stability": 0.35,
-            "similarity_boost": 0.8,
-            "style": 0.5,
-            "use_speaker_boost": True
-        },
-        "output_format": "mp3_44100_128"
-    }
-    async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(url, headers=headers, json=data)
-        if resp.status_code != 200:
-            logger.error(f"ElevenLabs error: {resp.status_code} - {resp.text}")
-            return None, None
-        return resp.content, "audio/mpeg"
-
+#     voice_id = influencer.voice_id
+#     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+#     headers = {
+#         "xi-api-key": ELEVENLABS_API_KEY,
+#         "Accept": "audio/mpeg",
+#         "Content-Type": "application/json",
+#     }
+#     data = {
+#         "text": text, 
+#         "model_id": "eleven_multilingual_v2", 
+#         "voice_settings": {
+#             "stability": 0.35,
+#             "similarity_boost": 0.8,
+#             "style": 0.5,
+#             "use_speaker_boost": True
+#         },
+#         "output_format": "mp3_44100_128"
+#     }
+#     async with httpx.AsyncClient(timeout=120) as client:
+#         resp = await client.post(url, headers=headers, json=data)
+#         if resp.status_code != 200:
+#             logger.error(f"ElevenLabs error: {resp.status_code} - {resp.text}")
+#             return None, None
+#         return resp.content, "audio/mpeg"
 # ElevenLabs V3 style tags mapping
 # Based on: https://elevenlabs.io/docs/best-practices/prompting/eleven-v3
 STYLE_TAGS = {
@@ -291,10 +317,30 @@ async def synthesize_audio_with_elevenlabs_V3(text: str, db, influencer_id: str 
     logger.debug(f"[ELEVENLABS V3] Voice settings: stability={data['voice_settings']['stability']}, similarity_boost={data['voice_settings']['similarity_boost']}, style={data['voice_settings']['style']}")
     
     async with httpx.AsyncClient(timeout=120) as client:
+        t0 = time.perf_counter()
         resp = await client.post(url, headers=headers, json=data)
+        tts_ms = int((time.perf_counter() - t0) * 1000)
+
+        from app.services.token_tracker import track_usage_bg
         if resp.status_code != 200:
             logger.error(f"ElevenLabs error: {resp.status_code} - {resp.text}")
+            track_usage_bg(
+                "18_voice", "elevenlabs", "eleven_v3", "tts",
+                latency_ms=tts_ms,
+                influencer_id=influencer_id,
+                success=False,
+                error_message=resp.text[:400],
+            )
             return None, None
+
+        # Estimate duration from audio length (128kbps mp3 = 16000 bytes/sec)
+        duration_estimate = len(resp.content) / 16000
+        track_usage_bg(
+            "18_voice", "elevenlabs", "eleven_v3", "tts",
+            latency_ms=tts_ms,
+            duration_secs=duration_estimate,
+            influencer_id=influencer_id,
+        )
         return resp.content, "audio/mpeg"
 
 def pcm_bytes_to_wav_bytes(pcm_bytes, sample_rate=44100):

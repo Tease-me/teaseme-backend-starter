@@ -298,7 +298,7 @@ async def chat_audio(
             raise HTTPException(status_code=422, detail="Empty transcript")
 
         from app.services.embeddings import get_embedding
-        embedding = await get_embedding(transcript_text)
+        embedding = await get_embedding(transcript_text, source="call")
         msg_user = Message18(
             chat_id=chat_id,
             sender="user",
