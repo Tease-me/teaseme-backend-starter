@@ -103,6 +103,8 @@ async def extract_and_store_facts_for_turn(
     recent_ctx: str,
     chat_id: str,
     cid: str,
+    user_id: str | int | None = None,
+    influencer_id: str | None = None,
 ) -> None:
     async with SessionLocal() as db:
         try:
@@ -322,6 +324,8 @@ async def handle_turn(
                 recent_ctx=recent_ctx,
                 chat_id=chat_id,
                 cid=cid,
+                user_id=user_id,
+                influencer_id=influencer_id,
             )
         )
         # Add done callback to log any exceptions

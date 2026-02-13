@@ -944,6 +944,8 @@ async def _poll_and_persist_conversation(
                             recent_ctx=recent_ctx,
                             chat_id=chat_id,
                             cid=conversation_id,
+                            user_id=user_id,
+                            influencer_id=influencer_id,
                         )
                     )
                     log.info(
