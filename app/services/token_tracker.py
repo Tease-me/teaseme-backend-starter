@@ -99,7 +99,16 @@ def _estimate_cost(
     duration_secs: Optional[float],
     purpose: str,
 ) -> Optional[int]:
-    """Estimate cost in micro-dollars."""
+    """
+    Estimate cost in raw units (not micro-dollars despite column name).
+
+    Returns raw cost value where:
+    - 1,000,000 units = 1 micro-dollar
+    - 1,000,000,000,000 units = 1 USD
+
+    This preserves precision for small API calls that would otherwise round to zero.
+    Convert to USD at display time by dividing by 1 trillion.
+    """
     # Handle ElevenLabs time-based pricing
     if provider == "elevenlabs" and duration_secs is not None:
         rate = (
@@ -142,8 +151,10 @@ def _estimate_cost(
                 model, provider
             )
 
-    # Divide once at the end to convert to microdollars
-    return (cost // 1_000_000) if has_pricing else None
+    # Return raw cost value (don't divide yet to preserve precision for small calls)
+    # The column name is estimated_cost_micros but it stores raw units where 1M units = 1 microdollar
+    # Division by 1M happens at display time to convert to microdollars
+    return cost if has_pricing else None
 
 
 async def track_usage(
@@ -169,6 +180,9 @@ async def track_usage(
 
     This function NEVER raises — all errors are logged and swallowed
     so it can't disrupt the main request flow.
+
+    Note: estimated_cost_micros stores raw cost units (1 trillion units = 1 USD)
+    to preserve precision for small API calls. Convert to USD at display time.
 
     Args:
         category: "text" | "call" | "18_chat" | "18_voice" | "embedding" | "moderation" | "transcription" | "analysis" | "extraction" | "assistant"

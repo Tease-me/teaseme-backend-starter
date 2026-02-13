@@ -616,8 +616,9 @@ async def get_api_usage_summary(
                 "total_input_tokens": r.total_input_tokens or 0,
                 "total_output_tokens": r.total_output_tokens or 0,
                 "total_tokens": r.total_tokens or 0,
-                "total_cost_micros": r.total_cost_micros or 0,
-                "estimated_cost_usd": round((r.total_cost_micros or 0) / 1_000_000, 6),
+                # estimated_cost_micros stores raw units (1M units = 1 microdollar)
+                "total_cost_micros": round((r.total_cost_micros or 0) / 1_000_000, 2) if r.total_cost_micros else 0,
+                "estimated_cost_usd": round((r.total_cost_micros or 0) / 1_000_000_000_000, 9),
                 "avg_latency_ms": round(r.avg_latency_ms, 1) if r.avg_latency_ms else None,
                 "max_latency_ms": r.max_latency_ms,
                 "total_duration_secs": round(r.total_duration_secs, 1) if r.total_duration_secs else None,
@@ -667,8 +668,9 @@ async def get_top_api_users(
                 "user_id": r.user_id,
                 "total_calls": r.total_calls,
                 "total_tokens": r.total_tokens or 0,
-                "total_cost_micros": r.total_cost_micros or 0,
-                "estimated_cost_usd": round((r.total_cost_micros or 0) / 1_000_000, 6),
+                # estimated_cost_micros stores raw units (1M units = 1 microdollar)
+                "total_cost_micros": round((r.total_cost_micros or 0) / 1_000_000, 2) if r.total_cost_micros else 0,
+                "estimated_cost_usd": round((r.total_cost_micros or 0) / 1_000_000_000_000, 9),
             }
             for r in rows
         ],
@@ -714,8 +716,9 @@ async def get_top_api_influencers(
                 "influencer_id": r.influencer_id,
                 "total_calls": r.total_calls,
                 "total_tokens": r.total_tokens or 0,
-                "total_cost_micros": r.total_cost_micros or 0,
-                "estimated_cost_usd": round((r.total_cost_micros or 0) / 1_000_000, 6),
+                # estimated_cost_micros stores raw units (1M units = 1 microdollar)
+                "total_cost_micros": round((r.total_cost_micros or 0) / 1_000_000, 2) if r.total_cost_micros else 0,
+                "estimated_cost_usd": round((r.total_cost_micros or 0) / 1_000_000_000_000, 9),
                 "total_call_secs": round(r.total_call_secs, 1) if r.total_call_secs else 0,
             }
             for r in rows
@@ -913,8 +916,9 @@ async def get_monthly_usage(
                 "key": str(r.group_key),
                 "total_calls": r.total_calls,
                 "total_tokens": r.total_tokens or 0,
-                "total_cost_micros": r.total_cost_micros or 0,
-                "estimated_cost_usd": round((r.total_cost_micros or 0) / 1_000_000, 6),
+                # estimated_cost_micros stores raw units (1M units = 1 microdollar)
+                "total_cost_micros": round((r.total_cost_micros or 0) / 1_000_000, 2) if r.total_cost_micros else 0,
+                "estimated_cost_usd": round((r.total_cost_micros or 0) / 1_000_000_000_000, 9),
                 "total_duration_secs": round(r.total_duration_secs, 1) if r.total_duration_secs else 0,
                 "error_count": r.error_count or 0,
             }
