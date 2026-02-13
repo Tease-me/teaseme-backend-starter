@@ -203,6 +203,7 @@ async def handle_turn(
     personality_rules = bio.get("personality_rules", "")
     tone = bio.get("tone", "")
     daily_context = ""  
+    users_name = await _build_user_name_block(db, user_id)
 
     prompt = build_relationship_prompt(
         prompt_template,
