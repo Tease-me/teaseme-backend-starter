@@ -25,7 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.services.billing import can_afford, get_remaining_units
 from app.services.chat_service import get_or_create_chat
-from app.agents.turn_handler import _norm, redis_history
+from app.agents.turn_handler import _norm, _build_user_name_block, redis_history
 from langchain_core.prompts import ChatPromptTemplate
 from app.db.session import SessionLocal
 from app.services.embeddings import get_embedding
@@ -425,16 +425,24 @@ async def _generate_contextual_greeting(
         log.warning("contextual_greeting.parallel_fetch_failed chat=%s err=%s", chat_id, exc)
         db_messages, chat, influencer = [], None, None
 
-    # Second wave: last call (depends on user_id from chat)
+    # Second wave: last call + user (depends on user_id from chat)
     user_id = chat.user_id if chat else None
     last_call: Optional[CallRecord] = None
+    user_obj = None
     
     if user_id:
+        async def _fetch_user_standalone() -> Optional[User]:
+            async with SessionLocal() as session:
+                return await session.get(User, user_id)
+        
         try:
-            last_call = await _fetch_last_call_standalone(user_id)
+            last_call, user_obj = await asyncio.gather(
+                _fetch_last_call_standalone(user_id),
+                _fetch_user_standalone(),
+            )
         except Exception as exc:
             log.warning(
-                "contextual_greeting.call_fetch_failed chat=%s user=%s infl=%s err=%s",
+                "contextual_greeting.call_user_fetch_failed chat=%s user=%s infl=%s err=%s",
                 chat_id, user_id, influencer_id, exc,
             )
 
@@ -497,9 +505,12 @@ async def _generate_contextual_greeting(
         return _pick_random_first_greeting(persona_name)
 
     try:
+        async with SessionLocal() as session:
+            users_name = await _build_user_name_block(session, user_id)
         prompt = await _get_contextual_first_message_prompt(db)
         chain = prompt.partial(
             influencer_name=persona_name,
+            users_name=users_name,
             gap_category=gap_category,
             gap_minutes=str(round(gap_minutes, 1)),
             call_ending_type=call_ending_type,
