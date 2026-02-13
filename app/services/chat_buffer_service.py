@@ -275,8 +275,8 @@ async def flush_buffer(
             "is_audio": False,
         }
         
-        # Add timezone for 18+ chats
-        if config.is_18plus and user_timezone:
+        # Add timezone if available (for both regular and 18+ chats)
+        if user_timezone:
             handler_kwargs["user_timezone"] = user_timezone
         
         reply = await config.turn_handler(**handler_kwargs)

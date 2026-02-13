@@ -84,7 +84,8 @@ async def websocket_chat(
             text = (raw.get("message") or "").strip()
             if not text:
                 continue
-
+            
+            user_timezone = raw.get("timezone")
             chat_id = raw.get("chat_id") or f"{user_id}_{influencer_id}"
 
             # Check if user can afford the message
@@ -139,6 +140,7 @@ async def websocket_chat(
                 user_id=user_id,
                 db=db,
                 config=CHAT_CONFIG,
+                user_timezone=user_timezone,
             )
 
             # Handle final flush request
