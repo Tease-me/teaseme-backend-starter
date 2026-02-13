@@ -3,26 +3,13 @@ import time
 from functools import wraps
 from typing import Callable, Optional
 
-import redis.asyncio as redis
 from fastapi import HTTPException, Request, Response
 from starlette.status import HTTP_429_TOO_MANY_REQUESTS
 
 from app.core.config import settings
+from app.utils.infrastructure.redis_pool import get_redis
 
 log = logging.getLogger(__name__)
-
-_redis_pool: Optional[redis.Redis] = None
-
-
-async def get_redis() -> redis.Redis:
-    global _redis_pool
-    if _redis_pool is None:
-        _redis_pool = redis.from_url(
-            settings.REDIS_URL,
-            encoding="utf-8",
-            decode_responses=True,
-        )
-    return _redis_pool
 
 
 async def check_rate_limit(

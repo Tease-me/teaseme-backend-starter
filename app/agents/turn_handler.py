@@ -7,20 +7,21 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import RedisChatMessageHistory
 
 from app.core.config import settings
-from app.agents.memory import find_similar_memories, store_fact
+from app.agents.memory import find_similar_memories, store_facts_batch
 from app.agents.prompts import MODEL, FACT_EXTRACTOR, CONVO_ANALYZER, get_fact_prompt
 from app.db.session import SessionLocal
 from app.agents.prompt_utils import (
     get_global_prompt,
     build_relationship_prompt,
-    pick_time_mood,
+    get_time_context,
     get_mbti_rules_for_archetype,
+    get_relationship_stage_prompts,
 )
 from app.db.models import Influencer
-from app.utils.tts_sanitizer import sanitize_tts_text
+from app.utils.messaging.tts_sanitizer import sanitize_tts_text
 from app.services.system_prompt_service import get_system_prompt
 from app.constants import prompt_keys
-from app.utils.prompt_logging import log_prompt
+from app.utils.logging.prompt_logging import log_prompt
 
 from app.relationship.processor import process_relationship_turn
 
@@ -72,13 +73,17 @@ async def extract_and_store_facts_for_turn(
 
             facts_txt = facts_resp.content or ""
             lines = [ln.strip("- ").strip() for ln in facts_txt.split("\n") if ln.strip()]
-
-            for line in lines[:5]:
-                if line.lower() == "no new memories.":
-                    continue
-                await store_fact(db, chat_id, line)
+            
+            # Filter out empty/skip lines
+            valid_facts = [line for line in lines[:5] if line.lower() != "no new memories."]
+            
+            if valid_facts:
+                # Use batch storage - single API call for all facts
+                await store_facts_batch(db, chat_id, valid_facts)
+                
         except Exception as ex:
             log.error("[%s] Fact extraction failed: %s", cid, ex, exc_info=True)
+
 
 
 async def handle_turn(
@@ -102,14 +107,14 @@ async def handle_turn(
 
     recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
 
-    influencer, prompt_template, weekday_prompt, weekend_prompt = await asyncio.gather(
-        db.get(Influencer, influencer_id),
-        get_global_prompt(db, is_audio),
-        get_system_prompt(db, prompt_keys.WEEKDAY_TIME_PROMPT),
-        get_system_prompt(db, prompt_keys.WEEKEND_TIME_PROMPT),
-    )
+    # Phase 1: Fetch cached prompts in parallel (Redis cache, no DB contention)
+    prompt_template = await get_global_prompt(db, is_audio)
     
-    mood = pick_time_mood(weekday_prompt, weekend_prompt, user_timezone)
+    # Phase 2: DB operation sequentially (AsyncSession doesn't allow concurrent access)
+    influencer = await db.get(Influencer, influencer_id)
+    
+    # Generate simple time context instead of picking from mood arrays
+    time_context = get_time_context(user_timezone)
 
     if not influencer:
         raise HTTPException(404, "Influencer not found")
@@ -146,16 +151,20 @@ async def handle_turn(
         persona_likes = []
     if not isinstance(persona_dislikes, list):
         persona_dislikes = []
-    stages = bio.get("stages", {})
-    if not isinstance(stages, dict):
-        stages = {}
+    
+    stages = await get_relationship_stage_prompts(db)
+    bio_stages = bio.get("stages", {})
+    if isinstance(bio_stages, dict) and bio_stages:
+        for key, val in bio_stages.items():
+            if val: 
+                stages[key.upper()] = val
 
     mbti_archetype = bio.get("mbti_architype", "")  
     mbti_addon = bio.get("mbti_rules", "")  
     mbti_rules = await get_mbti_rules_for_archetype(db, mbti_archetype, mbti_addon)
     personality_rules = bio.get("personality_rules", "")
     tone = bio.get("tone", "")
-    daily_context = ""  # Can be populated from influencer data if needed
+    daily_context = ""  
 
     prompt = build_relationship_prompt(
         prompt_template,
@@ -169,8 +178,8 @@ async def handle_turn(
         mbti_rules=mbti_rules,
         memories=mem_block,
         daily_context=daily_context,
-        last_user_message=message,
-        mood=mood,
+        last_user_message=recent_ctx,
+        mood=time_context,
         tone=tone,
         influencer_name=influencer.display_name,
     )

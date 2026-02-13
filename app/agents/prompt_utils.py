@@ -66,46 +66,128 @@ def _parse_time_range(label: str):
     return (start, end)
 
 
+def get_time_context(user_timezone: str | None) -> str:
+    """
+    Generate simple time context for AI to naturally incorporate.
+    Returns a concise time description instead of pre-written mood scripts.
+    """
+    tz = _resolve_tz(user_timezone)
+    now = datetime.now(tz)
+    
+    hour = now.hour
+    day_name = now.strftime("%A")
+    is_weekend = _is_weekend(user_timezone)
+    
+    # Multiple variations for each time period - randomly selected for variety
+    if 0 <= hour < 6:
+        vibes = [
+            "late night hours",
+            "deep night, most people asleep",
+            "quiet hours",
+            "very late, winding down",
+            "after-hours calm"
+        ]
+    elif 6 <= hour < 9:
+        vibes = [
+            "early morning, just waking up",
+            "morning starting",
+            "beginning of the day",
+            "fresh morning energy",
+            "sunrise hours"
+        ]
+    elif 9 <= hour < 12:
+        vibes = [
+            "mid-morning",
+            "morning in full swing",
+            "active morning hours",
+            "getting things done",
+            "busy morning time"
+        ]
+    elif 12 <= hour < 15:
+        vibes = [
+            "midday",
+            "afternoon starting",
+            "middle of the day",
+            "lunch time hours",
+            "afternoon energy"
+        ]
+    elif 15 <= hour < 18:
+        vibes = [
+            "late afternoon",
+            "afternoon winding down",
+            "transitioning to evening",
+            "end of afternoon",
+            "golden hour time"
+        ]
+    elif 18 <= hour < 21:
+        vibes = [
+            "evening",
+            "night beginning",
+            "relaxed evening hours",
+            "dinner time vibe",
+            "early night"
+        ]
+    else:
+        vibes = [
+            "night time",
+            "late evening hours",
+            "late night vibe",
+            "nighttime energy",
+            "after dark"
+        ]
+    
+    weekend_type = "weekend" if is_weekend else "weekday"
+    selected_vibe = random.choice(vibes)
+    
+    return f"{now.strftime('%I:%M %p')}, {day_name} {weekend_type} - {selected_vibe}"
+
+
+# Keep old function for backward compatibility during transition
 def pick_time_mood(
     weekday_prompt: str | None,
     weekend_prompt: str | None,
     user_timezone: str | None,
 ) -> str:
-    is_weekend = _is_weekend(user_timezone)
-    time_prompt = weekend_prompt if is_weekend else weekday_prompt
-
-    if not time_prompt:
-        return ""
-    try:
-        mood_map = json.loads(time_prompt)
-    except json.JSONDecodeError:
-        log.warning("Invalid TIME_PROMPT JSON; using empty mood")
-        return ""
-    if not isinstance(mood_map, dict):
-        return ""
-
-    hour = datetime.now(_resolve_tz(user_timezone)).hour
-
-    matches: list[tuple[int, list[str]]] = []
-    for label, options in mood_map.items():
-        if not isinstance(options, list) or not options:
-            continue
-        parsed = _parse_time_range(label)
-        if not parsed:
-            continue
-        start, end = parsed
-        if _hour_in_range(hour, start, end):
-            matches.append((_range_span(start, end), options))
-
-    if matches:
-        matches.sort(key=lambda item: item[0])
-        return random.choice(matches[0][1])
-
-    flat = [m for opts in mood_map.values() if isinstance(opts, list) for m in opts]
-    return random.choice(flat) if flat else ""
-
+    """
+    DEPRECATED: Use get_time_context() instead.
+    This function is kept for backward compatibility.
+    """
+    return get_time_context(user_timezone)
+ 
 
 _mbti_cache: Optional[dict] = None
+_stage_prompts_cache: Optional[dict] = None
+
+
+async def get_relationship_stage_prompts(db: AsyncSession) -> dict:
+    """
+    Fetches relationship stage prompts from the database and returns them as a dict.
+    The prompts are cached after the first fetch.
+    Returns a dict mapping relationship state (uppercase) to prompt string.
+    """
+    global _stage_prompts_cache
+    
+    if _stage_prompts_cache is not None:
+        return _stage_prompts_cache
+    
+    stage_json_str = await get_system_prompt(db, prompt_keys.RELATIONSHIP_STAGE_PROMPTS)
+    if stage_json_str:
+        try:
+            raw = json.loads(stage_json_str)
+            _stage_prompts_cache = {}
+            for key, value in raw.items():
+                if isinstance(value, list):
+                    _stage_prompts_cache[key.upper()] = "\n".join(str(v) for v in value)
+                else:
+                    _stage_prompts_cache[key.upper()] = str(value)
+        except json.JSONDecodeError as exc:
+            log.warning("Failed to parse RELATIONSHIP_STAGE_PROMPTS: %s", exc)
+            _stage_prompts_cache = {}
+    else:
+        log.warning("RELATIONSHIP_STAGE_PROMPTS system prompt not found")
+        _stage_prompts_cache = {}
+    
+    return _stage_prompts_cache
 
 
 async def get_mbti_rules_for_archetype(
@@ -195,22 +277,8 @@ def build_relationship_prompt(
     stage_prompt = ""
 
     if stages:
-        if rel_state == "HATE":
-            stage_prompt = stages.get("hate", "")
-        elif rel_state == "DISLIKE":
-            stage_prompt = stages.get("dislike", "")
-        elif rel_state == "STRANGERS":
-            stage_prompt = stages.get("strangers", "")
-        elif rel_state == "FRIENDS":
-            stage_prompt = stages.get("friends", "")
-        elif rel_state == "FLIRTING":
-            stage_prompt = stages.get("flirting", "")
-        elif rel_state == "DATING":
-            stage_prompt = stages.get("dating", "")
-        elif rel_state == "GIRLFRIEND":
-            stage_prompt = stages.get("girlfriend", "")
-        else:
-            stage_prompt = stages.get(rel_state.lower(), "")
+        # Try uppercase key first (DB format), then lowercase (bio_json format)
+        stage_prompt = stages.get(rel_state, "") or stages.get(rel_state.lower(), "")
 
     partial_vars = {
         "relationship_state": rel.state,
