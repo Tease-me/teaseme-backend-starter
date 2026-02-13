@@ -14,11 +14,11 @@ from app.db.session import SessionLocal
 from app.agents.prompt_utils import (
     get_global_prompt,
     build_relationship_prompt,
-    pick_time_mood,
+    get_time_context,
     get_mbti_rules_for_archetype,
     get_relationship_stage_prompts,
 )
-from app.db.models import Influencer
+from app.db.models import Influencer, User
 from app.utils.messaging.tts_sanitizer import sanitize_tts_text
 from app.services.system_prompt_service import get_system_prompt
 from app.constants import prompt_keys
@@ -57,6 +57,45 @@ def _norm(m):
                 return m[key].strip()
         return str(m).strip()
     return str(m).strip()
+
+
+async def _build_user_name_block(db, user_id) -> str:
+    
+    user = None
+    if user_id:
+        try:
+            user = await db.get(User, int(user_id))
+        except Exception as exc:
+            log.warning("_build_user_name_block: failed to fetch user %s: %s", user_id, exc)
+
+    if user:
+        parts = []
+        full_name = (user.full_name or "").strip()
+        username = (user.username or "").strip()
+        gender = (user.gender or "").strip()
+        dob = user.date_of_birth
+
+        if full_name:
+            parts.append(f"Full name: {full_name}")
+        if username:
+            parts.append(f"Username: {username}")
+        if gender:
+            parts.append(f"Gender: {gender}")
+        if dob:
+            parts.append(f"Date of birth: {dob.strftime('%B %d, %Y')}")
+
+        if parts:
+            return (
+                ", ".join(parts) + ". "
+                "Use their name naturally and sparingly — don't overuse it. "
+                "If the user has told you to call them something else "
+                "(check your memories), use that preferred name instead."
+            )
+    return (
+        "You don't know the user's name yet. "
+        "If you've learned it in past conversations, use it from memory. "
+        "Otherwise, don't assume a name."
+    )
 
 
 async def extract_and_store_facts_for_turn(
@@ -123,16 +162,12 @@ async def handle_turn(
     recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
 
     # Phase 1: Fetch cached prompts in parallel (Redis cache, no DB contention)
-    prompt_template, weekday_prompt, weekend_prompt = await asyncio.gather(
-        get_global_prompt(db, is_audio),
-        get_system_prompt(db, prompt_keys.WEEKDAY_TIME_PROMPT),
-        get_system_prompt(db, prompt_keys.WEEKEND_TIME_PROMPT),
-    )
+    prompt_template = await get_global_prompt(db, is_audio)
     
-    # Phase 2: DB operation sequentially (AsyncSession doesn't allow concurrent access)
     influencer = await db.get(Influencer, influencer_id)
     
-    mood = pick_time_mood(weekday_prompt, weekend_prompt, user_timezone)
+    # Generate simple time context instead of picking from mood arrays
+    time_context = get_time_context(user_timezone)
 
     if not influencer:
         raise HTTPException(404, "Influencer not found")
@@ -140,25 +175,39 @@ async def handle_turn(
     if not user_id:
         raise HTTPException(400, "user_id is required for relationship persistence")
 
-    rel_pack = await process_relationship_turn(
-        db=db,
-        user_id=int(user_id),
-        influencer_id=influencer_id,
-        message=message,
-        recent_ctx=recent_ctx,
-        cid=cid,
-        convo_analyzer=CONVO_ANALYZER,
-        influencer=influencer,
+    from app.services.embeddings import get_embedding
+    message_embedding = await get_embedding(message) if (db and user_id) else None
+
+    rel_pack_task = asyncio.create_task(
+        process_relationship_turn(
+            db=db,
+            user_id=int(user_id),
+            influencer_id=influencer_id,
+            message=message,
+            recent_ctx=recent_ctx,
+            cid=cid,
+            convo_analyzer=CONVO_ANALYZER,
+            influencer=influencer,
+        )
+    )
+    
+    memories_task = asyncio.create_task(
+        find_similar_memories(
+            db, 
+            chat_id, 
+            message, 
+            embedding=message_embedding  # Reuse precomputed embedding
+        ) if (db and user_id) else asyncio.sleep(0, result=[])
     )
 
+    # Wait for both to complete in parallel
+    rel_pack, memories_result = await asyncio.gather(rel_pack_task, memories_task)
    
     rel = rel_pack["rel"]
     days_idle = rel_pack["days_idle"]
     dtr_goal = rel_pack["dtr_goal"]
 
-    memories_result = await find_similar_memories(db, chat_id, message) if (db and user_id) else []
     memories = memories_result[0] if isinstance(memories_result, tuple) else memories_result
-
     mem_block = "\n".join(s for s in (_norm(m) for m in memories or []) if s)
 
     bio = influencer.bio_json or {}
@@ -170,19 +219,26 @@ async def handle_turn(
     if not isinstance(persona_dislikes, list):
         persona_dislikes = []
     
-    stages = await get_relationship_stage_prompts(db)
+    # OPTIMIZATION: Parallelize system prompt fetches
+    # These are independent Redis/DB lookups that can run concurrently
+    mbti_archetype = bio.get("mbti_architype", "")  
+    mbti_addon = bio.get("mbti_rules", "")
+    
+    stages, mbti_rules = await asyncio.gather(
+        get_relationship_stage_prompts(db),
+        get_mbti_rules_for_archetype(db, mbti_archetype, mbti_addon)
+    )
+    
     bio_stages = bio.get("stages", {})
     if isinstance(bio_stages, dict) and bio_stages:
         for key, val in bio_stages.items():
             if val: 
                 stages[key.upper()] = val
 
-    mbti_archetype = bio.get("mbti_architype", "")  
-    mbti_addon = bio.get("mbti_rules", "")  
-    mbti_rules = await get_mbti_rules_for_archetype(db, mbti_archetype, mbti_addon)
     personality_rules = bio.get("personality_rules", "")
     tone = bio.get("tone", "")
     daily_context = ""  
+    users_name = await _build_user_name_block(db, user_id)
 
     prompt = build_relationship_prompt(
         prompt_template,
@@ -197,9 +253,10 @@ async def handle_turn(
         memories=mem_block,
         daily_context=daily_context,
         last_user_message=recent_ctx,
-        mood=mood,
+        mood=time_context,
         tone=tone,
         influencer_name=influencer.display_name,
+        users_name=users_name,
     )
 
     hist_msgs = history.messages
@@ -247,14 +304,21 @@ async def handle_turn(
         )
         return "Sorry, something went wrong. 😔"
 
+    # Schedule background fact extraction (fire-and-forget)
+    # Store task reference to prevent premature garbage collection
     try:
-        asyncio.create_task(
+        fact_task = asyncio.create_task(
             extract_and_store_facts_for_turn(
                 message=message,
                 recent_ctx=recent_ctx,
                 chat_id=chat_id,
                 cid=cid,
             )
+        )
+        # Add done callback to log any exceptions
+        fact_task.add_done_callback(
+            lambda t: log.error("[%s] Fact extraction failed: %s", cid, t.exception()) 
+            if t.exception() else None
         )
     except Exception as ex:
         log.error("[%s] Failed to schedule fact extraction: %s", cid, ex, exc_info=True)
@@ -263,3 +327,4 @@ async def handle_turn(
         return sanitize_tts_text(reply)
 
     return reply
+
