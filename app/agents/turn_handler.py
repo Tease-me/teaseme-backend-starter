@@ -17,7 +17,7 @@ from app.agents.prompt_utils import (
     get_mbti_rules_for_archetype,
     get_relationship_stage_prompts,
 )
-from app.db.models import Influencer
+from app.db.models import Influencer, User
 from app.utils.messaging.tts_sanitizer import sanitize_tts_text
 from app.services.system_prompt_service import get_system_prompt
 from app.constants import prompt_keys
@@ -55,6 +55,45 @@ def _norm(m):
                 return m[key].strip()
         return str(m).strip()
     return str(m).strip()
+
+
+async def _build_user_name_block(db, user_id) -> str:
+    
+    user = None
+    if user_id:
+        try:
+            user = await db.get(User, int(user_id))
+        except Exception as exc:
+            log.warning("_build_user_name_block: failed to fetch user %s: %s", user_id, exc)
+
+    if user:
+        parts = []
+        full_name = (user.full_name or "").strip()
+        username = (user.username or "").strip()
+        gender = (user.gender or "").strip()
+        dob = user.date_of_birth
+
+        if full_name:
+            parts.append(f"Full name: {full_name}")
+        if username:
+            parts.append(f"Username: {username}")
+        if gender:
+            parts.append(f"Gender: {gender}")
+        if dob:
+            parts.append(f"Date of birth: {dob.strftime('%B %d, %Y')}")
+
+        if parts:
+            return (
+                ", ".join(parts) + ". "
+                "Use their name naturally and sparingly — don't overuse it. "
+                "If the user has told you to call them something else "
+                "(check your memories), use that preferred name instead."
+            )
+    return (
+        "You don't know the user's name yet. "
+        "If you've learned it in past conversations, use it from memory. "
+        "Otherwise, don't assume a name."
+    )
 
 
 async def extract_and_store_facts_for_turn(
@@ -114,10 +153,10 @@ async def handle_turn(
         get_system_prompt(db, prompt_keys.WEEKEND_TIME_PROMPT),
     )
     
-    # Phase 2: DB operation sequentially (AsyncSession doesn't allow concurrent access)
     influencer = await db.get(Influencer, influencer_id)
     
     mood = pick_time_mood(weekday_prompt, weekend_prompt, user_timezone)
+    users_name = await _build_user_name_block(db, user_id)
 
     if not influencer:
         raise HTTPException(404, "Influencer not found")
@@ -185,6 +224,7 @@ async def handle_turn(
         mood=mood,
         tone=tone,
         influencer_name=influencer.display_name,
+        users_name=users_name,
     )
 
     hist_msgs = history.messages
@@ -225,3 +265,4 @@ async def handle_turn(
         return sanitize_tts_text(reply)
 
     return reply
+

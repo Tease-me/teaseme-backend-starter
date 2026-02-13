@@ -221,6 +221,7 @@ def build_relationship_prompt(
     mood: str = "",
     analysis: str | None = None,
     influencer_name: str = "",
+    users_name: str = "",
 ):
     stages = stages or {}
     rel_state = (getattr(rel, "state", "") or "").strip().upper()
@@ -233,6 +234,7 @@ def build_relationship_prompt(
     partial_vars = {
         "relationship_state": rel.state,
         "influencer_name": influencer_name,
+        "users_name": users_name,
         "stage_prompt": stage_prompt,
         "trust": int(rel.trust or 0),
         "closeness": int(rel.closeness or 0),

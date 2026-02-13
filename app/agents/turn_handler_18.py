@@ -6,6 +6,7 @@ from sqlalchemy import select
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 
 from app.agents.prompt_utils import pick_time_mood
+from app.agents.turn_handler import _build_user_name_block
 from app.db.models import Influencer, Message18, User
 from app.agents.prompts import XAI_MODEL
 from app.utils.messaging.tts_sanitizer import sanitize_tts_text
@@ -70,7 +71,6 @@ async def handle_turn_18(
     
     # Phase 2: DB operations sequentially (AsyncSession doesn't allow concurrent access)
     influencer = await db.get(Influencer, influencer_id)
-    user = await db.get(User, user_id)
     recent_ctx = await _load_recent_ctx_18(db, chat_id, limit=12)
 
     if not influencer:
@@ -89,8 +89,10 @@ async def handle_turn_18(
     )
     mood = pick_time_mood(weekday_prompt, weekend_prompt, user_timezone)
 
+    user = await db.get(User, user_id) if user_id else None
     user_adult_prompt = user.custom_adult_prompt if user else None
-    prompt = prompt.partial(user_prompt=user_adult_prompt, history=recent_ctx, mood=mood)
+    users_name = await _build_user_name_block(db, user_id)
+    prompt = prompt.partial(user_prompt=user_adult_prompt, users_name=users_name, history=recent_ctx, mood=mood)
     chain = prompt | XAI_MODEL
 
     try:
