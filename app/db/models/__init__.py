@@ -55,7 +55,7 @@ from .system import SystemPrompt
 from .verification import IdentityVerification
 
 # API usage tracking
-from .api_usage import ApiUsageLog, ApiUsageMonthly
+from .api_usage import ApiUsageLog
 
 # Export all models
 __all__ = [

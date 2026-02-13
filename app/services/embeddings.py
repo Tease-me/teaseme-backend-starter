@@ -21,18 +21,20 @@ log = logging.getLogger(__name__)
 client = AsyncOpenAI()
 
 
-async def get_embedding(text_input: str) -> list[float]:
+async def get_embedding(text_input: str, source: str = "txt") -> list[float]:
     """
     Get embedding for a single text (non-blocking).
     
     Args:
         text_input: Text to embed
+        source: "txt" or "call" — determines tracked category
         
     Returns:
         Embedding vector as list of floats
     """
     from app.services.token_tracker import track_usage_bg
 
+    category = f"embedding_{source}"
     t0 = time.perf_counter()
     response = await client.embeddings.create(
         input=text_input,
@@ -42,7 +44,7 @@ async def get_embedding(text_input: str) -> list[float]:
 
     usage = response.usage
     track_usage_bg(
-        "embedding", "openai", "text-embedding-3-small", "embedding",
+        category, "openai", "text-embedding-3-small", "embedding",
         input_tokens=getattr(usage, "total_tokens", None),
         latency_ms=emb_ms,
     )
@@ -50,7 +52,7 @@ async def get_embedding(text_input: str) -> list[float]:
     return response.data[0].embedding
 
 
-async def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
+async def get_embeddings_batch(texts: list[str], source: str = "txt") -> list[list[float]]:
     """
     Get embeddings for multiple texts in a single API call.
     
@@ -61,6 +63,7 @@ async def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
     
     Args:
         texts: List of texts to embed (max ~2000 recommended per batch)
+        source: "txt" or "call" — determines tracked category
         
     Returns:
         List of embeddings in the same order as input texts
@@ -70,9 +73,10 @@ async def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
     
     if len(texts) == 1:
         # Single text - use regular function
-        return [await get_embedding(texts[0])]
+        return [await get_embedding(texts[0], source=source)]
     
     try:
+        category = f"embedding_{source}"
         t0 = time.perf_counter()
         response = await client.embeddings.create(
             input=texts,
@@ -84,7 +88,7 @@ async def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
         from app.services.token_tracker import track_usage_bg
         usage = response.usage
         track_usage_bg(
-            "embedding", "openai", "text-embedding-3-small", "embedding_batch",
+            category, "openai", "text-embedding-3-small", "embedding_batch",
             input_tokens=getattr(usage, "total_tokens", None),
             latency_ms=emb_ms,
         )
@@ -99,7 +103,7 @@ async def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
         embeddings = []
         for text in texts:
             try:
-                emb = await get_embedding(text)
+                emb = await get_embedding(text, source=source)
                 embeddings.append(emb)
             except Exception as inner_e:
                 log.error("Single embedding fallback failed for text: %s", inner_e)

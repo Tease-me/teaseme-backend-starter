@@ -1301,7 +1301,7 @@ async def _persist_transcript_to_chat(
     embeddings: List[Optional[List[float]]] = []
     try:
         from app.services.embeddings import get_embeddings_batch
-        embeddings = await get_embeddings_batch(texts_to_embed)
+        embeddings = await get_embeddings_batch(texts_to_embed, source="call")
     except Exception as exc:
         log.warning("persist_transcript.batch_embed_failed chat=%s err=%s", chat_id, exc)
         embeddings = [None] * len(pending_entries)
