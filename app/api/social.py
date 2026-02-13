@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.db.session import get_db
-from app.db.models import PreInfluencer
+from app.db.models import PreInfluencer, Influencer
 from app.core.config import settings
 from typing import Optional
 
@@ -26,6 +26,17 @@ class SocialValidateOut(BaseModel):
     platform: str
     username: str
     followers_count: int
+
+
+class ConnectedSocialMedia(BaseModel):
+    platform: str
+    username: str
+
+
+class ConnectedSocialMediaListResponse(BaseModel):
+    influencer_id: str
+    connected_platforms: list[ConnectedSocialMedia]
+    total_connected: int
 
 
 @router.post("/validate", response_model=SocialValidateOut)
@@ -78,6 +89,58 @@ async def validate_social_media(
         platform="instagram",
         username=ig_username,
         followers_count=followers,
+    )
+
+
+@router.get("/connected/{pre_influencer_id}", response_model=ConnectedSocialMediaListResponse)
+async def get_connected_social_media(
+    pre_influencer_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(PreInfluencer).where(PreInfluencer.id == pre_influencer_id)
+    )
+    pre_influencer = result.scalar_one_or_none()
+
+    if not pre_influencer:
+        raise HTTPException(404, "PreInfluencer not found.")
+
+    influencer = None
+    if pre_influencer.email:
+        inf_result = await db.execute(
+            select(Influencer).where(Influencer.email == pre_influencer.email)
+        )
+        influencer = inf_result.scalar_one_or_none()
+
+    connected_platforms: list[ConnectedSocialMedia] = []
+
+    if pre_influencer and pre_influencer.survey_answers:
+        survey_answers = pre_influencer.survey_answers
+
+        for key, value in survey_answers.items():
+            if isinstance(value, str) and value:
+                platform_keywords = ["instagram", "tiktok", "twitter", "youtube", "twitch", "facebook", "linkedin"]
+                key_lower = key.lower()
+
+                if any(keyword in key_lower for keyword in platform_keywords):
+                    platform = None
+                    for keyword in platform_keywords:
+                        if keyword in key_lower:
+                            platform = keyword
+                            break
+
+                    if platform and value:
+                        connected_platforms.append(
+                            ConnectedSocialMedia(
+                                platform=platform,
+                                username=value,
+                            )
+                        )
+
+    return ConnectedSocialMediaListResponse(
+        influencer_id=str(pre_influencer.id),
+        connected_platforms=connected_platforms,
+        total_connected=len(connected_platforms),
     )
 
 
