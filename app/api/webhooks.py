@@ -5,7 +5,7 @@ from hashlib import sha256
 from typing import Optional, Any
 from app.agents.prompts import CONVO_ANALYZER
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Header
+from fastapi import APIRouter, Depends, HTTPException, Request, Header, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.session import get_db
@@ -208,6 +208,7 @@ async def elevenlabs_post_call(request: Request, db: AsyncSession = Depends(get_
 @router.post("/update_relationship")
 async def update_relationship_api(
     req: Request,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     x_webhook_token: str | None = Header(default=None),
 ):
@@ -216,7 +217,7 @@ async def update_relationship_api(
     try:
         payload = await req.json()
     except Exception:
-        return {"error": "Sorry, I didn’t catch that. Could you repeat?"}
+        return {"status": "received"}
 
     try:
         log.info("[EL TOOL] payload(head)=%s", str(payload)[:800])
@@ -231,24 +232,40 @@ async def update_relationship_api(
         or ""
     )
     user_text = str(raw_text).strip()
-    if not user_text:
-        return {"error": "I didn’t catch that. Could you repeat?"}
-
     conversation_id = payload.get("conversation_id")
+    
+    # Queue background processing - return immediately without waiting
+    background_tasks.add_task(
+        _process_relationship_update,
+        user_text,
+        conversation_id,
+        db
+    )
+    
+    # Return immediately so conversation doesn't wait
+    return {"status": "processing"}
+
+
+async def _process_relationship_update(user_text: str, conversation_id: str, db: AsyncSession):
+    """Process relationship update in background without blocking webhook response."""
+    if not user_text:
+        log.warning("[EL TOOL BG] empty user_text")
+        return
+
     if not conversation_id:
-        log.warning("[EL TOOL] missing conversation_id in payload=%s", str(payload)[:300])
-        return {"error": "I’m missing the call ID. Please try again."}
+        log.warning("[EL TOOL BG] missing conversation_id")
+        return
 
     try:
         res = await db.execute(select(CallRecord).where(CallRecord.conversation_id == conversation_id))
         call = res.scalar_one_or_none()
     except Exception as e:
-        log.exception("[EL TOOL] CallRecord lookup failed: %s", e)
-        return {"error": "I had an internal issue looking up this call. Please try again."}
+        log.exception("[EL TOOL BG] CallRecord lookup failed: %s", e)
+        return
 
     if not call:
-        log.warning("[EL TOOL] No CallRecord found for conv=%s", conversation_id)
-        return {"error": "Conversation ID Not Found"}
+        log.warning("[EL TOOL BG] No CallRecord found for conv=%s", conversation_id)
+        return
 
     user_id = call.user_id
     influencer_id = call.influencer_id
@@ -256,10 +273,10 @@ async def update_relationship_api(
 
     if not user_id or not influencer_id or not chat_id:
         log.warning(
-            "[EL TOOL] incomplete CallRecord context conv=%s user=%s infl=%s chat=%s",
+            "[EL TOOL BG] incomplete CallRecord context conv=%s user=%s infl=%s chat=%s",
             conversation_id, user_id, influencer_id, chat_id
         )
-        return {"error": "I’m having trouble with this call’s context."}
+        return
 
     history = redis_history(chat_id)
 
@@ -272,8 +289,8 @@ async def update_relationship_api(
 
     influencer = await db.get(Influencer, influencer_id)
     if not influencer:
-        log.warning("[EL TOOL] Influencer not found infl=%s conv=%s", influencer_id, conversation_id)
-        return {"error": "Influencer not found"}
+        log.warning("[EL TOOL BG] Influencer not found infl=%s conv=%s", influencer_id, conversation_id)
+        return
 
     rel_pack = await process_relationship_turn(
         db=db,
@@ -304,8 +321,7 @@ async def update_relationship_api(
         f"- dtr_goal: {dtr_goal}\n"
     )
 
-    log.info("[EL TOOL] relationship_metrics conv=%s\n%s", conversation_id, relationship)
-    return relationship
+    log.info("[EL TOOL BG] relationship_metrics conv=%s\n%s", conversation_id, relationship)
 
 def _verify_token(shared: str, token: str | None) -> None:
     if not shared: 
