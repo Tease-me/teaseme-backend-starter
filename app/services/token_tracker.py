@@ -4,20 +4,40 @@ Fire-and-forget API usage tracking service.
 All tracking is non-blocking — failures are logged but never propagate to callers.
 Usage is persisted to the `api_usage_logs` table for analytics.
 
-Usage:
-    from app.services.token_tracker import track_usage
+Supported Providers:
+- OpenAI: GPT models (gpt-5.2, gpt-4.1, gpt-4o, gpt-4o-mini),
+          embeddings (text-embedding-3-small),
+          Whisper transcription
+- XAI: Grok models (grok-4-1-fast-reasoning)
+- ElevenLabs: ConvAI voice calls, TTS (eleven_v3)
 
-    await track_usage(
+Categories:
+- "text": Regular chat messages
+- "18_chat": Adult chat messages
+- "call": Voice calls (ElevenLabs ConvAI)
+- "18_voice": Adult voice messages (TTS)
+- "embedding": Text embeddings for vector search
+- "moderation": Content moderation and safety checks
+- "transcription": Audio-to-text conversion (Whisper)
+- "analysis": Conversation analysis, survey summarization
+- "extraction": Fact extraction from user messages
+- "assistant": OpenAI assistants functionality
+
+Usage Example:
+    from app.services.token_tracker import track_usage_bg
+
+    # After LLM call:
+    usage = getattr(response, "usage_metadata", None) or {}
+    track_usage_bg(
         category="text",
         provider="openai",
         model="gpt-5.2",
         purpose="main_reply",
-        input_tokens=350,
-        output_tokens=120,
-        latency_ms=820,
-        user_id=42,
-        influencer_id="luna",
-        chat_id="luna_42",
+        input_tokens=usage.get("input_tokens"),
+        output_tokens=usage.get("output_tokens"),
+        latency_ms=timer.ms,
+        user_id=user_id,
+        chat_id=chat_id,
     )
 """
 
@@ -34,7 +54,12 @@ log = logging.getLogger("token-tracker")
 
 # ── Model Pricing (micro-dollars per token) ──────────────────────
 # 1 micro-dollar = $0.000001
-# Update these when model pricing changes.
+# Last updated: 2026-02-13
+#
+# Sources:
+# - OpenAI: https://openai.com/api/pricing/
+# - XAI: https://docs.x.ai/developers/models
+# - ElevenLabs: https://elevenlabs.io/pricing/api
 _PRICING_INPUT = {
     # OpenAI
     "gpt-5.2":                  2_500,   # $2.50 / 1M input tokens
@@ -58,9 +83,12 @@ _PRICING_OUTPUT = {
 }
 
 # ElevenLabs: charged per character or per minute for ConvAI
-# ~$0.30/min for ConvAI, ~$0.18/1000 chars for TTS
-_ELEVENLABS_CONVAI_COST_PER_SEC = 5_000    # $0.005/sec = $0.30/min in microdollars
+# Official: $0.10/min for ConvAI, ~$0.18/1000 chars for TTS
+_ELEVENLABS_CONVAI_COST_PER_SEC = 1_667    # $0.001667/sec = $0.10/min in microdollars
 _ELEVENLABS_TTS_COST_PER_SEC    = 3_000    # ~$0.003/sec estimate for TTS
+
+# Whisper: charged per minute of audio
+_WHISPER_COST_PER_MINUTE = 6_000  # $0.006/min in microdollars
 
 
 def _estimate_cost(
@@ -72,6 +100,7 @@ def _estimate_cost(
     purpose: str,
 ) -> Optional[int]:
     """Estimate cost in micro-dollars."""
+    # Handle ElevenLabs time-based pricing
     if provider == "elevenlabs" and duration_secs is not None:
         rate = (
             _ELEVENLABS_CONVAI_COST_PER_SEC
@@ -80,15 +109,41 @@ def _estimate_cost(
         )
         return int(duration_secs * rate)
 
-    cost = 0
-    if input_tokens and model in _PRICING_INPUT:
-        cost += input_tokens * _PRICING_INPUT[model]  # already in microdollars per 1M
-        cost = cost // 1_000_000  # normalize back
-    if output_tokens and model in _PRICING_OUTPUT:
-        out_cost = output_tokens * _PRICING_OUTPUT[model]
-        cost += out_cost // 1_000_000
+    # Handle Whisper time-based pricing
+    if model == "whisper-1" and duration_secs is not None:
+        duration_mins = duration_secs / 60.0
+        return int(duration_mins * _WHISPER_COST_PER_MINUTE)
 
-    return cost if cost > 0 else None
+    # Handle token-based pricing
+    # Pricing constants store microdollars per token (before division)
+    # Calculation: accumulate (tokens × rate), then divide once at the end
+    cost = 0
+    has_pricing = False
+
+    if input_tokens:
+        if model in _PRICING_INPUT:
+            cost += input_tokens * _PRICING_INPUT[model]
+            has_pricing = True
+        else:
+            log.warning(
+                "Unknown model '%s' (provider=%s) - no input pricing available. "
+                "Add pricing to _PRICING_INPUT in token_tracker.py",
+                model, provider
+            )
+
+    if output_tokens:
+        if model in _PRICING_OUTPUT:
+            cost += output_tokens * _PRICING_OUTPUT[model]
+            has_pricing = True
+        else:
+            log.warning(
+                "Unknown model '%s' (provider=%s) - no output pricing available. "
+                "Add pricing to _PRICING_OUTPUT in token_tracker.py",
+                model, provider
+            )
+
+    # Divide once at the end to convert to microdollars
+    return (cost // 1_000_000) if has_pricing else None
 
 
 async def track_usage(
@@ -110,16 +165,27 @@ async def track_usage(
     error_message: Optional[str] = None,
 ) -> None:
     """
-    Fire-and-forget API usage tracking.
+    Track API usage with cost estimation.
 
     This function NEVER raises — all errors are logged and swallowed
     so it can't disrupt the main request flow.
 
     Args:
-        category: "text" | "call" | "18_chat" | "18_voice" | "system"
+        category: "text" | "call" | "18_chat" | "18_voice" | "embedding" | "moderation" | "transcription" | "analysis" | "extraction" | "assistant"
         provider: "openai" | "xai" | "elevenlabs"
-        model: The model name (e.g. "gpt-5.2", "grok-4-1-fast-reasoning")
-        purpose: What the call was for (e.g. "main_reply", "fact_extraction")
+        model: Model name (e.g. "gpt-5.2", "grok-4-1-fast-reasoning", "whisper-1")
+        purpose: Purpose of call (e.g. "main_reply", "moderation", "tts", "transcription")
+        input_tokens: Number of input tokens (for LLMs)
+        output_tokens: Number of output tokens (for LLMs)
+        total_tokens: Total tokens (input + output)
+        duration_secs: Duration in seconds (for audio services like Whisper, ElevenLabs)
+        latency_ms: API call latency in milliseconds
+        user_id: User ID for attribution (optional)
+        influencer_id: Influencer ID for attribution (optional)
+        chat_id: Chat ID for attribution (optional)
+        conversation_id: Conversation ID for attribution (optional)
+        success: Whether the API call succeeded (default: True)
+        error_message: Error message if success=False (truncated to 500 chars)
     """
     try:
         # Auto-compute total_tokens if not provided

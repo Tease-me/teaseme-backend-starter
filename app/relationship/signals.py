@@ -31,7 +31,9 @@ async def classify_signals(
     recent_ctx: str,
     persona_likes: list[str],
     persona_dislikes: list[str],
-    llm
+    llm,
+    user_id: int | None = None,
+    influencer_id: str | None = None,
 ) -> dict:
     prompt_template = await get_system_prompt(db, prompt_keys.RELATIONSHIP_SIGNAL_PROMPT)
     prompt = prompt_template.format(
@@ -50,11 +52,13 @@ async def classify_signals(
         from app.services.token_tracker import track_usage_bg
         usage = getattr(r, "usage_metadata", None) or {}
         track_usage_bg(
-            "system", "openai", "gpt-4o-mini", "convo_analysis",
+            "analysis", "openai", "gpt-4o-mini", "convo_analysis",
             input_tokens=usage.get("input_tokens"),
             output_tokens=usage.get("output_tokens"),
             total_tokens=usage.get("total_tokens"),
             latency_ms=sig_ms,
+            user_id=user_id,
+            influencer_id=influencer_id,
         )
     except Exception:
         data = {}

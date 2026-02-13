@@ -44,6 +44,22 @@ async def transcribe_audio(file_or_bytesio, filename=None, content_type=None):
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(content)
         tmp_path = tmp.name
+
+    # Get audio duration for cost tracking
+    audio_duration_secs = None
+    try:
+        if suffix == ".wav":
+            with wave.open(tmp_path, 'rb') as wav_file:
+                frames = wav_file.getnframes()
+                rate = wav_file.getframerate()
+                audio_duration_secs = frames / float(rate)
+        else:
+            # For webm/mp3, estimate duration from file size
+            # Rough estimate: ~16KB/sec for typical voice audio
+            audio_duration_secs = len(content) / 16000
+    except Exception as e:
+        logger.debug(f"Could not determine audio duration: {e}")
+
     t0 = time.perf_counter()
     with open(tmp_path, "rb") as f:
         transcript = openai.audio.transcriptions.create(
@@ -56,8 +72,9 @@ async def transcribe_audio(file_or_bytesio, filename=None, content_type=None):
     # Track transcription usage
     from app.services.token_tracker import track_usage_bg
     track_usage_bg(
-        "system", "openai", "whisper-1", "transcription",
+        "transcription", "openai", "whisper-1", "transcription",
         latency_ms=whisper_ms,
+        duration_secs=audio_duration_secs,
     )
 
     logger.info(f"Transcription successful: {transcript.text[:50]}...")
@@ -89,39 +106,37 @@ async def get_ai_reply_via_websocket(
         is_audio=True
     )
     return reply
+# async def synthesize_audio_with_elevenlabs(text: str, db, influencer_id: str = None):
+#     influencer = await db.get(Influencer, influencer_id)
+#     if not influencer:
+#         raise HTTPException(404, "Influencer not found")
+#     if not influencer.voice_id:
+#         raise HTTPException(500, f"Voice ID not set for influencer '{influencer_id}'")
 
-async def synthesize_audio_with_elevenlabs(text: str, db, influencer_id: str = None):
-    influencer = await db.get(Influencer, influencer_id)
-    if not influencer:
-        raise HTTPException(404, "Influencer not found")
-    if not influencer.voice_id:
-        raise HTTPException(500, f"Voice ID not set for influencer '{influencer_id}'")
-
-    voice_id = influencer.voice_id
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
-    headers = {
-        "xi-api-key": ELEVENLABS_API_KEY,
-        "Accept": "audio/mpeg",
-        "Content-Type": "application/json",
-    }
-    data = {
-        "text": text, 
-        "model_id": "eleven_multilingual_v2", 
-        "voice_settings": {
-            "stability": 0.35,
-            "similarity_boost": 0.8,
-            "style": 0.5,
-            "use_speaker_boost": True
-        },
-        "output_format": "mp3_44100_128"
-    }
-    async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(url, headers=headers, json=data)
-        if resp.status_code != 200:
-            logger.error(f"ElevenLabs error: {resp.status_code} - {resp.text}")
-            return None, None
-        return resp.content, "audio/mpeg"
-
+#     voice_id = influencer.voice_id
+#     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+#     headers = {
+#         "xi-api-key": ELEVENLABS_API_KEY,
+#         "Accept": "audio/mpeg",
+#         "Content-Type": "application/json",
+#     }
+#     data = {
+#         "text": text, 
+#         "model_id": "eleven_multilingual_v2", 
+#         "voice_settings": {
+#             "stability": 0.35,
+#             "similarity_boost": 0.8,
+#             "style": 0.5,
+#             "use_speaker_boost": True
+#         },
+#         "output_format": "mp3_44100_128"
+#     }
+#     async with httpx.AsyncClient(timeout=120) as client:
+#         resp = await client.post(url, headers=headers, json=data)
+#         if resp.status_code != 200:
+#             logger.error(f"ElevenLabs error: {resp.status_code} - {resp.text}")
+#             return None, None
+#         return resp.content, "audio/mpeg"
 # ElevenLabs V3 style tags mapping
 # Based on: https://elevenlabs.io/docs/best-practices/prompting/eleven-v3
 STYLE_TAGS = {

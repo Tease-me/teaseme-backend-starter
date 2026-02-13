@@ -2,6 +2,7 @@ import json
 import logging
 import secrets
 import re
+import time
 from fastapi.encoders import jsonable_encoder
 
 from datetime import datetime, timezone
@@ -24,6 +25,7 @@ from app.agents.prompts import SURVEY_SUMMARIZER
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
 from app.services.system_prompt_service import get_system_prompt
+from app.services.token_tracker import track_usage_bg
 from app.constants import prompt_keys
 
 from app.db.session import get_db
@@ -216,12 +218,26 @@ async def _generate_prompt_from_markdown(markdown: str, additional_prompt: str |
     user_msg = f"Survey markdown:\n{markdown}\n\nExtra instructions for style/tone:\n{additional_prompt or '(none)'}"
 
     try:
+        # Track timing and usage
+        t0 = time.perf_counter()
         resp = await SURVEY_SUMMARIZER.ainvoke(
             [
                 {"role": "system", "content": sys_msg},
                 {"role": "user", "content": user_msg},
             ]
         )
+        survey_ms = int((time.perf_counter() - t0) * 1000)
+
+        # Track survey summarization API usage
+        usage = getattr(resp, "usage_metadata", None) or {}
+        track_usage_bg(
+            "analysis", "openai", "gpt-4o", "survey_summarization",
+            input_tokens=usage.get("input_tokens"),
+            output_tokens=usage.get("output_tokens"),
+            total_tokens=usage.get("total_tokens"),
+            latency_ms=survey_ms,
+        )
+
         raw = getattr(resp, "content", "") or ""
     except Exception as exc:
         log.warning("survey_prompt.llm_failed err=%s", exc)

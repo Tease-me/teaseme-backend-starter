@@ -534,6 +534,7 @@ async def _generate_contextual_greeting(
             output_tokens=usage.get("output_tokens"),
             total_tokens=usage.get("total_tokens"),
             latency_ms=greet_ms,
+            user_id=user_id,
             chat_id=chat_id,
             influencer_id=influencer_id,
         )

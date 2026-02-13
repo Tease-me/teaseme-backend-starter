@@ -120,11 +120,13 @@ async def extract_and_store_facts_for_turn(
             # Track fact extraction usage
             usage = getattr(facts_resp, "usage_metadata", None) or {}
             track_usage_bg(
-                "text", "openai", "gpt-4o-mini", "fact_extraction",
+                "extraction", "openai", "gpt-4o-mini", "fact_extraction",
                 input_tokens=usage.get("input_tokens"),
                 output_tokens=usage.get("output_tokens"),
                 total_tokens=usage.get("total_tokens"),
                 latency_ms=fact_ms,
+                user_id=int(user_id) if user_id else None,
+                influencer_id=influencer_id,
                 chat_id=chat_id,
             )
 
@@ -178,30 +180,37 @@ async def handle_turn(
     from app.services.embeddings import get_embedding
     message_embedding = await get_embedding(message) if (db and user_id) else None
 
-    rel_pack_task = asyncio.create_task(
-        process_relationship_turn(
-            db=db,
-            user_id=int(user_id),
-            influencer_id=influencer_id,
-            message=message,
-            recent_ctx=recent_ctx,
-            cid=cid,
-            convo_analyzer=CONVO_ANALYZER,
-            influencer=influencer,
-        )
-    )
-    
-    memories_task = asyncio.create_task(
-        find_similar_memories(
-            db, 
-            chat_id, 
-            message, 
-            embedding=message_embedding  # Reuse precomputed embedding
-        ) if (db and user_id) else asyncio.sleep(0, result=[])
-    )
+    # Run in parallel with separate DB sessions for optimal performance
+    # Each task gets its own session to avoid SQLAlchemy concurrency issues
+    async def _rel_pack_with_session():
+        async with SessionLocal() as db_rel:
+            return await process_relationship_turn(
+                db=db_rel,
+                user_id=int(user_id),
+                influencer_id=influencer_id,
+                message=message,
+                recent_ctx=recent_ctx,
+                cid=cid,
+                convo_analyzer=CONVO_ANALYZER,
+                influencer=influencer,
+            )
 
-    # Wait for both to complete in parallel
-    rel_pack, memories_result = await asyncio.gather(rel_pack_task, memories_task)
+    async def _memories_with_session():
+        if not (db and user_id):
+            return []
+        async with SessionLocal() as db_mem:
+            return await find_similar_memories(
+                db_mem,
+                chat_id,
+                message,
+                embedding=message_embedding  # Reuse precomputed embedding
+            )
+
+    # Execute both in parallel - each with independent DB session
+    rel_pack, memories_result = await asyncio.gather(
+        _rel_pack_with_session(),
+        _memories_with_session()
+    )
    
     rel = rel_pack["rel"]
     days_idle = rel_pack["days_idle"]

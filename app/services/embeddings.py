@@ -42,7 +42,7 @@ async def get_embedding(text_input: str) -> list[float]:
 
     usage = response.usage
     track_usage_bg(
-        "system", "openai", "text-embedding-3-small", "embedding",
+        "embedding", "openai", "text-embedding-3-small", "embedding",
         input_tokens=getattr(usage, "total_tokens", None),
         latency_ms=emb_ms,
     )
@@ -84,7 +84,7 @@ async def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
         from app.services.token_tracker import track_usage_bg
         usage = response.usage
         track_usage_bg(
-            "system", "openai", "text-embedding-3-small", "embedding_batch",
+            "embedding", "openai", "text-embedding-3-small", "embedding_batch",
             input_tokens=getattr(usage, "total_tokens", None),
             latency_ms=emb_ms,
         )
