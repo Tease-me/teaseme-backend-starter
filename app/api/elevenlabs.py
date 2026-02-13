@@ -5,7 +5,7 @@ import random
 import json
 import time
 from uuid import uuid4
-from app.agents.prompt_utils import build_relationship_prompt, get_global_prompt, get_mbti_rules_for_archetype, get_relationship_stage_prompts
+from app.agents.prompt_utils import build_relationship_prompt, get_global_prompt, get_mbti_rules_for_archetype, get_relationship_stage_prompts, get_time_context
 from app.relationship.dtr import plan_dtr_goal
 from app.relationship.inactivity import apply_inactivity_decay
 from app.relationship.repo import get_or_create_relationship
@@ -1403,6 +1403,7 @@ async def get_signed_url(
 @router.get("/conversation-token")
 async def get_conversation_token(
     influencer_id: str,
+    user_timezone: str = Query("UTC"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1459,6 +1460,8 @@ async def get_conversation_token(
         history.clear()
         history.add_messages(trimmed)
 
+    recent_ctx = "\n".join(f"{m.type}: {m.content}" for m in history.messages[-6:])
+
     now = datetime.now(timezone.utc)
     rel = await get_or_create_relationship(db, int(user_id), influencer_id)
     days_idle = apply_inactivity_decay(rel, now)
@@ -1472,6 +1475,9 @@ async def get_conversation_token(
     )
 
     dtr_goal = plan_dtr_goal(rel, can_ask)
+    time_context = get_time_context(user_timezone)
+
+    users_name = await _build_user_name_block(db, user_id)
 
     prompt = build_relationship_prompt(
         prompt_template,
@@ -1483,12 +1489,13 @@ async def get_conversation_token(
         persona_likes=persona_likes,
         persona_dislikes=persona_dislikes,
         mbti_rules=mbti_rules,
-        memories="",
+        memories="None",
         daily_context=daily_context,
-        last_user_message="",
+        last_user_message=recent_ctx,
+        mood=time_context,
         tone=tone,
-        analysis="",
         influencer_name=influencer.display_name,
+        users_name=users_name,
     )
     
     log_prompt(log, prompt, cid="", input="")
