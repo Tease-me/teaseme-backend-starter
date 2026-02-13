@@ -1,4 +1,4 @@
-"""add api_usage_logs and api_usage_monthly tables
+"""add api_usage_logs table
 
 Revision ID: e1f2a3b4c5d6
 Revises: d4e5f6a7b8c9
@@ -19,7 +19,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Create api_usage_logs and api_usage_monthly tables."""
+    """Create api_usage_logs table."""
     # ── Individual logs (kept forever) ───────────────────────────
     op.create_table(
         'api_usage_logs',
@@ -53,39 +53,9 @@ def upgrade() -> None:
     op.create_index('ix_api_usage_influencer_id', 'api_usage_logs', ['influencer_id'])
     op.create_index('ix_api_usage_conversation', 'api_usage_logs', ['conversation_id'])
 
-    # ── 30-day rollups (kept forever) ────────────────────────────
-    op.create_table(
-        'api_usage_monthly',
-        sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-        sa.Column('period_start', sa.Date(), nullable=False),
-        sa.Column('category', sa.String(length=20), nullable=False),
-        sa.Column('provider', sa.String(length=20), nullable=False),
-        sa.Column('model', sa.String(length=60), nullable=False),
-        sa.Column('purpose', sa.String(length=40), nullable=False),
-        sa.Column('total_calls', sa.Integer(), server_default='0', nullable=False),
-        sa.Column('total_input_tokens', sa.BigInteger(), server_default='0', nullable=False),
-        sa.Column('total_output_tokens', sa.BigInteger(), server_default='0', nullable=False),
-        sa.Column('total_tokens', sa.BigInteger(), server_default='0', nullable=False),
-        sa.Column('total_cost_micros', sa.BigInteger(), server_default='0', nullable=False),
-        sa.Column('total_duration_secs', sa.Float(), server_default='0', nullable=False),
-        sa.Column('avg_latency_ms', sa.Float(), nullable=True),
-        sa.Column('max_latency_ms', sa.Integer(), nullable=True),
-        sa.Column('error_count', sa.Integer(), server_default='0', nullable=False),
-        sa.PrimaryKeyConstraint('id'),
-    )
-    op.create_index('ix_monthly_period_cat', 'api_usage_monthly', ['period_start', 'category'])
-    op.create_index('ix_monthly_period_model', 'api_usage_monthly', ['period_start', 'model'])
-    op.create_index(
-        'uq_monthly_period_keys', 'api_usage_monthly',
-        ['period_start', 'category', 'provider', 'model', 'purpose'],
-        unique=True,
-    )
-
 
 def downgrade() -> None:
-    """Drop api_usage_monthly and api_usage_logs tables."""
-    op.drop_table('api_usage_monthly')
-
+    """Drop api_usage_logs table."""
     op.drop_index('ix_api_usage_conversation', table_name='api_usage_logs')
     op.drop_index('ix_api_usage_influencer_id', table_name='api_usage_logs')
     op.drop_index('ix_api_usage_user_id', table_name='api_usage_logs')
