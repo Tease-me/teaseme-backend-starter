@@ -67,7 +67,6 @@ async def handle_turn_18(
     
     # Phase 2: DB operations sequentially (AsyncSession doesn't allow concurrent access)
     influencer = await db.get(Influencer, influencer_id)
-    user = await db.get(User, user_id)
     recent_ctx = await _load_recent_ctx_18(db, chat_id, limit=12)
 
     if not influencer:
@@ -88,6 +87,7 @@ async def handle_turn_18(
     # Generate simple time context instead of picking from mood arrays
     time_context = get_time_context(user_timezone)
 
+    user = await db.get(User, user_id) if user_id else None
     user_adult_prompt = user.custom_adult_prompt if user else None
     prompt = prompt.partial(
         user_prompt=user_adult_prompt or "", 
