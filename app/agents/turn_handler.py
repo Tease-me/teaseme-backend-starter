@@ -122,25 +122,39 @@ async def handle_turn(
     if not user_id:
         raise HTTPException(400, "user_id is required for relationship persistence")
 
-    rel_pack = await process_relationship_turn(
-        db=db,
-        user_id=int(user_id),
-        influencer_id=influencer_id,
-        message=message,
-        recent_ctx=recent_ctx,
-        cid=cid,
-        convo_analyzer=CONVO_ANALYZER,
-        influencer=influencer,
+    from app.services.embeddings import get_embedding
+    message_embedding = await get_embedding(message) if (db and user_id) else None
+
+    rel_pack_task = asyncio.create_task(
+        process_relationship_turn(
+            db=db,
+            user_id=int(user_id),
+            influencer_id=influencer_id,
+            message=message,
+            recent_ctx=recent_ctx,
+            cid=cid,
+            convo_analyzer=CONVO_ANALYZER,
+            influencer=influencer,
+        )
+    )
+    
+    memories_task = asyncio.create_task(
+        find_similar_memories(
+            db, 
+            chat_id, 
+            message, 
+            embedding=message_embedding  # Reuse precomputed embedding
+        ) if (db and user_id) else asyncio.sleep(0, result=[])
     )
 
+    # Wait for both to complete in parallel
+    rel_pack, memories_result = await asyncio.gather(rel_pack_task, memories_task)
    
     rel = rel_pack["rel"]
     days_idle = rel_pack["days_idle"]
     dtr_goal = rel_pack["dtr_goal"]
 
-    memories_result = await find_similar_memories(db, chat_id, message) if (db and user_id) else []
     memories = memories_result[0] if isinstance(memories_result, tuple) else memories_result
-
     mem_block = "\n".join(s for s in (_norm(m) for m in memories or []) if s)
 
     bio = influencer.bio_json or {}
@@ -152,16 +166,22 @@ async def handle_turn(
     if not isinstance(persona_dislikes, list):
         persona_dislikes = []
     
-    stages = await get_relationship_stage_prompts(db)
+    # OPTIMIZATION: Parallelize system prompt fetches
+    # These are independent Redis/DB lookups that can run concurrently
+    mbti_archetype = bio.get("mbti_architype", "")  
+    mbti_addon = bio.get("mbti_rules", "")
+    
+    stages, mbti_rules = await asyncio.gather(
+        get_relationship_stage_prompts(db),
+        get_mbti_rules_for_archetype(db, mbti_archetype, mbti_addon)
+    )
+    
     bio_stages = bio.get("stages", {})
     if isinstance(bio_stages, dict) and bio_stages:
         for key, val in bio_stages.items():
             if val: 
                 stages[key.upper()] = val
 
-    mbti_archetype = bio.get("mbti_architype", "")  
-    mbti_addon = bio.get("mbti_rules", "")  
-    mbti_rules = await get_mbti_rules_for_archetype(db, mbti_archetype, mbti_addon)
     personality_rules = bio.get("personality_rules", "")
     tone = bio.get("tone", "")
     daily_context = ""  
@@ -206,14 +226,21 @@ async def handle_turn(
         log.error("[%s] LLM error: %s", cid, e, exc_info=True)
         return "Sorry, something went wrong. 😔"
 
+    # Schedule background fact extraction (fire-and-forget)
+    # Store task reference to prevent premature garbage collection
     try:
-        asyncio.create_task(
+        fact_task = asyncio.create_task(
             extract_and_store_facts_for_turn(
                 message=message,
                 recent_ctx=recent_ctx,
                 chat_id=chat_id,
                 cid=cid,
             )
+        )
+        # Add done callback to log any exceptions
+        fact_task.add_done_callback(
+            lambda t: log.error("[%s] Fact extraction failed: %s", cid, t.exception()) 
+            if t.exception() else None
         )
     except Exception as ex:
         log.error("[%s] Failed to schedule fact extraction: %s", cid, ex, exc_info=True)

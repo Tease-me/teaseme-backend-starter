@@ -59,7 +59,8 @@ async def handle_turn_18(
     cid = uuid4().hex[:8]
     log.info("[%s] START(18) persona=%s chat=%s user=%s", cid, influencer_id, chat_id, user_id)
 
-    # Phase 1: Fetch cached system prompts in parallel (Redis cache, no DB contention)
+    # OPTIMIZATION: Fetch cached system prompts in parallel (Redis cache, no DB contention)
+    # These are independent Redis lookups that benefit from parallel execution
     base_adult_prompt, base_audio_prompt = await asyncio.gather(
         get_system_prompt(db, prompt_keys.BASE_ADULT_PROMPT),
         get_system_prompt(db, prompt_keys.BASE_ADULT_AUDIO_PROMPT),
