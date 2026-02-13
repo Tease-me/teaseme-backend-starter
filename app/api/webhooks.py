@@ -242,7 +242,6 @@ async def update_relationship_api(
         db
     )
     
-    # Return immediately so conversation doesn't wait
     return {"status": "processing"}
 
 
@@ -349,117 +348,68 @@ async def eleven_webhook_get_memories(
     except Exception:
         pass
 
-    args = payload.get("arguments") or {}
-    raw_text = (
-        payload.get("text")
-        or payload.get("input")
-        or (args.get("text") if isinstance(args, dict) else None)
-        or ""
-    )
-    user_text = str(raw_text).strip()
-    if not user_text:
-        return {"memories": []}
-
+    # Simplified payload parsing
+    user_text = str(
+        payload.get("text") or 
+        payload.get("input") or 
+        payload.get("arguments", {}).get("text", "")
+    ).strip()
+    
     conversation_id = payload.get("conversation_id")
-    if not conversation_id:
-        log.warning("[EL TOOL] missing conversation_id in payload=%s", str(payload)[:300])
+    
+    if not user_text or not conversation_id:
         return {"memories": []}
 
+    # Quick lookup - fail fast
     try:
-        res = await db.execute(
+        call = await db.scalar(
             select(CallRecord).where(CallRecord.conversation_id == conversation_id)
         )
-        call = res.scalar_one_or_none()
     except Exception as e:
-        log.exception("[EL TOOL] CallRecord lookup failed: %s", e)
+        log.warning("[EL TOOL] CallRecord lookup failed: %s", str(e)[:100])
         return {"memories": []}
 
-    if not call:
-        log.warning("[EL TOOL] No CallRecord found for conv=%s", conversation_id)
-        return {
-            "memories": []
-        }
-
-    user_id = call.user_id
-    influencer_id = call.influencer_id
-    chat_id = call.chat_id
-
-    if not user_id or not influencer_id or not chat_id:
-        log.warning(
-            "[EL TOOL] incomplete CallRecord context conv=%s user=%s infl=%s chat=%s",
-            conversation_id, user_id, influencer_id, chat_id
-        )
-        return {
-            "memories": []}
-
-    try:
-        res = await db.execute(select(Chat).where(Chat.id == chat_id))
-        chat = res.scalar_one_or_none()
-    except Exception as e:
-        log.exception("[EL TOOL] Chat lookup failed: %s", e)
+    if not call or not call.chat_id or not call.influencer_id:
         return {"memories": []}
-
-    if not chat:
-        log.warning(
-            "[EL TOOL] Chat not found for conv=%s chat=%s user=%s infl=%s",
-            conversation_id, chat_id, user_id, influencer_id
-        )
-        return {
-            "memories": []
-        }
-
+    
     started = time.perf_counter()
     memories = []
     
     try:
-        # Compute embedding ONCE, then query memories and messages in PARALLEL
-        # Embedding typically completes in 50-100ms, reduced timeout for faster failover
         from app.services.embeddings import get_embedding
+        
+        # Tighter embedding timeout
         embedding = await asyncio.wait_for(
             get_embedding(user_text),
-            timeout=1.5,  # Reduced from 3.0s - embeddings are fast
+            timeout=0.5,
         )
         
-        # Run both queries in parallel with shared embedding
-        memories_result, messages_result = await asyncio.wait_for(
-            asyncio.gather(
-                find_similar_memories(
-                    message=user_text,
-                    chat_id=chat_id,
-                    influencer_id=influencer_id,
-                    db=db,
-                    embedding=embedding,
-                ),
-                find_similar_messages(
-                    message=user_text,
-                    chat_id=chat_id,
-                    influencer_id=influencer_id,
-                    db=db,
-                    embedding=embedding,
-                ),
-                return_exceptions=True,
+        # Query ONLY memories (not messages) - faster, single query
+        memories = await asyncio.wait_for(
+            find_similar_memories(
+                message=user_text,
+                chat_id=call.chat_id,
+                influencer_id=call.influencer_id,
+                db=db,
+                embedding=embedding,
             ),
-            timeout=6.0,
+            timeout=1.5,
         )
-        
-        # Combine results, filtering out exceptions
-        if isinstance(memories_result, list) and memories_result:
-            memories = memories_result
-        elif isinstance(messages_result, list) and messages_result:
-            memories = messages_result
             
     except asyncio.TimeoutError:
-        log.warning("[EL TOOL] memory query timeout conv=%s", conversation_id)
+        log.warning("[EL TOOL] memory timeout conv=%s", conversation_id)
     except Exception as e:
-        log.exception("[EL TOOL] memory query failed: %s", e)
+        log.warning("[EL TOOL] memory failed conv=%s: %s", conversation_id, str(e)[:100])
     finally:
         ms = int((time.perf_counter() - started) * 1000)
         log.info(
-            "[EL TOOL] memories ms=%d count=%d conv=%s user=%s infl=%s chat=%s",
-            ms, len(memories) if memories else 0, conversation_id, user_id, influencer_id, chat_id
+            "[EL TOOL] memories ms=%d count=%d conv=%s chat=%s infl=%s",
+            ms, len(memories) if isinstance(memories, list) else 0, 
+            conversation_id, call.chat_id, call.influencer_id
         )
 
-    return {"memories": memories}
+    return {"memories": memories if isinstance(memories, list) else []}
+
 
 @router.post("/reply")
 async def eleven_webhook_reply(
